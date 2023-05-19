@@ -13,15 +13,16 @@ import { nanoid } from 'nanoid';
 type User = {
   id: string;
   name: string;
-  voted: boolean;
+  vote: string | null;
+  role: 'user' | 'mod';
 };
 
 // export interface ServerToClientEvents {
-//   'room-created': (data: { code: string; users: User[] }) => void;
-//   'room-joined': (data: { code: string; users: User[] }) => void;
-//   'user-joined': (data: { user: User }) => void;
-//   'results-revealed': (data: { value: string; count: number }[]) => void;
-//   'voting-started': () => void
+//   'room-created': (data: { code: string; users: User[] }) => void; | done
+//   'room-joined': (data: { code: string; users: User[] }) => void; | done
+//   'user-joined': (data: { user: User }) => void; | done
+//   'results-revealed': (data: { value: string; count: number }[]) => void; | done
+//   'voting-started': () => void | done
 // }
 
 // // Interface for when clients emit events to the server.
@@ -33,7 +34,7 @@ type User = {
 //   'start-voting': () => void
 // }
 
-type Client = WebSocket & { id?: string };
+type Client = WebSocket & { id?: string; roomId?: string };
 
 interface Room {
   code: string;
@@ -57,7 +58,7 @@ export class EventsGateway implements OnGatewayConnection<Client> {
     @ConnectedSocket() client: Client,
     @MessageBody() data: { name: string },
   ): WsResponse<Room> {
-    const user = this.createUser(client.id, data.name);
+    const user = this.createUser(client.id, data.name, 'mod');
 
     const room: Room = {
       code: nanoid(7),
@@ -66,6 +67,8 @@ export class EventsGateway implements OnGatewayConnection<Client> {
     };
 
     this.rooms.set(room.code, room);
+
+    client.roomId = room.code;
 
     return { event: 'room-joined', data: room };
   }
@@ -86,6 +89,7 @@ export class EventsGateway implements OnGatewayConnection<Client> {
     }
 
     const user = this.createUser(client.id, data.name);
+    client.roomId = room.code;
 
     const userIds = room.users.map((it) => it.id);
 
@@ -100,11 +104,109 @@ export class EventsGateway implements OnGatewayConnection<Client> {
     return { event: 'room-joined', data: { ...room, user } };
   }
 
-  private createUser(id: string, name: string): User {
+  @SubscribeMessage('reveal-results')
+  onRevealResults(@ConnectedSocket() client: Client) {
+    const room = this.rooms.get(client.roomId);
+
+    if (!room) {
+      return { event: 'room-not-found', data: null };
+    }
+
+    const user = room.users.find((it) => it.id === client.id);
+
+    if (!user) {
+      return { event: 'user-not-found', data: null };
+    }
+
+    if (user.role !== 'mod') {
+      return { event: 'user-not-mod', data: null };
+    }
+
+    const data = room.users.reduce((it, current) => {
+      if (current.vote == null) {
+        return it;
+      }
+
+      return {
+        ...it,
+        [current.vote]: (it?.[current.vote] ?? 0) + 1,
+      };
+    });
+
+    const userIds = room.users.map((it) => it.id);
+    for (const client of this.server.clients) {
+      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ event: 'results-revealed', data }));
+      }
+    }
+
+    room.state = 'results';
+
+    return { event: 'ok', data: null };
+  }
+
+  @SubscribeMessage('reveal-results')
+  onStartVoting(
+    @ConnectedSocket() client: Client,
+    @MessageBody() data: { vote: string },
+  ) {
+    const room = this.rooms.get(client.roomId);
+
+    if (!room) {
+      return { event: 'room-not-found', data: null };
+    }
+
+    const user = room.users.find((it) => it.id === client.id);
+
+    if (!user) {
+      return { event: 'user-not-found', data: null };
+    }
+
+    if (user.role !== 'mod') {
+      return { event: 'user-not-mod', data: null };
+    }
+
+    user.vote = data.vote;
+
+    return { event: 'ok', data: null };
+  }
+
+  @SubscribeMessage('choose-vote')
+  onChooseVote(@ConnectedSocket() client: Client) {
+    const room = this.rooms.get(client.roomId);
+
+    if (!room) {
+      return { event: 'room-not-found', data: null };
+    }
+
+    const user = room.users.find((it) => it.id === client.id);
+
+    if (!user) {
+      return { event: 'user-not-found', data: null };
+    }
+
+    for (const participant of room.users) {
+      participant.vote = null;
+    }
+
+    const userIds = room.users.map((it) => it.id);
+    for (const client of this.server.clients) {
+      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({ event: 'voting-started', data: null }));
+      }
+    }
+
+    room.state = 'voting';
+
+    return { event: 'ok', data: null };
+  }
+
+  private createUser(id: string, name: string, role?: 'user' | 'mod'): User {
     return {
       id,
       name,
-      voted: false,
+      vote: null,
+      role: role ?? 'user',
     };
   }
 }
