@@ -1,11 +1,9 @@
 "use client";
 
 import { memo, useEffect, useState } from "react";
-import { io, Socket } from "socket.io-client";
-import { ClientToServerEvents, ServerToClientEvents } from "shared";
 import { z } from "zod";
-
-const socket = new WebSocket("ws://localhost:8080");
+import { createEmitter } from "../lib/event-emitter";
+import { useWebsocket } from "../hooks/use-websocket";
 
 const userSchema = z.object({ id: z.string(), name: z.string() });
 
@@ -30,57 +28,36 @@ const serverEventsSchema = z.discriminatedUnion("event", [
   }),
 ]);
 
+const serverEventMapSchema = z.object({
+  "room-joined": z.object({ code: z.string(), users: userSchema.array() }),
+});
+
 type ServerEvents = z.input<typeof serverEventsSchema>;
+type ServerEventsMap = z.input<typeof serverEventMapSchema>;
+
+const emitter = createEmitter<ServerEventsMap>();
 
 function WebsocketImpl() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [name, setName] = useState("");
   const [room, setRoom] = useState("");
 
-  useEffect(() => {
-    const onOpen = (event) => {
-      console.log("Connected");
-    };
-
-    const onMessage = (event) => {
-      console.log(event);
+  const socket = useWebsocket({
+    url: "ws://localhost:8080",
+    onOpen: () => console.log("Connected"),
+    onMessage: (event) => {
       const message = serverEventsSchema.parse(JSON.parse(event.data));
-
-      console.log(message);
-
       setMessages((prev) => [...prev, message]);
-    };
-
-    socket.addEventListener("open", onOpen);
-    socket.addEventListener("message", onMessage);
-
-    return () => {
-      socket.removeEventListener("open", onOpen);
-      socket.removeEventListener("message", onMessage);
-    };
-  }, []);
+      console.log(message);
+    }
+  });
 
   const handleCreateRoom = () => {
-    socket.send(
-      JSON.stringify({
-        event: "create-room",
-        data: {
-          name,
-        },
-      })
-    );
+    socket.send("create-room", { name });
   };
 
   const handleJoinRoom = () => {
-    socket.send(
-      JSON.stringify({
-        event: "join-room",
-        data: {
-          name,
-          room
-        },
-      })
-    );
+    socket.send("join-room", { name, room });
   };
 
   return (
@@ -103,7 +80,6 @@ function WebsocketImpl() {
         <div>
           <button onClick={handleCreateRoom}>Create room</button>
           <button onClick={handleJoinRoom}>Join room</button>
-
         </div>
       </div>
       <pre>
