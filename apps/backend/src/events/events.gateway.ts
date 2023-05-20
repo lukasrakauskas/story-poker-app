@@ -137,22 +137,12 @@ export class EventsGateway implements OnGatewayDisconnect<Client> {
       return;
     }
 
-    const userIds = room.users
-      .map((it) => it.id)
-      .filter((it) => it !== leftUser.id);
-
-    for (const client of this.server.clients) {
-      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
-        client.send(
-          JSON.stringify({
-            event: 'user-left',
-            data: { user: this.hideUserVote(user) },
-          }),
-        );
-      }
-    }
-
     room.users = room.users.filter((it) => it.id !== leftUser.id);
+
+    this.notifyRoom(room, {
+      event: 'user-left',
+      data: { user: this.hideUserVote(user) },
+    });
   }
 
   @SubscribeMessage('reveal-results')
@@ -184,20 +174,15 @@ export class EventsGateway implements OnGatewayDisconnect<Client> {
       };
     });
 
-    const userIds = room.users.map((it) => it.id);
-    for (const client of this.server.clients) {
-      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ event: 'results-revealed', data }));
-      }
-    }
+    this.notifyRoom(room, { event: 'results-revealed', data });
 
     room.state = 'results';
 
     return { event: 'ok', data: null };
   }
 
-  @SubscribeMessage('reveal-results')
-  onStartVoting(
+  @SubscribeMessage('cast-vote')
+  onCastVote(
     @ConnectedSocket() client: Client,
     @MessageBody() data: { vote: string },
   ) {
@@ -213,17 +198,16 @@ export class EventsGateway implements OnGatewayDisconnect<Client> {
       return { event: 'user-not-found', data: null };
     }
 
-    if (user.role !== 'mod') {
-      return { event: 'user-not-mod', data: null };
-    }
-
     user.vote = data.vote;
 
-    return { event: 'ok', data: null };
+    this.notifyRoom(room, {
+      event: 'user-voted',
+      data: { user: this.hideUserVote(user) },
+    });
   }
 
-  @SubscribeMessage('choose-vote')
-  onChooseVote(@ConnectedSocket() client: Client) {
+  @SubscribeMessage('start-voting')
+  onStartVoting(@ConnectedSocket() client: Client) {
     const room = this.rooms.get(client.roomId ?? '');
 
     if (!room) {
@@ -240,16 +224,20 @@ export class EventsGateway implements OnGatewayDisconnect<Client> {
       participant.vote = null;
     }
 
-    const userIds = room.users.map((it) => it.id);
-    for (const client of this.server.clients) {
-      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ event: 'voting-started', data: null }));
-      }
-    }
+    this.notifyRoom(room, { event: 'voting-started', data: null });
 
     room.state = 'voting';
 
     return { event: 'ok', data: null };
+  }
+
+  private notifyRoom(room: Room, message: { event: string; data: unknown }) {
+    const userIds = room.users.map((it) => it.id);
+    for (const client of this.server.clients) {
+      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(message));
+      }
+    }
   }
 
   private createUser(id: string, name: string, role?: 'user' | 'mod'): User {

@@ -34,8 +34,10 @@ const serverEventsSchema = z.discriminatedUnion("event", [
     })
   }),
   z.object({
-    event: z.literal("results-revealed"),
-    data: z.object({ value: z.string(), count: z.number() }).array(),
+    event: z.literal('user-voted'),
+    data: z.object({
+      user: userSchema
+    })
   }),
 ]);
 
@@ -45,6 +47,7 @@ type ServerEventsMap = { [T in ServerEvents as T["event"]]: T["data"] };
 type ClientEvents = {
   "create-room": { name: string };
   "join-room": { name: string; room: string };
+  "cast-vote": { vote: string }
 };
 
 export function useAppEvents() {
@@ -53,10 +56,11 @@ export function useAppEvents() {
 
   useEffect(() => {
     const onMessage = (socketEvent: any) => {
+      const parsedMessage = JSON.parse(socketEvent?.data ?? "")
+      console.log(parsedMessage)
       const { event, data } = serverEventsSchema.parse(
-        JSON.parse(socketEvent?.data ?? "")
+        parsedMessage
       );
-      console.log({ event, data });
       emitterRef.current.emit(event, data);
     };
 

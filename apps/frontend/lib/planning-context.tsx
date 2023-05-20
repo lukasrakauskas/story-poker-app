@@ -20,6 +20,7 @@ interface PlanningData {
   setRoomCode: (room: string) => void;
   createRoom: (name: string) => void;
   joinRoom: (name: string, room: string) => void;
+  castVote: (vote: string) => void;
 }
 
 export const PlanningContext = createContext<PlanningData>({
@@ -31,6 +32,7 @@ export const PlanningContext = createContext<PlanningData>({
   setRoomCode: () => {},
   createRoom: () => {},
   joinRoom: () => {},
+  castVote: () => {},
 });
 
 export function PlanningProvider({ children }: { children: ReactNode }) {
@@ -51,6 +53,11 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
     app.send("join-room", { name, room });
   };
 
+  const castVote = (vote: string) => {
+    setVote(vote);
+    app.send("cast-vote", { vote });
+  };
+
   useEffect(() => {
     const unsubRoomJoined = app.on("room-joined", (data) => {
       setUsers(data.users);
@@ -58,18 +65,27 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
       setCurrentUser(data.user);
     });
 
-    const unsubUserJoined = app.on('user-joined', (data) => {
-      setUsers(prev => [...prev, data.user])
-    })
+    const unsubUserJoined = app.on("user-joined", (data) => {
+      setUsers((prev) => [...prev, data.user]);
+    });
 
-    const unsubUserLeft = app.on('user-left', (data) => {
-      setUsers(prev => prev.filter(it => it.id !== data.user.id))
-    })
+    const unsubUserLeft = app.on("user-left", (data) => {
+      setUsers((prev) => prev.filter((it) => it.id !== data.user.id));
+    });
+
+    const unsubUserVoted = app.on("user-voted", (data) => {
+      setUsers((prev) =>
+        prev.map((it) =>
+          it.id === data.user.id ? { ...it, ...data.user } : it
+        )
+      );
+    });
 
     return () => {
       unsubRoomJoined();
       unsubUserJoined();
       unsubUserLeft();
+      unsubUserVoted();
     };
   }, [app]);
 
@@ -84,7 +100,8 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
         roomCode,
         setRoomCode,
         createRoom,
-        joinRoom
+        joinRoom,
+        castVote,
       }}
     >
       {children}

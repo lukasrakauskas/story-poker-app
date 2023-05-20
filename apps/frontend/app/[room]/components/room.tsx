@@ -1,3 +1,4 @@
+import { Cards } from "./cards";
 import { InviteToRoom } from "./invite-to-room";
 
 export function Room() {
@@ -6,7 +7,9 @@ export function Room() {
       <div className="md:col-span-5 lg:col-span-4">
         <InviteToRoom />
       </div>
-      <div className="md:col-span-7 lg:col-span-8">cards</div>
+      <div className="md:col-span-7 lg:col-span-8">
+        <Cards />
+      </div>
     </div>
   );
 }

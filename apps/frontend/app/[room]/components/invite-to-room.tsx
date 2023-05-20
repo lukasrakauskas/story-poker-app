@@ -22,11 +22,13 @@ import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
 
 export function InviteToRoom() {
-  const { users, currentUser } = usePlanning();
+  const { users, currentUser, planningState } = usePlanning();
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
   };
+
+  const handleChangePlanningState = () => {}
 
   return (
     <Card>
@@ -38,7 +40,10 @@ export function InviteToRoom() {
       </CardHeader>
       <CardContent>
         <div className="flex space-x-2">
-          <Input value={typeof window !== 'undefined' ? window.location.href : ''} readOnly />
+          <Input
+            value={typeof window !== "undefined" ? window.location.href : ""}
+            readOnly
+          />
           <Button
             variant="secondary"
             className="shrink-0"
@@ -63,11 +68,16 @@ export function InviteToRoom() {
                       <AvatarFallback>OM</AvatarFallback>
                     </Avatar>
                     <div>
-                      <p className={cn("text-sm font-medium leading-none", user.id === currentUser?.id && "underline")}>
+                      <p
+                        className={cn(
+                          "text-sm font-medium leading-none",
+                          user.id === currentUser?.id && "underline"
+                        )}
+                      >
                         {user.name}
                       </p>
                       <p className="text-sm leading-none">
-                        {user.voted ? 'has voted': 'currently voting'}
+                        {user.voted ? "has voted" : "currently voting"}
                       </p>
                     </div>
                   </div>
@@ -87,6 +97,14 @@ export function InviteToRoom() {
             })}
           </div>
         </div>
+        {currentUser?.role === "mod" && (
+          <>
+            <Separator className="my-4" />
+            <Button className="w-full" onClick={handleChangePlanningState}>
+              {planningState === "voting" ? "Reveal results" : "Start voting"}
+            </Button>
+          </>
+        )}
       </CardContent>
     </Card>
   );
