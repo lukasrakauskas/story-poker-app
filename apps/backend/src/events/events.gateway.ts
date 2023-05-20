@@ -17,25 +17,6 @@ type User = {
   role: 'user' | 'mod';
 };
 
-// export interface ServerToClientEvents {
-//   'room-created': (data: { code: string; users: User[] }) => void; | done
-//   'room-joined': (data: { code: string; users: User[] }) => void; | done
-//   'user-joined': (data: { user: User }) => void; | done
-//   'results-revealed': (data: { value: string; count: number }[]) => void; | done
-//   'voting-started': () => void | done
-// }
-
-// // Interface for when clients emit events to the server.
-// export interface ClientToServerEvents {
-//   'create-room': (data: { name: string }) => void;
-//   'join-room': (data: { name: string; room: string }) => void;
-//   'choose-vote': (data: { value: string }) => void;
-//   'reveal-results': () => void;
-//   'start-voting': () => void
-// }
-
-// type Client = WebSocket & { id?: string; roomId?: string };
-
 interface Room {
   code: string;
   users: User[];
