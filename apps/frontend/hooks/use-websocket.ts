@@ -8,21 +8,8 @@ declare global {
   }
 }
 
-interface Params {
-  url?: string;
-  onOpen?: (event: Event) => void;
-  onMessage?: <T extends string>(event: MessageEvent<T>) => void;
-  onClose?: (event: Event) => void;
-}
 
-export function useWebsocket(params: Params) {
-  const {
-    url,
-    onOpen = () => {},
-    onMessage = () => {},
-    onClose = () => {},
-  } = params;
-
+export function useWebsocket(url: string) {
   const client = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -41,24 +28,23 @@ export function useWebsocket(params: Params) {
 
     client.current = window.__webSocketClient;
 
-    client.current?.addEventListener("open", onOpen);
-    client.current?.addEventListener("message", onMessage);
-    client.current?.addEventListener("close", onClose);
-
     return () => {
-      client.current?.removeEventListener("open", onOpen);
-      client.current?.removeEventListener("message", onMessage);
-      client.current?.removeEventListener("close", onClose);
-
       if (client.current?.readyState === WebSocket.OPEN) {
         client.current?.close();
       }
     };
   }, []);
 
-  function send<T>(event: string, data: T) {
-    client.current?.send(JSON.stringify({ event, data }));
+  function send(data: string) {
+    client.current?.send(data);
   }
 
-  return { send };
+  type Off = NonNullable<typeof client.current>['addEventListener']
+  type On = NonNullable<typeof client.current>['removeEventListener']
+
+  return {
+    send,
+    on: (...args: Parameters<On>) => client.current?.addEventListener(...args),
+    off: (...args: Parameters<Off>) => client.current?.removeEventListener(...args),
+  };
 }

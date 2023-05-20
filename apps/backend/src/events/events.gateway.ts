@@ -36,11 +36,13 @@ type User = {
 
 // type Client = WebSocket & { id?: string; roomId?: string };
 
-interface Room {
+interface Room<T = User> {
   code: string;
   users: User[];
   state: 'voting' | 'results';
 }
+
+type ClientUser = Omit<User, 'vote'> & { voted: boolean };
 
 @WebSocketGateway(8080, {
   cors: { origin: '*' },
@@ -57,7 +59,7 @@ export class EventsGateway {
   onCreateRoom(
     @ConnectedSocket() client: Client,
     @MessageBody() data: { name: string },
-  ): WsResponse<Room> {
+  ) {
     const user = this.createUser(client.id, data.name, 'mod');
 
     const room: Room = {
@@ -70,7 +72,12 @@ export class EventsGateway {
 
     client.roomId = room.code;
 
-    return { event: 'room-joined', data: room };
+    const roomData = this.mapRoomUsers(room, this.hideUserVote);
+
+    return {
+      event: 'room-joined',
+      data: { ...roomData, user: this.hideUserVote(user) },
+    };
   }
 
   @SubscribeMessage('join-room')
@@ -207,6 +214,23 @@ export class EventsGateway {
       name,
       vote: null,
       role: role ?? 'user',
+    };
+  }
+
+  private hideUserVote(user: User): ClientUser {
+    const { vote, ...userData } = user;
+    return {
+      ...userData,
+      voted: !!vote,
+    };
+  }
+
+  private mapRoomUsers<T>(room: Room, convert: (user: User) => T) {
+    const users = room.users.map(convert);
+
+    return {
+      ...room,
+      users,
     };
   }
 }

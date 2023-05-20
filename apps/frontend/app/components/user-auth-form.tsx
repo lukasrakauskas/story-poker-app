@@ -7,20 +7,35 @@ import { Button } from "ui/components/button"
 import { Input } from "ui/components/input"
 import { Label } from "ui/components/label"
 import { Icons } from "ui/icons"
+import { usePlanning } from "../../lib/planning-context"
+import { usePathname, useRouter } from "next/navigation"
 
 interface UserAuthFormProps extends React.HTMLAttributes<HTMLDivElement> {}
 
 export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const [name, setName] = React.useState('')
   const [isLoading, setIsLoading] = React.useState<boolean>(false)
+
+  const { createRoom, joinRoom, roomCode } = usePlanning() 
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault()
     setIsLoading(true)
 
-    setTimeout(() => {
-      setIsLoading(false)
-    }, 3000)
+    if (!roomCode) {
+      createRoom(name)
+    } else {
+      joinRoom(name, roomCode)
+    }
   }
+
+  React.useEffect(() => {
+    if (roomCode && pathname === '/') {
+      router.replace(`/${roomCode}`)
+    }
+  }, [roomCode])
 
   return (
     <div className={cn("grid gap-6", className)} {...props}>
@@ -36,13 +51,14 @@ export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
               autoCapitalize="none"
               autoCorrect="off"
               disabled={isLoading}
+              onChange={(event) => setName(event.target.value)}
             />
           </div>
           <Button disabled={isLoading}>
             {isLoading && (
               <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
             )}
-            Create room
+            {roomCode ? "Join room" : "Create room"}
           </Button>
         </div>
       </form>
