@@ -15,7 +15,23 @@ export type User = z.infer<typeof userSchema>;
 const serverEventsSchema = z.discriminatedUnion("event", [
   z.object({
     event: z.literal("room-joined"),
-    data: z.object({ code: z.string(), users: userSchema.array(), user: userSchema }),
+    data: z.object({
+      code: z.string(),
+      users: userSchema.array(),
+      user: userSchema,
+    }),
+  }),
+  z.object({
+    event: z.literal('user-joined'),
+    data: z.object({
+      user: userSchema
+    })
+  }),
+  z.object({
+    event: z.literal('user-left'),
+    data: z.object({
+      user: userSchema
+    })
   }),
   z.object({
     event: z.literal("results-revealed"),
@@ -28,7 +44,7 @@ type ServerEventsMap = { [T in ServerEvents as T["event"]]: T["data"] };
 
 type ClientEvents = {
   "create-room": { name: string };
-  "join-room": { name: string, room: string }
+  "join-room": { name: string; room: string };
 };
 
 export function useAppEvents() {

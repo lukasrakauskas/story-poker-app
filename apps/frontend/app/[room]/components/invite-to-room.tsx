@@ -19,6 +19,7 @@ import {
 } from "ui/components/select";
 import { Separator } from "ui/components/separator";
 import { usePlanning } from "../../../lib/planning-context";
+import { cn } from "ui/utils";
 
 export function InviteToRoom() {
   const { users, currentUser } = usePlanning();
@@ -62,7 +63,7 @@ export function InviteToRoom() {
                       <AvatarFallback>OM</AvatarFallback>
                     </Avatar>
                     <div>
-                      <p className="text-sm font-medium leading-none">
+                      <p className={cn("text-sm font-medium leading-none", user.id === currentUser?.id && "underline")}>
                         {user.name}
                       </p>
                       <p className="text-sm leading-none">

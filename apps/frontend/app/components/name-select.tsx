@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { UserAuthForm } from "./user-auth-form";
 
-export function NameSelect({ title }: { title: string }) {
+export function NameSelect({ title, action }: { title: string, action: string }) {
   return (
     <div className="p-4 flex items-center justify-center min-h-screen">
       <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
@@ -14,7 +14,7 @@ export function NameSelect({ title }: { title: string }) {
             Enter your name below
           </p>
         </div>
-        <UserAuthForm />
+        <UserAuthForm action={action} />
         <p className="px-8 text-center text-sm text-muted-foreground">
           By clicking continue, you agree to our{" "}
           <Link

@@ -10,9 +10,11 @@ import { Icons } from "ui/icons"
 import { usePlanning } from "../../lib/planning-context"
 import { usePathname, useRouter } from "next/navigation"
 
-interface UserAuthFormProps extends React.HTMLAttributes<HTMLDivElement> {}
+interface UserAuthFormProps extends React.HTMLAttributes<HTMLDivElement> {
+  action: string
+}
 
-export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
+export function UserAuthForm({ className, action, ...props }: UserAuthFormProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [name, setName] = React.useState('')
@@ -58,7 +60,7 @@ export function UserAuthForm({ className, ...props }: UserAuthFormProps) {
             {isLoading && (
               <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
             )}
-            {roomCode ? "Join room" : "Create room"}
+            {action}
           </Button>
         </div>
       </form>

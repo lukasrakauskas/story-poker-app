@@ -2,9 +2,9 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
-  WsResponse,
   MessageBody,
   ConnectedSocket,
+  OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
@@ -36,7 +36,7 @@ type User = {
 
 // type Client = WebSocket & { id?: string; roomId?: string };
 
-interface Room<T = User> {
+interface Room {
   code: string;
   users: User[];
   state: 'voting' | 'results';
@@ -49,11 +49,10 @@ type ClientUser = Omit<User, 'vote'> & { voted: boolean };
   clientTracking: true,
   WebSocket: Client,
 })
-export class EventsGateway {
+export class EventsGateway implements OnGatewayDisconnect<Client> {
   @WebSocketServer()
   server: Server<Client>;
   rooms: Map<string, Room> = new Map();
-  clients: Client[] = [];
 
   @SubscribeMessage('create-room')
   onCreateRoom(
@@ -84,7 +83,7 @@ export class EventsGateway {
   onJoinRoom(
     @ConnectedSocket() client: Client,
     @MessageBody() data: { name: string; room: string },
-  ): WsResponse<null | (Room & { user: User })> {
+  ) {
     const room = this.rooms.get(data.room);
 
     if (!room) {
@@ -102,13 +101,58 @@ export class EventsGateway {
 
     for (const client of this.server.clients) {
       if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify({ event: 'user-joined', data: { user } }));
+        client.send(
+          JSON.stringify({
+            event: 'user-joined',
+            data: { user: this.hideUserVote(user) },
+          }),
+        );
       }
     }
 
     room.users.push(user);
 
-    return { event: 'room-joined', data: { ...room, user } };
+    const roomData = this.mapRoomUsers(room, this.hideUserVote);
+
+    return {
+      event: 'room-joined',
+      data: { ...roomData, user: this.hideUserVote(user) },
+    };
+  }
+
+  handleDisconnect(leftUser: Client) {
+    if (!leftUser.roomId) {
+      return;
+    }
+
+    const room = this.rooms.get(leftUser.roomId);
+
+    if (!room) {
+      return;
+    }
+
+    const user = room.users.find((it) => it.id === leftUser.id);
+
+    if (!user) {
+      return;
+    }
+
+    const userIds = room.users
+      .map((it) => it.id)
+      .filter((it) => it !== leftUser.id);
+
+    for (const client of this.server.clients) {
+      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
+        client.send(
+          JSON.stringify({
+            event: 'user-left',
+            data: { user: this.hideUserVote(user) },
+          }),
+        );
+      }
+    }
+
+    room.users.filter((it) => it.id !== leftUser.id);
   }
 
   @SubscribeMessage('reveal-results')

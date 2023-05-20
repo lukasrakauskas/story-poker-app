@@ -8,6 +8,6 @@ export const metadata: Metadata = {
 
 export default function Home() {
   return (
-    <NameSelect title="Create a planning room" />
+    <NameSelect title="Create a planning room" action="Create room" />
   );
 }

@@ -58,8 +58,18 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
       setCurrentUser(data.user);
     });
 
+    const unsubUserJoined = app.on('user-joined', (data) => {
+      setUsers(prev => [...prev, data.user])
+    })
+
+    const unsubUserLeft = app.on('user-left', (data) => {
+      setUsers(prev => prev.filter(it => it.id !== data.user.id))
+    })
+
     return () => {
       unsubRoomJoined();
+      unsubUserJoined();
+      unsubUserLeft();
     };
   }, [app]);
 

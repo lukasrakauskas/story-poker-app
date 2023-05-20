@@ -14,7 +14,7 @@ export default function RoomPage({ params }: { params: { room: string } }) {
   }, [params.room]);
 
   if (currentUser == null) {
-    return <NameSelect title="Join a planning room" />;
+    return <NameSelect title="Join a planning room" action="Join room" />;
   }
 
   return <Room />;
