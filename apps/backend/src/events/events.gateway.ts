@@ -5,10 +5,10 @@ import {
   WsResponse,
   MessageBody,
   ConnectedSocket,
-  OnGatewayConnection,
 } from '@nestjs/websockets';
 import { Server, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
+import { Client } from './client.entity';
 
 type User = {
   id: string;
@@ -34,7 +34,7 @@ type User = {
 //   'start-voting': () => void
 // }
 
-type Client = WebSocket & { id?: string; roomId?: string };
+// type Client = WebSocket & { id?: string; roomId?: string };
 
 interface Room {
   code: string;
@@ -42,16 +42,16 @@ interface Room {
   state: 'voting' | 'results';
 }
 
-@WebSocketGateway(8080, { cors: { origin: '*' }, clientTracking: true })
-export class EventsGateway implements OnGatewayConnection<Client> {
+@WebSocketGateway(8080, {
+  cors: { origin: '*' },
+  clientTracking: true,
+  WebSocket: Client,
+})
+export class EventsGateway {
   @WebSocketServer()
   server: Server<Client>;
   rooms: Map<string, Room> = new Map();
   clients: Client[] = [];
-
-  handleConnection(client: Client) {
-    client.id = nanoid();
-  }
 
   @SubscribeMessage('create-room')
   onCreateRoom(
@@ -106,7 +106,7 @@ export class EventsGateway implements OnGatewayConnection<Client> {
 
   @SubscribeMessage('reveal-results')
   onRevealResults(@ConnectedSocket() client: Client) {
-    const room = this.rooms.get(client.roomId);
+    const room = this.rooms.get(client.roomId ?? '');
 
     if (!room) {
       return { event: 'room-not-found', data: null };
@@ -150,7 +150,7 @@ export class EventsGateway implements OnGatewayConnection<Client> {
     @ConnectedSocket() client: Client,
     @MessageBody() data: { vote: string },
   ) {
-    const room = this.rooms.get(client.roomId);
+    const room = this.rooms.get(client.roomId ?? '');
 
     if (!room) {
       return { event: 'room-not-found', data: null };
@@ -173,7 +173,7 @@ export class EventsGateway implements OnGatewayConnection<Client> {
 
   @SubscribeMessage('choose-vote')
   onChooseVote(@ConnectedSocket() client: Client) {
-    const room = this.rooms.get(client.roomId);
+    const room = this.rooms.get(client.roomId ?? '');
 
     if (!room) {
       return { event: 'room-not-found', data: null };
