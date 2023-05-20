@@ -21,6 +21,7 @@ interface PlanningData {
   createRoom: (name: string) => void;
   joinRoom: (name: string, room: string) => void;
   castVote: (vote: string) => void;
+  changePlanningState: () => void;
 }
 
 export const PlanningContext = createContext<PlanningData>({
@@ -33,6 +34,7 @@ export const PlanningContext = createContext<PlanningData>({
   createRoom: () => {},
   joinRoom: () => {},
   castVote: () => {},
+  changePlanningState: () => {}
 });
 
 export function PlanningProvider({ children }: { children: ReactNode }) {
@@ -58,8 +60,19 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
     app.send("cast-vote", { vote });
   };
 
+  const changePlanningState = () => {
+    if (planningState === 'voting') {
+      app.send('reveal-results')
+    }
+
+    if (planningState === 'results') {
+      app.send('start-voting')
+    }
+  }
+
   useEffect(() => {
     const unsubRoomJoined = app.on("room-joined", (data) => {
+      setPlanningState(data.state);
       setUsers(data.users);
       setRoomCode(data.code);
       setCurrentUser(data.user);
@@ -81,11 +94,24 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
       );
     });
 
+    const unsubVotingStarted = app.on('voting-started', () => {
+      setPlanningState('voting')
+      setResults({})
+    })
+    
+    const unsubResultsRevealed = app.on('results-revealed', (data) => {
+      setPlanningState('results')
+      setResults(data)
+      setVote(null)
+    })
+
     return () => {
       unsubRoomJoined();
       unsubUserJoined();
       unsubUserLeft();
       unsubUserVoted();
+      unsubVotingStarted();
+      unsubResultsRevealed();
     };
   }, [app]);
 
@@ -102,6 +128,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
         createRoom,
         joinRoom,
         castVote,
+        changePlanningState
       }}
     >
       {children}

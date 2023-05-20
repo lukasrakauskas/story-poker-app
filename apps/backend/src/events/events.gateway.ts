@@ -172,13 +172,11 @@ export class EventsGateway implements OnGatewayDisconnect<Client> {
         ...it,
         [current.vote]: (it?.[current.vote] ?? 0) + 1,
       };
-    });
+    }, {});
 
-    this.notifyRoom(room, { event: 'results-revealed', data });
-
+    room.users = room.users.map((it) => ({ ...it, vote: null }));
     room.state = 'results';
-
-    return { event: 'ok', data: null };
+    this.notifyRoom(room, { event: 'results-revealed', data });
   }
 
   @SubscribeMessage('cast-vote')
@@ -224,11 +222,8 @@ export class EventsGateway implements OnGatewayDisconnect<Client> {
       participant.vote = null;
     }
 
-    this.notifyRoom(room, { event: 'voting-started', data: null });
-
     room.state = 'voting';
-
-    return { event: 'ok', data: null };
+    this.notifyRoom(room, { event: 'voting-started', data: null });
   }
 
   private notifyRoom(room: Room, message: { event: string; data: unknown }) {

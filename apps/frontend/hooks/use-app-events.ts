@@ -19,6 +19,7 @@ const serverEventsSchema = z.discriminatedUnion("event", [
       code: z.string(),
       users: userSchema.array(),
       user: userSchema,
+      state: z.enum(['voting', 'results'])
     }),
   }),
   z.object({
@@ -39,6 +40,14 @@ const serverEventsSchema = z.discriminatedUnion("event", [
       user: userSchema
     })
   }),
+  z.object({
+    event: z.literal('voting-started'),
+    data: z.null()
+  }),
+  z.object({
+    event: z.literal('results-revealed'),
+    data: z.record(z.number())
+  })
 ]);
 
 type ServerEvents = z.infer<typeof serverEventsSchema>;
@@ -48,6 +57,8 @@ type ClientEvents = {
   "create-room": { name: string };
   "join-room": { name: string; room: string };
   "cast-vote": { vote: string }
+  "start-voting": undefined,
+  "reveal-results": undefined
 };
 
 export function useAppEvents() {
@@ -71,7 +82,7 @@ export function useAppEvents() {
     };
   }, [socket]);
 
-  function send<T extends keyof ClientEvents>(event: T, data: ClientEvents[T]) {
+  function send<T extends keyof ClientEvents>(event: T, data?: ClientEvents[T]) {
     socket.send(JSON.stringify({ event, data }));
   }
 

@@ -20,7 +20,15 @@ const cardDeck = [
 ];
 
 export function Cards() {
-  const { vote, castVote } = usePlanning();
+  const { vote, castVote, results, planningState } = usePlanning();
+
+  if (planningState === 'results') {
+    return <div>
+      <pre>
+        {JSON.stringify(results, null, 2)}
+      </pre>
+    </div>
+  }
 
   return (
     <div className="grid grid-cols-4 lg:grid-cols-6 gap-2">

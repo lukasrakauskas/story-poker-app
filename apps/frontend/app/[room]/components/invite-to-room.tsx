@@ -22,13 +22,11 @@ import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
 
 export function InviteToRoom() {
-  const { users, currentUser, planningState } = usePlanning();
+  const { users, currentUser, planningState, changePlanningState } = usePlanning();
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
   };
-
-  const handleChangePlanningState = () => {}
 
   return (
     <Card>
@@ -81,7 +79,7 @@ export function InviteToRoom() {
                       </p>
                     </div>
                   </div>
-                  {currentUser?.role === "mod" && (
+                  {currentUser?.role === "mod" && false && (
                     <Select defaultValue="edit">
                       <SelectTrigger className="ml-auto w-[110px]">
                         <SelectValue placeholder="Select" />
@@ -100,7 +98,7 @@ export function InviteToRoom() {
         {currentUser?.role === "mod" && (
           <>
             <Separator className="my-4" />
-            <Button className="w-full" onClick={handleChangePlanningState}>
+            <Button className="w-full" onClick={changePlanningState}>
               {planningState === "voting" ? "Reveal results" : "Start voting"}
             </Button>
           </>
