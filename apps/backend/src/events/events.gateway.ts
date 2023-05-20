@@ -152,7 +152,7 @@ export class EventsGateway implements OnGatewayDisconnect<Client> {
       }
     }
 
-    room.users.filter((it) => it.id !== leftUser.id);
+    room.users = room.users.filter((it) => it.id !== leftUser.id);
   }
 
   @SubscribeMessage('reveal-results')
