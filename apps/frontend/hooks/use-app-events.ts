@@ -62,7 +62,7 @@ type ClientEvents = {
 };
 
 export function useAppEvents() {
-  const socket = useWebsocket(`ws://${process.env.NEXT_PUBLIC_API_HOST}`);
+  const socket = useWebsocket(process.env.NEXT_PUBLIC_WS_URL ?? '');
   const emitterRef = useRef(createEmitter<ServerEventsMap>());
 
   useEffect(() => {

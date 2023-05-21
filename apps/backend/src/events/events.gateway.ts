@@ -25,7 +25,7 @@ interface Room {
 
 type ClientUser = Omit<User, 'vote'> & { voted: boolean };
 
-@WebSocketGateway(8080, {
+@WebSocketGateway({
   cors: { origin: '*' },
   clientTracking: true,
   WebSocket: Client,
