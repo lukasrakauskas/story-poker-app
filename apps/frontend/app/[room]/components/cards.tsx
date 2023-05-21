@@ -3,31 +3,29 @@
 import { Card } from "ui/components/card";
 import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
-
-const cardDeck = [
-  "0",
-  "1/2",
-  "1",
-  "2",
-  "3",
-  "5",
-  "8",
-  "13",
-  "20",
-  "40",
-  "100",
-  "?",
-];
+import PieExample from "./pie";
+import ParentSize from "@visx/responsive/lib/components/ParentSize";
+import { cardDeck } from "../../../lib/constants";
 
 export function Cards() {
   const { vote, castVote, results, planningState } = usePlanning();
 
-  if (planningState === 'results') {
-    return <div>
-      <pre>
-        {JSON.stringify(results, null, 2)}
-      </pre>
-    </div>
+  if (planningState === "results") {
+    const displayResults = Object.entries(results)
+      .map(([key, value]) => ({
+        key,
+        value,
+      }))
+      .filter((it) => it.value !== 0);
+    console.log(displayResults);
+
+    return (
+      <ParentSize>
+        {({ width, height }) => (
+          <PieExample width={width} height={height} data={displayResults} />
+        )}
+      </ParentSize>
+    );
   }
 
   return (

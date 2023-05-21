@@ -2,15 +2,10 @@
 module.exports = {
   darkMode: ["class"],
   content: [
-    '../../apps/**/*.{ts,tsx}',
-    '../../packages/**/*.{ts,tsx}',
-    // Or if using `src` directory:
-    './src/**/*.{js,ts,jsx,tsx}',
-    // "../../packages/ui/**/*.{ts,tsx}",
-    // "./**/*.{ts,tsx}",
-    // "./pages/**/*.{ts,tsx}",
-    // "./app/**/*.{ts,tsx}",
-	],
+    "../../apps/**/*.{ts,tsx}",
+    "../../packages/**/*.{ts,tsx}",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
   theme: {
     container: {
       center: true,
@@ -76,5 +71,25 @@ module.exports = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
-}
+  plugins: [
+    require("tailwindcss-animate"),
+    function ({ addBase, theme }) {
+      function extractColorVars(colorObj, colorGroup = "") {
+        return Object.keys(colorObj).reduce((vars, colorKey) => {
+          const value = colorObj[colorKey];
+
+          const newVars =
+            typeof value === "string"
+              ? { [`--color${colorGroup}-${colorKey}`]: value }
+              : extractColorVars(value, `-${colorKey}`);
+
+          return { ...vars, ...newVars };
+        }, {});
+      }
+
+      addBase({
+        ":root": extractColorVars(theme("colors")),
+      });
+    },
+  ],
+};

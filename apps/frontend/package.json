@@ -9,6 +9,13 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@react-spring/web": "^9.7.2",
+    "@visx/gradient": "^3.0.0",
+    "@visx/group": "^3.0.0",
+    "@visx/mock-data": "^3.0.0",
+    "@visx/responsive": "^3.0.0",
+    "@visx/scale": "^3.0.0",
+    "@visx/shape": "^3.0.0",
     "autoprefixer": "^10.4.14",
     "bufferutil": "^4.0.7",
     "next": "^13.4.1",
@@ -26,9 +33,9 @@
     "@types/react": "^18.0.22",
     "@types/react-dom": "^18.0.7",
     "eslint-config-custom": "workspace:*",
+    "tailwind-config": "workspace:*",
     "tsconfig": "workspace:*",
-    "typescript": "^4.5.3",
-    "tailwind-config": "workspace:*"
+    "typescript": "^4.5.3"
   },
   "description": "First, run the development server:",
   "main": ".eslintrc.js",
