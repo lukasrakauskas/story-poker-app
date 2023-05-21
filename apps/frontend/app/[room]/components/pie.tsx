@@ -63,9 +63,7 @@ export default function Example({
               {...pie}
               animate={animate}
               getKey={({ data: { key } }) => key}
-              getColor={({ data: { value } }) =>
-                getColor(String(value))
-              }
+              getColor={({ data: { key } }) => getColor(String(key))}
             />
           )}
         </Pie>
