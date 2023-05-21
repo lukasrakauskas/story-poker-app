@@ -62,7 +62,7 @@ type ClientEvents = {
 };
 
 export function useAppEvents() {
-  const socket = useWebsocket("ws://localhost:8080");
+  const socket = useWebsocket(`ws://${process.env.NEXT_PUBLIC_API_HOST}`);
   const emitterRef = useRef(createEmitter<ServerEventsMap>());
 
   useEffect(() => {
