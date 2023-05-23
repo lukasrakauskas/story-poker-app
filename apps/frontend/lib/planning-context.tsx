@@ -19,12 +19,14 @@ interface PlanningData {
   planningState?: "voting" | "results";
   results: Record<string, number>;
   roomCode: string;
+  avatars: string[];
 
   setRoomCode: (room: string) => void;
   createRoom: (name: string) => void;
   joinRoom: (name: string, room: string) => void;
   castVote: (vote: string) => void;
   changePlanningState: () => void;
+  setAvatars: (avatars: string[]) => void;
 }
 
 export const PlanningContext = createContext<PlanningData>({
@@ -34,21 +36,24 @@ export const PlanningContext = createContext<PlanningData>({
   vote: null,
   results: {},
   roomCode: "",
+  avatars: [],
   setRoomCode: () => {},
   createRoom: () => {},
   joinRoom: () => {},
   castVote: () => {},
   changePlanningState: () => {},
+  setAvatars: () => {},
 });
 
 export function PlanningProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
-  const [roomCode, setRoomCode] = useState("");
   const [users, setUsers] = useState<User[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [vote, setVote] = useState<string | null>(null);
   const [planningState, setPlanningState] = useState<"voting" | "results">();
   const [results, setResults] = useState<Record<string, number>>({});
+  const [roomCode, setRoomCode] = useState("");
+  const [avatars, setAvatars] = useState<string[]>([]);
 
   const app = useAppEvents();
   const { toast } = useToast();
@@ -163,11 +168,13 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
         planningState,
         results,
         roomCode,
+        avatars,
         setRoomCode,
         createRoom,
         joinRoom,
         castVote,
         changePlanningState,
+        setAvatars,
       }}
     >
       {children}

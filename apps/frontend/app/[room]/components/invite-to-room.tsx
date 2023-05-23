@@ -20,13 +20,43 @@ import {
 import { Separator } from "ui/components/separator";
 import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MurmurHash3, SimpleFastCounter32 } from "../../../lib/random";
 
 export function InviteToRoom() {
-  const { users, currentUser, planningState, changePlanningState } = usePlanning();
+  const [copied, setCopied] = useState(false);
+  const {
+    users,
+    currentUser,
+    planningState,
+    changePlanningState,
+    avatars,
+    roomCode,
+  } = usePlanning();
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const handleCopyLink = () => {
+    setCopied(true);
     navigator.clipboard.writeText(window.location.href);
+
+    timerRef.current = setTimeout(() => {
+      setCopied(false);
+    }, 1000);
   };
+
+  useEffect(() => {
+    return () => clearTimeout(timerRef.current);
+  }, []);
+
+  const avatar = useMemo(() => {
+    const generateSeed = MurmurHash3(`${roomCode}+${currentUser?.id}`);
+    const generateRandomNumber = SimpleFastCounter32(
+      generateSeed(),
+      generateSeed()
+    );
+
+    return avatars[Math.floor(generateRandomNumber() * avatars.length)];
+  }, [roomCode, currentUser, avatars]);
 
   return (
     <Card>
@@ -46,8 +76,9 @@ export function InviteToRoom() {
             variant="secondary"
             className="shrink-0"
             onClick={handleCopyLink}
+            disabled={copied}
           >
-            Copy Link
+            {copied ? "Copied" : "Copy Link"}
           </Button>
         </div>
         <Separator className="my-4" />
@@ -62,7 +93,7 @@ export function InviteToRoom() {
                 >
                   <div className="flex items-center space-x-4">
                     <Avatar>
-                      <AvatarImage src="/avatars/03.png" />
+                      <AvatarImage src={`/avatars/${avatar}`} />
                       <AvatarFallback>OM</AvatarFallback>
                     </Avatar>
                     <div>

@@ -1,21 +1,14 @@
-"use client";
+import path from "path";
+import fs from "fs/promises";
+import RoomOrJoin from "./room-or-join";
 
-import { Metadata } from "next";
-import { usePlanning } from "../../lib/planning-context";
-import { NameSelect } from "../components/name-select";
-import { useEffect } from "react";
-import { Room } from "./components/room";
+export default async function RoomPage({
+  params,
+}: {
+  params: { room: string };
+}) {
+  const publicDir = path.join(process.cwd(), "public", "avatars");
+  const avatars = await fs.readdir(publicDir);
 
-export default function RoomPage({ params }: { params: { room: string } }) {
-  const { currentUser, setRoomCode } = usePlanning();
-
-  useEffect(() => {
-    setRoomCode(params.room)
-  }, [params.room]);
-
-  if (currentUser == null) {
-    return <NameSelect title="Join a planning room" action="Join room" />;
-  }
-
-  return <Room />;
+  return <RoomOrJoin room={params.room} avatars={avatars} />;
 }
