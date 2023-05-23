@@ -1,15 +1,12 @@
-"use client"
+"use client";
 
-import { PlanningProvider } from "../lib/planning-context"
+import { ToastProvider } from "ui/components/toast";
+import { PlanningProvider } from "../lib/planning-context";
 
-export default function Providers({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <PlanningProvider>
-      {children}
-    </PlanningProvider>
-  )
+    <ToastProvider>
+      <PlanningProvider>{children}</PlanningProvider>
+    </ToastProvider>
+  );
 }

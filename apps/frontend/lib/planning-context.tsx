@@ -8,8 +8,11 @@ import {
   useState,
 } from "react";
 import { User, useAppEvents } from "../hooks/use-app-events";
+import { useToast } from "ui/hooks/use-toast";
+import { ToastAction } from "ui/components/toast";
 
 interface PlanningData {
+  isConnected: boolean;
   users: User[];
   currentUser: User | null;
   vote: string | null;
@@ -25,6 +28,7 @@ interface PlanningData {
 }
 
 export const PlanningContext = createContext<PlanningData>({
+  isConnected: false,
   users: [],
   currentUser: null,
   vote: null,
@@ -38,6 +42,7 @@ export const PlanningContext = createContext<PlanningData>({
 });
 
 export function PlanningProvider({ children }: { children: ReactNode }) {
+  const [isConnected, setIsConnected] = useState(false);
   const [roomCode, setRoomCode] = useState("");
   const [users, setUsers] = useState<User[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -46,6 +51,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const [results, setResults] = useState<Record<string, number>>({});
 
   const app = useAppEvents();
+  const { toast } = useToast();
 
   const createRoom = (name: string) => {
     app.send("create-room", { name });
@@ -68,6 +74,14 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
     if (planningState === "results") {
       app.send("start-voting");
     }
+  };
+
+  const reset = () => {
+    setRoomCode("");
+    setUsers([]);
+    setCurrentUser(null);
+    setVote(null);
+    setResults({});
   };
 
   useEffect(() => {
@@ -106,6 +120,27 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
       setVote(null);
     });
 
+    const unsubConnected = app.on("connected", () => {
+      setIsConnected(true);
+    });
+
+    const unsubDisconnected = app.on("disconnected", () => {
+      setIsConnected(false);
+      reset();
+      toast({
+        title: "Uh oh! Something went wrong.",
+        description: "There was a problem with your connection.",
+        action: (
+          <ToastAction
+            altText="Reload page"
+            onClick={() => window.location.reload()}
+          >
+            Reload page
+          </ToastAction>
+        ),
+      });
+    });
+
     return () => {
       unsubRoomJoined();
       unsubUserJoined();
@@ -113,12 +148,15 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
       unsubUserVoted();
       unsubVotingStarted();
       unsubResultsRevealed();
+      unsubConnected();
+      unsubDisconnected();
     };
   }, [app]);
 
   return (
     <PlanningContext.Provider
       value={{
+        isConnected,
         users,
         currentUser,
         vote,

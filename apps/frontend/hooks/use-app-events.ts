@@ -19,70 +19,90 @@ const serverEventsSchema = z.discriminatedUnion("event", [
       code: z.string(),
       users: userSchema.array(),
       user: userSchema,
-      state: z.enum(['voting', 'results'])
+      state: z.enum(["voting", "results"]),
     }),
   }),
   z.object({
-    event: z.literal('user-joined'),
+    event: z.literal("user-joined"),
     data: z.object({
-      user: userSchema
-    })
+      user: userSchema,
+    }),
   }),
   z.object({
-    event: z.literal('user-left'),
+    event: z.literal("user-left"),
     data: z.object({
-      user: userSchema
-    })
+      user: userSchema,
+    }),
   }),
   z.object({
-    event: z.literal('user-voted'),
+    event: z.literal("user-voted"),
     data: z.object({
-      user: userSchema
-    })
+      user: userSchema,
+    }),
   }),
   z.object({
-    event: z.literal('voting-started'),
-    data: z.null()
+    event: z.literal("voting-started"),
+    data: z.null(),
   }),
   z.object({
-    event: z.literal('results-revealed'),
-    data: z.record(z.number())
-  })
+    event: z.literal("results-revealed"),
+    data: z.record(z.number()),
+  }),
 ]);
 
 type ServerEvents = z.infer<typeof serverEventsSchema>;
 type ServerEventsMap = { [T in ServerEvents as T["event"]]: T["data"] };
 
+type WebsocketEventsMap = {
+  connected: undefined;
+  disconnected: undefined;
+};
+
 type ClientEvents = {
   "create-room": { name: string };
   "join-room": { name: string; room: string };
-  "cast-vote": { vote: string }
-  "start-voting": undefined,
-  "reveal-results": undefined
+  "cast-vote": { vote: string };
+  "start-voting": undefined;
+  "reveal-results": undefined;
 };
 
 export function useAppEvents() {
-  const socket = useWebsocket(process.env.NEXT_PUBLIC_WS_URL ?? '');
-  const emitterRef = useRef(createEmitter<ServerEventsMap>());
+  const socket = useWebsocket(process.env.NEXT_PUBLIC_WS_URL ?? "");
+  const emitterRef = useRef(
+    createEmitter<ServerEventsMap & WebsocketEventsMap>()
+  );
 
   useEffect(() => {
+    const onOpen = () => {
+      emitterRef.current.emit("connected", undefined);
+    };
+
+    const onClose = () => {
+      emitterRef.current.emit("disconnected", undefined);
+    };
+
     const onMessage = (socketEvent: any) => {
-      const parsedMessage = JSON.parse(socketEvent?.data ?? "")
-      console.log(parsedMessage)
-      const { event, data } = serverEventsSchema.parse(
-        parsedMessage
-      );
+      const parsedMessage = JSON.parse(socketEvent?.data ?? "");
+      console.log(parsedMessage);
+      const { event, data } = serverEventsSchema.parse(parsedMessage);
       emitterRef.current.emit(event, data);
     };
 
+    socket.on("open", onOpen);
     socket.on("message", onMessage);
+    socket.on("close", onClose);
 
     return () => {
+      socket.off("open", onOpen);
       socket.off("message", onMessage);
+      socket.off("close", onClose);
     };
   }, [socket]);
 
-  function send<T extends keyof ClientEvents>(event: T, data?: ClientEvents[T]) {
+  function send<T extends keyof ClientEvents>(
+    event: T,
+    data?: ClientEvents[T]
+  ) {
     socket.send(JSON.stringify({ event, data }));
   }
 
