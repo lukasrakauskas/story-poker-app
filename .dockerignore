@@ -1,0 +1,122 @@
+# flyctl launch added from .gitignore
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+**/node_modules
+**/.pnp
+**/.pnp.js
+
+# testing
+**/coverage
+
+# next.js
+**/.next
+**/out
+**/build
+
+# misc
+**/.DS_Store
+**/*.pem
+
+# debug
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# local env files
+**/.env
+**/.env.local
+**/.env.development.local
+**/.env.test.local
+**/.env.production.local
+
+# turbo
+**/.turbo
+
+# vercel
+**/.vercel
+
+# flyctl launch added from apps/backend/.gitignore
+# compiled output
+apps/backend/dist
+apps/backend/node_modules
+
+# Logs
+apps/backend/**/logs
+apps/backend/**/*.log
+apps/backend/**/npm-debug.log*
+apps/backend/**/pnpm-debug.log*
+apps/backend/**/yarn-debug.log*
+apps/backend/**/yarn-error.log*
+apps/backend/**/lerna-debug.log*
+
+# OS
+apps/backend/**/.DS_Store
+
+# Tests
+apps/backend/coverage
+apps/backend/.nyc_output
+
+# IDEs and editors
+apps/backend/.idea
+apps/backend/**/.project
+apps/backend/**/.classpath
+apps/backend/**/.c9
+apps/backend/**/*.launch
+apps/backend/**/.settings
+apps/backend/**/*.sublime-workspace
+
+# IDE - VSCode
+apps/backend/**/.vscode/*
+!apps/backend/**/.vscode/settings.json
+!apps/backend/**/.vscode/tasks.json
+!apps/backend/**/.vscode/launch.json
+!apps/backend/**/.vscode/extensions.json
+
+# flyctl launch added from apps/frontend/.gitignore
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+apps/frontend/node_modules
+apps/frontend/.pnp
+apps/frontend/**/.pnp.js
+
+# testing
+apps/frontend/coverage
+
+# next.js
+apps/frontend/.next
+apps/frontend/out
+
+# production
+apps/frontend/build
+
+# misc
+apps/frontend/**/.DS_Store
+apps/frontend/**/*.pem
+
+# debug
+apps/frontend/**/npm-debug.log*
+apps/frontend/**/yarn-debug.log*
+apps/frontend/**/yarn-error.log*
+
+# local env files
+apps/frontend/**/.env.local
+apps/frontend/**/.env.development.local
+apps/frontend/**/.env.test.local
+apps/frontend/**/.env.production.local
+
+# vercel
+apps/frontend/**/.vercel
+
+# flyctl launch added from node_modules/.pnpm/tailwindcss@3.3.2/node_modules/tailwindcss/stubs/.gitignore
+!node_modules/.pnpm/tailwindcss@3.3.2/node_modules/tailwindcss/stubs/**/*
+fly.toml
+
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions

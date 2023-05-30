@@ -8,8 +8,8 @@
     "lint": "eslint \"**/*.ts*\""
   },
   "devDependencies": {
-    "eslint-config-custom": "workspace:*",
-    "tsconfig": "workspace:*",
+    "eslint-config-custom": "*",
+    "tsconfig": "*",
     "typescript": "^5.0.4"
   }
 }
