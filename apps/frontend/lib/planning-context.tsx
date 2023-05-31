@@ -156,7 +156,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
       unsubConnected();
       unsubDisconnected();
     };
-  }, [app]);
+  }, [app, toast]);
 
   return (
     <PlanningContext.Provider

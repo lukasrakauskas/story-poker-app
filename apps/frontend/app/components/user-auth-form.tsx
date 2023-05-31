@@ -43,7 +43,7 @@ export function UserAuthForm({
     if (roomCode && pathname === "/") {
       router.replace(`/${roomCode}`);
     }
-  }, [roomCode]);
+  }, [roomCode, pathname, router]);
 
   return (
     <div className={cn("grid gap-6", className)} {...props}>

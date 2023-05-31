@@ -2,17 +2,19 @@ import Link from "next/link";
 
 import { UserAuthForm } from "./user-auth-form";
 
-export function NameSelect({ title, action }: { title: string, action: string }) {
+export function NameSelect({
+  title,
+  action,
+}: {
+  title: string;
+  action: string;
+}) {
   return (
     <div className="p-4 flex items-center justify-center min-h-screen">
       <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
         <div className="flex flex-col space-y-2 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {title}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Enter your name below
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <p className="text-sm text-muted-foreground">Enter your name below</p>
         </div>
         <UserAuthForm action={action} />
         <p className="px-8 text-center text-sm text-muted-foreground">

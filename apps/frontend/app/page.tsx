@@ -1,5 +1,5 @@
 import { Metadata } from "next";
-import {NameSelect} from "./components/name-select";
+import { NameSelect } from "./components/name-select";
 
 export const metadata: Metadata = {
   title: "Story Poker",
@@ -7,7 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function Home() {
-  return (
-    <NameSelect title="Create a planning room" action="Create room" />
-  );
+  return <NameSelect title="Create a planning room" action="Create room" />;
 }

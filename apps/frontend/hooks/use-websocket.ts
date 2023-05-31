@@ -8,7 +8,6 @@ declare global {
   }
 }
 
-
 export function useWebsocket(url: string) {
   const client = useRef<WebSocket | null>(null);
 
@@ -39,12 +38,13 @@ export function useWebsocket(url: string) {
     client.current?.send(data);
   }
 
-  type Off = NonNullable<typeof client.current>['addEventListener']
-  type On = NonNullable<typeof client.current>['removeEventListener']
+  type Off = NonNullable<typeof client.current>["addEventListener"];
+  type On = NonNullable<typeof client.current>["removeEventListener"];
 
   return {
     send,
     on: (...args: Parameters<On>) => client.current?.addEventListener(...args),
-    off: (...args: Parameters<Off>) => client.current?.removeEventListener(...args),
+    off: (...args: Parameters<Off>) =>
+      client.current?.removeEventListener(...args),
   };
 }

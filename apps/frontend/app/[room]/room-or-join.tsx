@@ -16,11 +16,11 @@ export default function RoomOrJoin({
 
   useEffect(() => {
     setRoomCode(room);
-  }, [room]);
+  }, [room, setRoomCode]);
 
   useEffect(() => {
     setAvatars(avatars);
-  }, [avatars]);
+  }, [avatars, setAvatars]);
 
   if (currentUser == null) {
     return <NameSelect title="Join a planning room" action="Join room" />;
