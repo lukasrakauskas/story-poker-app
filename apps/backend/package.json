@@ -29,7 +29,7 @@
     "nanoid": "^3.0.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.2.0",
-    "shared": "workspace:*",
+    "shared": "*",
     "socket.io": "^4.6.1",
     "ws": "^8.13.0"
   },
@@ -54,7 +54,7 @@
     "ts-jest": "29.1.0",
     "ts-loader": "^9.2.3",
     "ts-node": "^10.0.0",
-    "tsconfig": "workspace:*",
+    "tsconfig": "*",
     "tsconfig-paths": "4.2.0",
     "typescript": "^5.0.0"
   },

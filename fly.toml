@@ -1,0 +1,17 @@
+# fly.toml app configuration file generated for story-poker-backend on 2023-05-30T21:00:53+03:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = "story-poker-backend"
+primary_region = "ams"
+
+[build]
+  dockerfile = "./apps/backend/Dockerfile"
+
+[http_service]
+  internal_port = 4000 
+  force_https = true
+  # auto_stop_machines = true
+  # auto_start_machines = true
+  min_machines_running = 0
