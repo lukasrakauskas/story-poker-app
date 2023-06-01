@@ -20,19 +20,12 @@ import {
 import { Separator } from "ui/components/separator";
 import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { MurmurHash3, SimpleFastCounter32 } from "../../../lib/random";
+import { useEffect, useRef, useState } from "react";
 
 export function InviteToRoom() {
   const [copied, setCopied] = useState(false);
-  const {
-    users,
-    currentUser,
-    planningState,
-    changePlanningState,
-    avatars,
-    roomCode,
-  } = usePlanning();
+  const { users, currentUser, planningState, changePlanningState } =
+    usePlanning();
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const handleCopyLink = () => {
@@ -47,16 +40,6 @@ export function InviteToRoom() {
   useEffect(() => {
     return () => clearTimeout(timerRef.current);
   }, []);
-
-  const avatar = useMemo(() => {
-    const generateSeed = MurmurHash3(`${roomCode}+${currentUser?.id}`);
-    const generateRandomNumber = SimpleFastCounter32(
-      generateSeed(),
-      generateSeed()
-    );
-
-    return avatars[Math.floor(generateRandomNumber() * avatars.length)];
-  }, [roomCode, currentUser, avatars]);
 
   return (
     <Card>
@@ -93,8 +76,8 @@ export function InviteToRoom() {
                 >
                   <div className="flex items-center space-x-4">
                     <Avatar>
-                      <AvatarImage src={`/avatars/${avatar}`} />
-                      <AvatarFallback>OM</AvatarFallback>
+                      <AvatarImage src={`/avatars/${user.avatar}`} />
+                      <AvatarFallback>{user.name}</AvatarFallback>
                     </Avatar>
                     <div>
                       <p
