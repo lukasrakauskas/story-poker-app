@@ -10,23 +10,26 @@ import {
 import { User, useAppEvents } from "../hooks/use-app-events";
 import { useToast } from "ui/hooks/use-toast";
 import { ToastAction } from "ui/components/toast";
+import { MurmurHash3, SimpleFastCounter32 } from "./random";
+
+interface UserWithAvatar extends User {
+  avatar: string;
+}
 
 interface PlanningData {
   isConnected: boolean;
-  users: User[];
+  users: UserWithAvatar[];
   currentUser: User | null;
   vote: string | null;
   planningState?: "voting" | "results";
   results: Record<string, number>;
   roomCode: string;
-  avatars: string[];
 
   setRoomCode: (room: string) => void;
   createRoom: (name: string) => void;
   joinRoom: (name: string, room: string) => void;
   castVote: (vote: string) => void;
   changePlanningState: () => void;
-  setAvatars: (avatars: string[]) => void;
 }
 
 export const PlanningContext = createContext<PlanningData>({
@@ -36,24 +39,27 @@ export const PlanningContext = createContext<PlanningData>({
   vote: null,
   results: {},
   roomCode: "",
-  avatars: [],
   setRoomCode: () => {},
   createRoom: () => {},
   joinRoom: () => {},
   castVote: () => {},
   changePlanningState: () => {},
-  setAvatars: () => {},
 });
 
-export function PlanningProvider({ children }: { children: ReactNode }) {
+export function PlanningProvider({
+  children,
+  avatars,
+}: {
+  children: ReactNode;
+  avatars: string[];
+}) {
   const [isConnected, setIsConnected] = useState(false);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<UserWithAvatar[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [vote, setVote] = useState<string | null>(null);
   const [planningState, setPlanningState] = useState<"voting" | "results">();
   const [results, setResults] = useState<Record<string, number>>({});
   const [roomCode, setRoomCode] = useState("");
-  const [avatars, setAvatars] = useState<string[]>([]);
 
   const app = useAppEvents();
   const { toast } = useToast();
@@ -92,13 +98,13 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubRoomJoined = app.on("room-joined", (data) => {
       setPlanningState(data.state);
-      setUsers(data.users);
+      setUsers(data.users.map((user) => makeUserWithAvatar(user, avatars)));
       setRoomCode(data.code);
       setCurrentUser(data.user);
     });
 
     const unsubUserJoined = app.on("user-joined", (data) => {
-      setUsers((prev) => [...prev, data.user]);
+      setUsers((prev) => [...prev, makeUserWithAvatar(data.user, avatars)]);
     });
 
     const unsubUserLeft = app.on("user-left", (data) => {
@@ -156,7 +162,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
       unsubConnected();
       unsubDisconnected();
     };
-  }, [app, toast]);
+  }, [app, toast, avatars]);
 
   return (
     <PlanningContext.Provider
@@ -168,13 +174,11 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
         planningState,
         results,
         roomCode,
-        avatars,
         setRoomCode,
         createRoom,
         joinRoom,
         castVote,
         changePlanningState,
-        setAvatars,
       }}
     >
       {children}
@@ -183,3 +187,18 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
 }
 
 export const usePlanning = () => useContext(PlanningContext);
+
+function makeUserWithAvatar(user: User, avatars: string[]): UserWithAvatar {
+  const generateSeed = MurmurHash3(user.id);
+  const generateRandomNumber = SimpleFastCounter32(
+    generateSeed(),
+    generateSeed()
+  );
+
+  const avatar = avatars[Math.floor(generateRandomNumber() * avatars.length)];
+
+  return {
+    ...user,
+    avatar,
+  };
+}
