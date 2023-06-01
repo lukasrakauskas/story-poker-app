@@ -5,6 +5,8 @@ import {
   MessageBody,
   ConnectedSocket,
   OnGatewayDisconnect,
+  OnGatewayInit,
+  OnGatewayConnection,
 } from '@nestjs/websockets';
 import { Server, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
@@ -30,10 +32,38 @@ type ClientUser = Omit<User, 'vote'> & { voted: boolean };
   clientTracking: true,
   WebSocket: Client,
 })
-export class EventsGateway implements OnGatewayDisconnect<Client> {
+export class EventsGateway
+  implements
+    OnGatewayConnection<Client>,
+    OnGatewayDisconnect<Client>,
+    OnGatewayInit<Server<Client>>
+{
   @WebSocketServer()
   server: Server<Client>;
   rooms: Map<string, Room> = new Map();
+
+  afterInit(server: Server<Client>) {
+    setInterval(() => {
+      for (const client of server.clients) {
+        if (client.isAlive === false) {
+          return client.terminate();
+        }
+
+        client.isAlive = false;
+        client.send(JSON.stringify({ event: 'is-alive' }));
+      }
+    }, 7000);
+  }
+
+  handleConnection(client: Client) {
+    client.isAlive = true;
+    client.send(JSON.stringify({ event: 'is-alive' }));
+  }
+
+  @SubscribeMessage('keep-alive')
+  onKeepAlive(@ConnectedSocket() client: Client) {
+    client.isAlive = true;
+  }
 
   @SubscribeMessage('create-room')
   onCreateRoom(

@@ -48,6 +48,10 @@ const serverEventsSchema = z.discriminatedUnion("event", [
     event: z.literal("results-revealed"),
     data: z.record(z.number()),
   }),
+  z.object({
+    event: z.literal("is-alive"),
+    data: z.null().optional(),
+  }),
 ]);
 
 type ServerEvents = z.infer<typeof serverEventsSchema>;
@@ -64,6 +68,7 @@ type ClientEvents = {
   "cast-vote": { vote: string };
   "start-voting": undefined;
   "reveal-results": undefined;
+  "keep-alive": undefined;
 };
 
 export function useAppEvents() {
