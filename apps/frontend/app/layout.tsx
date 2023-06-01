@@ -1,8 +1,8 @@
-import { PlanningProvider } from "../lib/planning-context";
 import "./styles.css";
 import path from "path";
 import fs from "fs/promises";
 import { Inter } from "next/font/google";
+import Providers from "./providers";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -22,7 +22,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <PlanningProvider avatars={avatars}>{children}</PlanningProvider>
+        <Providers avatars={avatars}>{children}</Providers>
       </body>
     </html>
   );
