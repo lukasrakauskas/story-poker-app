@@ -96,6 +96,10 @@ export function PlanningProvider({
   };
 
   useEffect(() => {
+    const unsubIsAlive = app.on("is-alive", () => {
+      app.send("keep-alive");
+    });
+
     const unsubRoomJoined = app.on("room-joined", (data) => {
       setPlanningState(data.state);
       setUsers(data.users.map((user) => makeUserWithAvatar(user, avatars)));
@@ -153,6 +157,7 @@ export function PlanningProvider({
     });
 
     return () => {
+      unsubIsAlive();
       unsubRoomJoined();
       unsubUserJoined();
       unsubUserLeft();

@@ -32,7 +32,7 @@ export function useWebsocket(url: string) {
         client.current?.close();
       }
     };
-  }, []);
+  }, [url]);
 
   function send(data: string) {
     client.current?.send(data);
