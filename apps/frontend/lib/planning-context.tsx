@@ -126,12 +126,15 @@ export function PlanningProvider({
     const unsubVotingStarted = app.on("voting-started", () => {
       setPlanningState("voting");
       setResults({});
-      setUsers((prev) => prev.map((it) => ({ ...it, voted: false })));
+      setUsers((prev) =>
+        prev.map((it) => ({ ...it, voted: false, vote: null }))
+      );
     });
 
     const unsubResultsRevealed = app.on("results-revealed", (data) => {
       setPlanningState("results");
-      setResults(data);
+      setResults(data.results);
+      setUsers(data.users.map((user) => makeUserWithAvatar(user, avatars)));
       setVote(null);
     });
 

@@ -21,6 +21,7 @@ import { Separator } from "ui/components/separator";
 import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
 import { useEffect, useRef, useState } from "react";
+import { Icons } from "ui/icons";
 
 export function InviteToRoom() {
   const [copied, setCopied] = useState(false);
@@ -88,22 +89,12 @@ export function InviteToRoom() {
                       >
                         {user.name}
                       </p>
-                      <p className="text-sm leading-none">
-                        {user.voted ? "has voted" : "currently voting"}
-                      </p>
                     </div>
                   </div>
-                  {currentUser?.role === "mod" && false && (
-                    <Select defaultValue="edit">
-                      <SelectTrigger className="ml-auto w-[110px]">
-                        <SelectValue placeholder="Select" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="edit">Can edit</SelectItem>
-                        <SelectItem value="view">Can view</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
+                  <p className="text-sm leading-none">
+                    {user.vote ??
+                      (user.voted ? <Icons.voted /> : <Icons.voting />)}
+                  </p>
                 </div>
               );
             })}

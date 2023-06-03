@@ -25,7 +25,7 @@ interface Room {
   state: 'voting' | 'results';
 }
 
-type ClientUser = Omit<User, 'vote'> & { voted: boolean };
+type ClientUser = Omit<User, 'vote'> & { voted: boolean; vote?: string | null };
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -174,7 +174,7 @@ export class EventsGateway
       return { event: 'user-not-mod', data: null };
     }
 
-    const data = room.users.reduce((it, current) => {
+    const results = room.users.reduce((it, current) => {
       if (current.vote == null) {
         return it;
       }
@@ -185,9 +185,14 @@ export class EventsGateway
       };
     }, {});
 
+    const users = room.users.map(this.mapUser);
+
     room.users = room.users.map((it) => ({ ...it, vote: null }));
     room.state = 'results';
-    this.notifyRoom(room, { event: 'results-revealed', data });
+    this.notifyRoom(room, {
+      event: 'results-revealed',
+      data: { results, users },
+    });
   }
 
   @SubscribeMessage('cast-vote')
@@ -260,6 +265,15 @@ export class EventsGateway
     return {
       ...userData,
       voted: !!vote,
+    };
+  }
+
+  private mapUser(user: User): ClientUser {
+    const { vote, ...userData } = user;
+    return {
+      ...userData,
+      voted: !!vote,
+      vote,
     };
   }
 
