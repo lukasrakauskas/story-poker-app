@@ -34,8 +34,8 @@ export function Cards() {
         <button key={card} onClick={() => castVote(card)}>
           <Card
             className={cn(
-              "flex items-center justify-center aspect-[4/5] text-5xl hover:bg-gray-100",
-              vote === card && "border-gray-400"
+              "flex items-center justify-center aspect-[4/5] text-5xl hover:bg-card-hover",
+              vote === card && "border-card-selected"
             )}
           >
             {card}

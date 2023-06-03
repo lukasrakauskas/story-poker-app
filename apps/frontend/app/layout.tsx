@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs/promises";
 import { Inter } from "next/font/google";
 import Providers from "./providers";
+import { SiteHeader } from "../components/site-header";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -22,7 +23,10 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Providers avatars={avatars}>{children}</Providers>
+        <Providers avatars={avatars}>
+          <SiteHeader />
+          {children}
+        </Providers>
       </body>
     </html>
   );
