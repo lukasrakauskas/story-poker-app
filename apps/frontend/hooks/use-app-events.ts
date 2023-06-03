@@ -8,6 +8,7 @@ const userSchema = z.object({
   name: z.string(),
   voted: z.boolean(),
   role: z.enum(["user", "mod"]),
+  vote: z.string().nullable().optional(),
 });
 
 export type User = z.infer<typeof userSchema>;
@@ -46,7 +47,10 @@ const serverEventsSchema = z.discriminatedUnion("event", [
   }),
   z.object({
     event: z.literal("results-revealed"),
-    data: z.record(z.number()),
+    data: z.object({
+      results: z.record(z.number()),
+      users: userSchema.array(),
+    }),
   }),
   z.object({
     event: z.literal("is-alive"),
