@@ -1,9 +1,8 @@
 import "./styles.css";
-import path from "path";
-import fs from "fs/promises";
 import { Inter } from "next/font/google";
 import Providers from "./providers";
 import { SiteHeader } from "../components/site-header";
+import { getBaseUrl } from "../lib/utils";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -17,12 +16,9 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const publicDir = path.join(
-    process.env.PROJECT_ROOT ?? "",
-    "public",
-    "avatars"
-  );
-  const avatars = await fs.readdir(publicDir);
+  const baseUrl = getBaseUrl();
+  const response = await fetch(`${baseUrl}/api`, { cache: "no-cache" });
+  const { avatars } = await response.json();
 
   return (
     <html lang="en" suppressHydrationWarning>
