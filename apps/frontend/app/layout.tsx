@@ -4,9 +4,7 @@ import fs from "fs/promises";
 import { Inter } from "next/font/google";
 import Providers from "./providers";
 import { SiteHeader } from "../components/site-header";
-import getConfig from "next/config";
 
-const { serverRuntimeConfig } = getConfig();
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
@@ -20,7 +18,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const publicDir = path.join(
-    serverRuntimeConfig.projectRoot,
+    process.env.PROJECT_ROOT ?? "",
     "public",
     "avatars"
   );
