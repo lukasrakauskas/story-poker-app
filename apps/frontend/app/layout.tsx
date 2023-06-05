@@ -21,7 +21,7 @@ export default async function RootLayout({
   const avatars = await fs.readdir(publicDir);
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <Providers avatars={avatars}>
           <SiteHeader />

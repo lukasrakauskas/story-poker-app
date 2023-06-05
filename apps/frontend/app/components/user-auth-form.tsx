@@ -9,7 +9,6 @@ import { Label } from "ui/components/label";
 import { Icons } from "ui/icons";
 import { usePlanning } from "../../lib/planning-context";
 import { usePathname, useRouter } from "next/navigation";
-import { useAppEvents } from "../../hooks/use-app-events";
 
 interface UserAuthFormProps extends React.HTMLAttributes<HTMLDivElement> {
   action: string;
@@ -22,15 +21,13 @@ export function UserAuthForm({
 }: UserAuthFormProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isConnected } = usePlanning();
+  const { state } = usePlanning();
   const [name, setName] = React.useState("");
-  const [isLoading, setIsLoading] = React.useState<boolean>(false);
 
   const { createRoom, joinRoom, roomCode } = usePlanning();
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault();
-    setIsLoading(true);
 
     if (!roomCode) {
       createRoom(name);
@@ -45,6 +42,8 @@ export function UserAuthForm({
     }
   }, [roomCode, pathname, router]);
 
+  const isLoading = state === "connecting" || state === "joining";
+
   return (
     <div className={cn("grid gap-6", className)} {...props}>
       <form onSubmit={onSubmit}>
@@ -58,15 +57,15 @@ export function UserAuthForm({
               type="text"
               autoCapitalize="none"
               autoCorrect="off"
-              disabled={isLoading}
+              disabled={state === "connecting" || state === "joining"}
               onChange={(event) => setName(event.target.value)}
             />
           </div>
-          <Button disabled={isLoading || !isConnected}>
+          <Button disabled={isLoading}>
             {isLoading && (
               <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
             )}
-            {!isConnected ? "Connecting..." : action}
+            {state === "connecting" ? "Connecting..." : action}
           </Button>
         </div>
       </form>
