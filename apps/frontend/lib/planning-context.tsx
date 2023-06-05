@@ -16,8 +16,15 @@ interface UserWithAvatar extends User {
   avatar: string;
 }
 
+export type State =
+  | "connecting"
+  | "connected"
+  | "joining"
+  | "joined"
+  | "disconnected";
+
 interface PlanningData {
-  isConnected: boolean;
+  state: State;
   users: UserWithAvatar[];
   currentUser: User | null;
   vote: string | null;
@@ -33,7 +40,7 @@ interface PlanningData {
 }
 
 export const PlanningContext = createContext<PlanningData>({
-  isConnected: false,
+  state: "connecting",
   users: [],
   currentUser: null,
   vote: null,
@@ -53,7 +60,7 @@ export function PlanningProvider({
   children: ReactNode;
   avatars: string[];
 }) {
-  const [isConnected, setIsConnected] = useState(false);
+  const [state, setState] = useState<State>("connecting");
   const [users, setUsers] = useState<UserWithAvatar[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [vote, setVote] = useState<string | null>(null);
@@ -64,11 +71,17 @@ export function PlanningProvider({
   const app = useAppEvents();
   const { toast } = useToast();
 
+  useEffect(() => {
+    console.log({ state });
+  }, [state]);
+
   const createRoom = (name: string) => {
+    setState("joining");
     app.send("create-room", { name });
   };
 
   const joinRoom = (name: string, room: string) => {
+    setState("joining");
     app.send("join-room", { name, room });
   };
 
@@ -101,6 +114,7 @@ export function PlanningProvider({
     });
 
     const unsubRoomJoined = app.on("room-joined", (data) => {
+      setState("joined");
       setPlanningState(data.state);
       setUsers(data.users.map((user) => makeUserWithAvatar(user, avatars)));
       setRoomCode(data.code);
@@ -139,11 +153,11 @@ export function PlanningProvider({
     });
 
     const unsubConnected = app.on("connected", () => {
-      setIsConnected(true);
+      setState("connected");
     });
 
     const unsubDisconnected = app.on("disconnected", () => {
-      setIsConnected(false);
+      setState("disconnected");
       reset();
       toast({
         title: "Uh oh! Something went wrong.",
@@ -159,6 +173,24 @@ export function PlanningProvider({
       });
     });
 
+    const unsubNameTaken = app.on("name-taken", () => {
+      setState("connected");
+      toast({
+        title: "Uh oh! Name is taken.",
+        description: "Please choose a different name",
+        variant: "destructive",
+      });
+    });
+
+    const unsubRoomNotFound = app.on("room-not-found", () => {
+      setState("connected");
+      toast({
+        title: "Uh oh! Room not found.",
+        description: "Please check if you got correct room URL.",
+        variant: "destructive",
+      });
+    });
+
     return () => {
       unsubIsAlive();
       unsubRoomJoined();
@@ -169,13 +201,15 @@ export function PlanningProvider({
       unsubResultsRevealed();
       unsubConnected();
       unsubDisconnected();
+      unsubNameTaken();
+      unsubRoomNotFound();
     };
   }, [app, toast, avatars]);
 
   return (
     <PlanningContext.Provider
       value={{
-        isConnected,
+        state,
         users,
         currentUser,
         vote,

@@ -1,7 +1,7 @@
 "use client";
 
 import { ThemeProvider } from "next-themes";
-import { ToastProvider } from "ui/components/toast";
+import { Toaster } from "ui/components/toaster";
 import { PlanningProvider } from "../lib/planning-context";
 
 export default function Providers({
@@ -13,9 +13,8 @@ export default function Providers({
 }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-      <ToastProvider>
-        <PlanningProvider avatars={avatars}>{children}</PlanningProvider>
-      </ToastProvider>
+      <PlanningProvider avatars={avatars}>{children}</PlanningProvider>
+      <Toaster />
     </ThemeProvider>
   );
 }

@@ -1,6 +1,4 @@
 import "./styles.css";
-import path from "path";
-import fs from "fs/promises";
 import { Inter } from "next/font/google";
 import Providers from "./providers";
 import { SiteHeader } from "../components/site-header";
@@ -17,11 +15,15 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const publicDir = path.join(process.cwd(), "public", "avatars");
-  const avatars = await fs.readdir(publicDir);
+  const avatars = [
+    "cat-jam.webp",
+    "gigachad.webp",
+    "nerdge.webp",
+    "peepo-shy.webp",
+  ];
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <Providers avatars={avatars}>
           <SiteHeader />

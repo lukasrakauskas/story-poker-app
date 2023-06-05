@@ -56,6 +56,14 @@ const serverEventsSchema = z.discriminatedUnion("event", [
     event: z.literal("is-alive"),
     data: z.null().optional(),
   }),
+  z.object({
+    event: z.literal("room-not-found"),
+    data: z.null().optional(),
+  }),
+  z.object({
+    event: z.literal("name-taken"),
+    data: z.null().optional(),
+  }),
 ]);
 
 type ServerEvents = z.infer<typeof serverEventsSchema>;
