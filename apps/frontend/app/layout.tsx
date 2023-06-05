@@ -2,7 +2,6 @@ import "./styles.css";
 import { Inter } from "next/font/google";
 import Providers from "./providers";
 import { SiteHeader } from "../components/site-header";
-import { getBaseUrl } from "../lib/utils";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -16,9 +15,12 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const baseUrl = getBaseUrl();
-  const response = await fetch(`${baseUrl}/api`, { cache: "no-cache" });
-  const { avatars } = await response.json();
+  const avatars = [
+    "cat-jam.webp",
+    "gigachad.webp",
+    "nerdge.webp",
+    "peepo-shy.webp",
+  ];
 
   return (
     <html lang="en" suppressHydrationWarning>
