@@ -2,6 +2,7 @@ import "./styles.css";
 import { Inter } from "next/font/google";
 import Providers from "./providers";
 import { SiteHeader } from "../components/site-header";
+import avatars from "./avatars.json";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -15,13 +16,6 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const avatars = [
-    "cat-jam.webp",
-    "gigachad.webp",
-    "nerdge.webp",
-    "peepo-shy.webp",
-  ];
-
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
