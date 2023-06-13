@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "prebuild": "tsx ./scripts/runner.ts"
   },
   "dependencies": {
     "@react-spring/web": "^9.7.2",
