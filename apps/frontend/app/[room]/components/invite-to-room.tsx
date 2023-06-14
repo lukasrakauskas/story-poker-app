@@ -10,13 +10,6 @@ import {
   CardTitle,
 } from "ui/components/card";
 import { Input } from "ui/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "ui/components/select";
 import { Separator } from "ui/components/separator";
 import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
@@ -25,7 +18,7 @@ import { Icons } from "ui/icons";
 
 export function InviteToRoom() {
   const [copied, setCopied] = useState(false);
-  const { users, currentUser, planningState, changePlanningState } =
+  const { users, currentUser, planningState, changePlanningState, roomCode } =
     usePlanning();
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -42,6 +35,8 @@ export function InviteToRoom() {
     return () => clearTimeout(timerRef.current);
   }, []);
 
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+
   return (
     <Card>
       <CardHeader>
@@ -52,10 +47,7 @@ export function InviteToRoom() {
       </CardHeader>
       <CardContent>
         <div className="flex space-x-2">
-          <Input
-            value={typeof window !== "undefined" ? window.location.href : ""}
-            readOnly
-          />
+          <Input value={`${origin}/${roomCode}`} readOnly />
           <Button
             variant="secondary"
             className="shrink-0"
