@@ -21,17 +21,20 @@
   },
   "dependencies": {
     "@nestjs/common": "^9.0.0",
+    "@nestjs/config": "^3.0.0",
     "@nestjs/core": "^9.0.0",
     "@nestjs/platform-express": "^9.0.0",
     "@nestjs/platform-socket.io": "^9.4.1",
     "@nestjs/platform-ws": "^9.4.1",
     "@nestjs/websockets": "^9.4.1",
+    "@trpc/server": "^10.32.0",
     "nanoid": "^3.0.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.2.0",
     "shared": "*",
     "socket.io": "^4.6.1",
-    "ws": "^8.13.0"
+    "ws": "^8.13.0",
+    "zod": "^3.21.4"
   },
   "devDependencies": {
     "@nestjs/cli": "^9.0.0",

@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@react-spring/web": "^9.7.2",
+    "@trpc/client": "^10.32.0",
+    "@trpc/server": "^10.32.0",
     "@visx/gradient": "^3.0.0",
     "@visx/group": "^3.0.0",
     "@visx/mock-data": "^3.0.0",
@@ -18,6 +20,7 @@
     "@visx/scale": "^3.0.0",
     "@visx/shape": "^3.0.0",
     "autoprefixer": "^10.4.14",
+    "backend": "*",
     "bufferutil": "^4.0.7",
     "next": "^13.4.1",
     "next-themes": "^0.2.1",
