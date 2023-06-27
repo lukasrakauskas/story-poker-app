@@ -9,6 +9,7 @@ import { Label } from "ui/components/label";
 import { Icons } from "ui/icons";
 import { usePlanning } from "../../lib/planning-context";
 import { usePathname, useRouter } from "next/navigation";
+import { trpc } from "../../trpc";
 
 interface UserAuthFormProps extends React.HTMLAttributes<HTMLDivElement> {
   action: string;
@@ -24,13 +25,15 @@ export function UserAuthForm({
   const { state } = usePlanning();
   const [name, setName] = React.useState("");
 
+  console.log();
+
   const { createRoom, joinRoom, roomCode } = usePlanning();
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault();
 
     if (!roomCode) {
-      createRoom(name);
+      await createRoom(name);
     } else {
       joinRoom(name, roomCode);
     }

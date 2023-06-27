@@ -11,6 +11,7 @@ import { User, useAppEvents } from "../hooks/use-app-events";
 import { useToast } from "ui/hooks/use-toast";
 import { ToastAction } from "ui/components/toast";
 import { MurmurHash3, SimpleFastCounter32 } from "./random";
+import { trpc } from "../trpc";
 
 interface UserWithAvatar extends User {
   avatar: string;
@@ -33,7 +34,7 @@ interface PlanningData {
   roomCode: string;
 
   setRoomCode: (room: string) => void;
-  createRoom: (name: string) => void;
+  createRoom: (name: string) => Promise<void>;
   joinRoom: (name: string, room: string) => void;
   castVote: (vote: string) => void;
   changePlanningState: () => void;
@@ -47,7 +48,7 @@ export const PlanningContext = createContext<PlanningData>({
   results: {},
   roomCode: "",
   setRoomCode: () => {},
-  createRoom: () => {},
+  createRoom: async () => {},
   joinRoom: () => {},
   castVote: () => {},
   changePlanningState: () => {},
@@ -75,9 +76,13 @@ export function PlanningProvider({
     console.log({ state });
   }, [state]);
 
-  const createRoom = (name: string) => {
+  const createRoom = async (name: string) => {
     setState("joining");
-    app.send("create-room", { name });
+    // app.send("create-room", { name });
+    const { code } = await trpc.room.create.mutate({ name });
+    setState("joined");
+
+    setRoomCode(code);
   };
 
   const joinRoom = (name: string, room: string) => {

@@ -5,7 +5,7 @@ import {
   loggerLink,
   wsLink,
 } from "@trpc/client";
-import { AppRouter } from "backend/src/trpc/trpc.router";
+import { AppRouter } from "backend/src/trpc-router/trpc.router";
 
 const wsClient = createWSClient({
   url: () => {
@@ -25,6 +25,12 @@ export const trpc = createTRPCProxyClient<AppRouter>({
     }),
     httpBatchLink({
       url: `${process.env.NEXT_PUBLIC_API_URL}/trpc`,
+      fetch(url, options) {
+        return fetch(url, {
+          ...options,
+          credentials: "include",
+        });
+      },
     }),
     wsLink({
       client: wsClient,

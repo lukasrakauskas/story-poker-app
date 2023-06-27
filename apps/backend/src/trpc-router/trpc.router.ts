@@ -1,13 +1,17 @@
 import { INestApplication, Injectable, Logger } from '@nestjs/common';
 import { z } from 'zod';
-import { TrpcService } from './trpc.service';
 import * as trpcExpress from '@trpc/server/adapters/express';
 import { applyWSSHandler } from '@trpc/server/adapters/ws';
 import ws from 'ws';
+import { RoomRouter } from 'src/room/room.router';
+import { TrpcService } from 'src/trpc/trpc.service';
 
 @Injectable()
 export class TrpcRouter {
-  constructor(private readonly trpc: TrpcService) {}
+  constructor(
+    private readonly trpc: TrpcService,
+    private readonly roomRouter: RoomRouter,
+  ) {}
 
   appRouter = this.trpc.router({
     hello: this.trpc.procedure
@@ -22,6 +26,7 @@ export class TrpcRouter {
           greeting: `Hello ${name ? name : `Bilbo`}`,
         };
       }),
+    room: this.roomRouter.router,
   });
 
   async applyMiddleware(app: INestApplication) {
@@ -29,6 +34,7 @@ export class TrpcRouter {
       `/trpc`,
       trpcExpress.createExpressMiddleware({
         router: this.appRouter,
+        createContext: this.trpc.createContext,
       }),
     );
   }
@@ -37,7 +43,11 @@ export class TrpcRouter {
     const wss = new ws.Server({
       server: app.getHttpServer(),
     });
-    const handler = applyWSSHandler({ wss, router: this.appRouter });
+    const handler = applyWSSHandler({
+      wss,
+      router: this.appRouter,
+      createContext: this.trpc.createContext,
+    });
 
     wss.on('connection', (ws) => {
       Logger.log(`➕➕ Connection (${wss.clients.size})`);
@@ -57,4 +67,4 @@ export class TrpcRouter {
   }
 }
 
-export type AppRouter = TrpcRouter[`appRouter`];
+export type AppRouter = TrpcRouter['appRouter'];
