@@ -116,18 +116,10 @@ export class EventsGateway
     const user = this.createUser(client.id, data.name);
     client.roomId = room.code;
 
-    const userIds = room.users.map((it) => it.id);
-
-    for (const client of this.server.clients) {
-      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
-        client.send(
-          JSON.stringify({
-            event: 'user-joined',
-            data: { user: this.hideUserVote(user) },
-          }),
-        );
-      }
-    }
+    this.notifyRoom(room, {
+      event: 'user-joined',
+      data: { user: this.hideUserVote(user) },
+    });
 
     room.users.push(user);
 
@@ -153,17 +145,10 @@ export class EventsGateway
 
     user.status = 'connected';
 
-    const userIds = room.users.map((it) => it.id);
-    for (const client of this.server.clients) {
-      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
-        client.send(
-          JSON.stringify({
-            event: 'user-joined',
-            data: { user: this.hideUserVote(user) },
-          }),
-        );
-      }
-    }
+    this.notifyRoom(room, {
+      event: 'user-joined',
+      data: { user: this.hideUserVote(user) },
+    });
 
     room.users = room.users.map((it) =>
       it.id === user.id ? { ...it, status: 'connected' } : it,
