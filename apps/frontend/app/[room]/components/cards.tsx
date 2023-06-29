@@ -17,7 +17,6 @@ export function Cards() {
         value,
       }))
       .filter((it) => it.value !== 0);
-    console.log(displayResults);
 
     return (
       <ParentSize>

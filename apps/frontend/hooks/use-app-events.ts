@@ -9,7 +9,10 @@ const userSchema = z.object({
   voted: z.boolean(),
   role: z.enum(["user", "mod"]),
   vote: z.string().nullable().optional(),
+  status: z.enum(["connected", "disconnected"]),
 });
+
+const currentUserSchema = userSchema.merge(z.object({ token: z.string() }));
 
 export type User = z.infer<typeof userSchema>;
 
@@ -19,7 +22,7 @@ const serverEventsSchema = z.discriminatedUnion("event", [
     data: z.object({
       code: z.string(),
       users: userSchema.array(),
-      user: userSchema,
+      user: currentUserSchema,
       state: z.enum(["voting", "results"]),
     }),
   }),
@@ -81,6 +84,7 @@ type ClientEvents = {
   "start-voting": undefined;
   "reveal-results": undefined;
   "keep-alive": undefined;
+  reconnect: { token: string };
 };
 
 export function useAppEvents() {
@@ -100,7 +104,6 @@ export function useAppEvents() {
 
     const onMessage = (socketEvent: any) => {
       const parsedMessage = JSON.parse(socketEvent?.data ?? "");
-      console.log(parsedMessage);
       const { event, data } = serverEventsSchema.parse(parsedMessage);
       emitterRef.current.emit(event, data);
     };
@@ -123,5 +126,10 @@ export function useAppEvents() {
     socket.send(JSON.stringify({ event, data }));
   }
 
-  return { send, ...emitterRef.current };
+  return {
+    send,
+    ...emitterRef.current,
+    reconnect: socket.reconnect,
+    close: socket.close,
+  };
 }

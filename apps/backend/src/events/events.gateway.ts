@@ -11,12 +11,15 @@ import {
 import { Server, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
 import { Client } from './client.entity';
+import { omit } from 'radash';
 
 type User = {
   id: string;
   name: string;
   vote: string | null;
   role: 'user' | 'mod';
+  token: string;
+  status: 'connected' | 'disconnected';
 };
 
 interface Room {
@@ -25,7 +28,10 @@ interface Room {
   state: 'voting' | 'results';
 }
 
-type ClientUser = Omit<User, 'vote'> & { voted: boolean; vote?: string | null };
+type ClientUser = Omit<User, 'vote' | 'token'> & {
+  voted: boolean;
+  vote?: string | null;
+};
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -46,7 +52,9 @@ export class EventsGateway
     setInterval(() => {
       for (const client of server.clients) {
         if (client.isAlive === false) {
-          return client.terminate();
+          client.terminate();
+          this.handleDisconnect(client);
+          return;
         }
 
         client.isAlive = false;
@@ -86,7 +94,7 @@ export class EventsGateway
 
     return {
       event: 'room-joined',
-      data: { ...roomData, user: this.hideUserVote(user) },
+      data: { ...roomData, user: { ...user, voted: !!user.vote } },
     };
   }
 
@@ -127,7 +135,44 @@ export class EventsGateway
 
     return {
       event: 'room-joined',
-      data: { ...roomData, user: this.hideUserVote(user) },
+      data: { ...roomData, user: { ...user, voted: !!user.vote } },
+    };
+  }
+
+  @SubscribeMessage('reconnect')
+  onReconnect(@MessageBody() data: { token: string }) {
+    const { room, user } = this.findRoomAndUserByToken(data.token);
+
+    if (!room) {
+      return { event: 'room-not-found', data: null };
+    }
+
+    if (!user) {
+      return { event: 'user-not-found', data: null };
+    }
+
+    user.status = 'connected';
+
+    const userIds = room.users.map((it) => it.id);
+    for (const client of this.server.clients) {
+      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
+        client.send(
+          JSON.stringify({
+            event: 'user-joined',
+            data: { user: this.hideUserVote(user) },
+          }),
+        );
+      }
+    }
+
+    room.users = room.users.map((it) =>
+      it.id === user.id ? { ...it, status: 'connected' } : it,
+    );
+    const roomData = this.mapRoomUsers(room, this.hideUserVote);
+
+    return {
+      event: 'room-joined',
+      data: { ...roomData, user: { ...user, voted: !!user.vote } },
     };
   }
 
@@ -148,7 +193,11 @@ export class EventsGateway
       return;
     }
 
-    room.users = room.users.filter((it) => it.id !== leftUser.id);
+    user.status = 'disconnected';
+
+    room.users = room.users.map((it) =>
+      it.id === leftUser.id ? { ...it, status: 'disconnected' } : it,
+    );
 
     this.notifyRoom(room, {
       event: 'user-left',
@@ -257,23 +306,22 @@ export class EventsGateway
       name,
       vote: null,
       role: role ?? 'user',
+      token: nanoid(32),
+      status: 'connected',
     };
   }
 
   private hideUserVote(user: User): ClientUser {
-    const { vote, ...userData } = user;
     return {
-      ...userData,
-      voted: !!vote,
+      ...omit(user, ['token', 'vote']),
+      voted: !!user.vote,
     };
   }
 
   private mapUser(user: User): ClientUser {
-    const { vote, ...userData } = user;
     return {
-      ...userData,
-      voted: !!vote,
-      vote,
+      ...omit(user, ['token']),
+      voted: !!user.vote,
     };
   }
 
@@ -284,5 +332,17 @@ export class EventsGateway
       ...room,
       users,
     };
+  }
+
+  private findRoomAndUserByToken(token: string) {
+    for (const room of this.rooms.values()) {
+      for (const user of room.users) {
+        if (user.token === token) {
+          return { room, user };
+        }
+      }
+    }
+
+    return { room: null, user: null };
   }
 }

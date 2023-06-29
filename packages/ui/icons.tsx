@@ -27,6 +27,7 @@ import {
   Circle,
   CheckCircle,
   type Icon as LucideIcon,
+  Unplug,
 } from "lucide-react";
 
 export type Icon = LucideIcon;
@@ -71,4 +72,5 @@ export const Icons = {
   laptop: Laptop,
   voting: Circle,
   voted: CheckCircle,
+  disconnected: Unplug,
 };
