@@ -71,10 +71,6 @@ export function PlanningProvider({
   const app = useAppEvents();
   const { toast } = useToast();
 
-  useEffect(() => {
-    console.log({ state });
-  }, [state]);
-
   const createRoom = (name: string) => {
     setState("joining");
     app.send("create-room", { name });
@@ -119,14 +115,29 @@ export function PlanningProvider({
       setUsers(data.users.map((user) => makeUserWithAvatar(user, avatars)));
       setRoomCode(data.code);
       setCurrentUser(data.user);
+
+      localStorage.setItem("token", data.user.token);
+      localStorage.setItem("room", data.code);
     });
 
     const unsubUserJoined = app.on("user-joined", (data) => {
-      setUsers((prev) => [...prev, makeUserWithAvatar(data.user, avatars)]);
+      const newUser = makeUserWithAvatar(data.user, avatars);
+
+      setUsers((prev) => {
+        if (prev.some((it) => it.id === newUser.id)) {
+          return prev.map((it) => (it.id === newUser.id ? newUser : it));
+        }
+
+        return [...prev, newUser];
+      });
     });
 
     const unsubUserLeft = app.on("user-left", (data) => {
-      setUsers((prev) => prev.filter((it) => it.id !== data.user.id));
+      const newUser = makeUserWithAvatar(data.user, avatars);
+
+      setUsers((prev) =>
+        prev.map((it) => (it.id === data.user.id ? newUser : it))
+      );
     });
 
     const unsubUserVoted = app.on("user-voted", (data) => {
@@ -154,23 +165,21 @@ export function PlanningProvider({
 
     const unsubConnected = app.on("connected", () => {
       setState("connected");
+
+      const token = localStorage.getItem("token");
+      const room = localStorage.getItem("room");
+
+      if (token && room && window.location.pathname.endsWith(room)) {
+        app.send("reconnect", { token });
+
+        toast({
+          title: "Reconnected",
+        });
+      }
     });
 
     const unsubDisconnected = app.on("disconnected", () => {
-      setState("disconnected");
-      reset();
-      toast({
-        title: "Uh oh! Something went wrong.",
-        description: "There was a problem with your connection.",
-        action: (
-          <ToastAction
-            altText="Reload page"
-            onClick={() => window.location.reload()}
-          >
-            Reload page
-          </ToastAction>
-        ),
-      });
+      app.reconnect();
     });
 
     const unsubNameTaken = app.on("name-taken", () => {
@@ -183,6 +192,7 @@ export function PlanningProvider({
     });
 
     const unsubRoomNotFound = app.on("room-not-found", () => {
+      reset();
       setState("connected");
       toast({
         title: "Uh oh! Room not found.",
@@ -190,6 +200,12 @@ export function PlanningProvider({
         variant: "destructive",
       });
     });
+
+    const handleClose = () => {
+      app.close();
+    };
+
+    window.addEventListener("beforeunload", handleClose);
 
     return () => {
       unsubIsAlive();
@@ -203,6 +219,7 @@ export function PlanningProvider({
       unsubDisconnected();
       unsubNameTaken();
       unsubRoomNotFound();
+      window.removeEventListener("beforeunload", handleClose);
     };
   }, [app, toast, avatars]);
 

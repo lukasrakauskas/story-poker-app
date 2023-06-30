@@ -11,7 +11,7 @@ const getColor = scaleOrdinal({
     "fill-red-500 dark:fill-red-700",
     "fill-orange-500 dark:fill-orange-700",
     "fill-lime-500 dark:fill-lime-700",
-    "fill-green-500, dark:fill-green-700",
+    "fill-green-500 dark:fill-green-700",
     "fill-cyan-500 dark:fill-cyan-700",
     "fill-blue-500 dark:fill-blue-700",
     "fill-purple-500 dark:fill-purple-700",

@@ -84,8 +84,12 @@ export function InviteToRoom() {
                     </div>
                   </div>
                   <p className="text-sm leading-none">
-                    {user.vote ??
-                      (user.voted ? <Icons.voted /> : <Icons.voting />)}
+                    {user.status === "disconnected" ? (
+                      <Icons.disconnected />
+                    ) : (
+                      user.vote ??
+                      (user.voted ? <Icons.voted /> : <Icons.voting />)
+                    )}
                   </p>
                 </div>
               );
