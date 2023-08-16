@@ -1,5 +1,6 @@
 import "./styles.css";
 import { Inter } from "next/font/google";
+import { Analytics } from "@vercel/analytics/react"
 import Providers from "./providers";
 import { SiteHeader } from "../components/site-header";
 import avatars from "./avatars.json";
@@ -23,6 +24,7 @@ export default async function RootLayout({
           <SiteHeader />
           {children}
         </Providers>
+        <Analytics />
       </body>
     </html>
   );
