@@ -12,6 +12,12 @@ import { Server, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
 import { Client } from './client.entity';
 import { omit } from 'radash';
+import { z } from 'zod';
+
+const usernameSchema = z
+  .string()
+  .min(3, 'It must be at least 3 characters')
+  .max(30, 'That is a long username, might want to trim that!');
 
 type User = {
   id: string;
@@ -78,6 +84,15 @@ export class EventsGateway
     @ConnectedSocket() client: Client,
     @MessageBody() data: { name: string },
   ) {
+    const parsedUsername = usernameSchema.safeParse(data.name);
+
+    if (!parsedUsername.success) {
+      return {
+        event: 'bad-username',
+        data: { error: parsedUsername.error.format()._errors.join(', ') },
+      };
+    }
+
     const user = this.createUser(client.id, data.name, 'mod');
 
     const room: Room = {
@@ -111,6 +126,15 @@ export class EventsGateway
 
     if (room.users.find((it) => it.name === data.name)) {
       return { event: 'name-taken', data: null };
+    }
+
+    const parsedUsername = usernameSchema.safeParse(data.name);
+
+    if (!parsedUsername.success) {
+      return {
+        event: 'bad-username',
+        data: { error: parsedUsername.error.format()._errors.join(', ') },
+      };
     }
 
     const user = this.createUser(client.id, data.name);

@@ -32,7 +32,8 @@
     "rxjs": "^7.2.0",
     "shared": "*",
     "socket.io": "^4.6.1",
-    "ws": "^8.13.0"
+    "ws": "^8.13.0",
+    "zod": "^3.22.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^9.0.0",
