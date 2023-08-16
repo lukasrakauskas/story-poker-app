@@ -11,6 +11,17 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Story Poker",
   description: "Create a planning room",
+  openGraph: {
+    type: "website",
+    url: "https://story-poker.rake.lt",
+    title: "Story Poker",
+    siteName: "Story Poker",
+    images: [
+      {
+        url: "/og",
+      },
+    ],
+  },
 };
 
 export default async function RootLayout({
