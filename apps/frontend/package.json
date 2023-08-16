@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@react-spring/web": "^9.7.2",
+    "@vercel/analytics": "^1.0.2",
     "@visx/gradient": "^3.0.0",
     "@visx/group": "^3.0.0",
     "@visx/mock-data": "^3.0.0",
