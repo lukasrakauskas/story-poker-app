@@ -15,7 +15,18 @@ export const metadata: Metadata = {
     type: "website",
     url: "https://story-poker.rake.lt",
     title: "Story Poker",
+    description: "Create or join a planning room",
     siteName: "Story Poker",
+    images: [
+      {
+        url: "/og",
+      },
+    ],
+  },
+  twitter: {
+    title: "Story Poker",
+    description: "Create or join a planning room",
+    card: "summary_large_image",
     images: [
       {
         url: "/og",

@@ -16,7 +16,7 @@ export async function GET() {
       >
         <div
           style={{
-            right: 50,
+            right: 120,
             bottom: 72,
             position: "absolute",
             display: "flex",
@@ -38,7 +38,7 @@ export async function GET() {
             display: "flex",
             justifyContent: "flex-start",
             alignItems: "center",
-            padding: "20px 50px",
+            padding: "20px 120px",
             fontSize: 128,
             width: "75%",
             textAlign: "left",
