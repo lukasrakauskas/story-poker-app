@@ -9,7 +9,6 @@ import {
 } from "react";
 import { User, useAppEvents } from "../hooks/use-app-events";
 import { useToast } from "ui/hooks/use-toast";
-import { ToastAction } from "ui/components/toast";
 import { MurmurHash3, SimpleFastCounter32 } from "./random";
 
 interface UserWithAvatar extends User {
@@ -201,6 +200,15 @@ export function PlanningProvider({
       });
     });
 
+    const unsubBadUsername = app.on("bad-username", (data) => {
+      setState("connected");
+      toast({
+        title: "Uh oh! Bad username.",
+        description: data.error,
+        variant: "destructive",
+      });
+    });
+
     const handleClose = () => {
       app.close();
     };
@@ -219,6 +227,7 @@ export function PlanningProvider({
       unsubDisconnected();
       unsubNameTaken();
       unsubRoomNotFound();
+      unsubBadUsername();
       window.removeEventListener("beforeunload", handleClose);
     };
   }, [app, toast, avatars]);
