@@ -156,7 +156,10 @@ export class EventsGateway
   }
 
   @SubscribeMessage('reconnect')
-  onReconnect(@MessageBody() data: { token: string }) {
+  onReconnect(
+    @ConnectedSocket() client: Client,
+    @MessageBody() data: { token: string },
+  ) {
     const { room, user } = this.findRoomAndUserByToken(data.token);
 
     if (!room) {
@@ -167,6 +170,8 @@ export class EventsGateway
       return { event: 'user-not-found', data: null };
     }
 
+    client.roomId = room.code;
+    client.id = user.id;
     user.status = 'connected';
 
     this.notifyRoom(room, {
