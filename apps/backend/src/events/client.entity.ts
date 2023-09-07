@@ -16,6 +16,10 @@ export class Client extends WebSocket {
     return this.#id;
   }
 
+  set id(newId: string) {
+    this.#id = newId;
+  }
+
   get roomId() {
     return this.#roomId ?? '';
   }
