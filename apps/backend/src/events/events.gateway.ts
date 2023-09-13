@@ -19,6 +19,21 @@ const usernameSchema = z
   .min(3, 'It must be at least 3 characters')
   .max(30, 'That is a long username, might want to trim that!');
 
+const DEFAULT_CARD_SET = [
+  '0',
+  '1/2',
+  '1',
+  '2',
+  '3',
+  '5',
+  '8',
+  '13',
+  '20',
+  '40',
+  '100',
+  '?',
+];
+
 type User = {
   id: string;
   name: string;
@@ -32,6 +47,7 @@ interface Room {
   code: string;
   users: User[];
   state: 'voting' | 'results';
+  cardSet: string[];
 }
 
 type ClientUser = Omit<User, 'vote' | 'token'> & {
@@ -82,9 +98,12 @@ export class EventsGateway
   @SubscribeMessage('create-room')
   onCreateRoom(
     @ConnectedSocket() client: Client,
-    @MessageBody() data: { name: string },
+    @MessageBody() data: { name: string; cardSet?: string[] },
   ) {
     const parsedUsername = usernameSchema.safeParse(data.name);
+
+    const customCardSet = data?.cardSet ?? [];
+    const cardSet = customCardSet.length > 0 ? customCardSet : DEFAULT_CARD_SET;
 
     if (!parsedUsername.success) {
       return {
@@ -99,6 +118,7 @@ export class EventsGateway
       code: nanoid(7),
       users: [user],
       state: 'voting',
+      cardSet,
     };
 
     this.rooms.set(room.code, room);

@@ -29,10 +29,11 @@ interface PlanningData {
   vote: string | null;
   planningState?: "voting" | "results";
   results: Record<string, number>;
+  cardSet: string[];
   roomCode: string;
 
   setRoomCode: (room: string) => void;
-  createRoom: (name: string) => void;
+  createRoom: (name: string, cardSet?: string[]) => void;
   joinRoom: (name: string, room: string) => void;
   castVote: (vote: string) => void;
   changePlanningState: () => void;
@@ -44,6 +45,7 @@ export const PlanningContext = createContext<PlanningData>({
   currentUser: null,
   vote: null,
   results: {},
+  cardSet: [],
   roomCode: "",
   setRoomCode: () => {},
   createRoom: () => {},
@@ -66,13 +68,18 @@ export function PlanningProvider({
   const [planningState, setPlanningState] = useState<"voting" | "results">();
   const [results, setResults] = useState<Record<string, number>>({});
   const [roomCode, setRoomCode] = useState("");
+  const [cardSet, setCardSet] = useState<string[]>([]);
 
   const app = useAppEvents();
   const { toast } = useToast();
 
-  const createRoom = (name: string) => {
+  const createRoom = (name: string, customCardSet?: string[]) => {
+    const url = new URL(window.location.href);
+    customCardSet ??= url.searchParams.get("cardSet")?.split(",") ?? [];
+
+    setCardSet(customCardSet ?? []);
     setState("joining");
-    app.send("create-room", { name });
+    app.send("create-room", { name, cardSet: customCardSet });
   };
 
   const joinRoom = (name: string, room: string) => {
@@ -114,6 +121,7 @@ export function PlanningProvider({
       setUsers(data.users.map((user) => makeUserWithAvatar(user, avatars)));
       setRoomCode(data.code);
       setCurrentUser(data.user);
+      setCardSet(data.cardSet);
 
       localStorage.setItem("token", data.user.token);
       localStorage.setItem("room", data.code);
@@ -241,6 +249,7 @@ export function PlanningProvider({
         vote,
         planningState,
         results,
+        cardSet,
         roomCode,
         setRoomCode,
         createRoom,

@@ -5,10 +5,9 @@ import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
 import PieExample from "./pie";
 import ParentSize from "@visx/responsive/lib/components/ParentSize";
-import { cardDeck } from "../../../lib/constants";
 
 export function Cards() {
-  const { vote, castVote, results, planningState } = usePlanning();
+  const { vote, castVote, results, planningState, cardSet } = usePlanning();
 
   if (planningState === "results") {
     const displayResults = Object.entries(results)
@@ -29,7 +28,7 @@ export function Cards() {
 
   return (
     <div className="grid grid-cols-4 lg:grid-cols-6 gap-2">
-      {cardDeck.map((card) => (
+      {cardSet.map((card) => (
         <button key={card} onClick={() => castVote(card)}>
           <Card
             className={cn(

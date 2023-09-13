@@ -24,6 +24,7 @@ const serverEventsSchema = z.discriminatedUnion("event", [
       users: userSchema.array(),
       user: currentUserSchema,
       state: z.enum(["voting", "results"]),
+      cardSet: z.array(z.string()),
     }),
   }),
   z.object({
@@ -82,7 +83,7 @@ type WebsocketEventsMap = {
 };
 
 type ClientEvents = {
-  "create-room": { name: string };
+  "create-room": { name: string; cardSet?: string[] };
   "join-room": { name: string; room: string };
   "cast-vote": { vote: string };
   "start-voting": undefined;
