@@ -28,9 +28,11 @@ export function UserAuthForm({
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault();
+    const url = new URL(window.location.href);
+    const cardSet = url.searchParams.get("cardSet")?.split(",") ?? [];
 
     if (!roomCode) {
-      createRoom(name);
+      createRoom(name, cardSet);
     } else {
       joinRoom(name, roomCode);
     }
