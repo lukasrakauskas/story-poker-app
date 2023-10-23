@@ -37,6 +37,11 @@ interface PlanningData {
   joinRoom: (name: string, room: string) => void;
   castVote: (vote: string) => void;
   changePlanningState: () => void;
+  broadcastMessage: (data: {
+    roomId: string;
+    message: string;
+    password: string;
+  }) => void;
 }
 
 export const PlanningContext = createContext<PlanningData>({
@@ -52,6 +57,7 @@ export const PlanningContext = createContext<PlanningData>({
   joinRoom: () => {},
   castVote: () => {},
   changePlanningState: () => {},
+  broadcastMessage: () => {},
 });
 
 export function PlanningProvider({
@@ -100,6 +106,14 @@ export function PlanningProvider({
     if (planningState === "results") {
       app.send("start-voting");
     }
+  };
+
+  const broadcastMessage = (data: {
+    roomId: string;
+    message: string;
+    password: string;
+  }) => {
+    app.send("broadcast-message", data);
   };
 
   const reset = () => {
@@ -217,6 +231,13 @@ export function PlanningProvider({
       });
     });
 
+    const unsubMessageBroadcasted = app.on("broadcasted-message", (data) => {
+      toast({
+        title: data.message,
+        duration: 10000,
+      });
+    });
+
     const handleClose = () => {
       app.close();
     };
@@ -236,6 +257,7 @@ export function PlanningProvider({
       unsubNameTaken();
       unsubRoomNotFound();
       unsubBadUsername();
+      unsubMessageBroadcasted();
       window.removeEventListener("beforeunload", handleClose);
     };
   }, [app, toast, avatars]);
@@ -256,6 +278,7 @@ export function PlanningProvider({
         joinRoom,
         castVote,
         changePlanningState,
+        broadcastMessage,
       }}
     >
       {children}

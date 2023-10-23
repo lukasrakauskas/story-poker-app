@@ -72,6 +72,20 @@ const serverEventsSchema = z.discriminatedUnion("event", [
     event: z.literal("bad-username"),
     data: z.object({ error: z.string() }),
   }),
+  z.object({
+    event: z.literal("broadcasted-message"),
+    data: z.object({
+      message: z.string(),
+    }),
+  }),
+  z.object({
+    event: z.literal("wrong-password"),
+    data: z.null().optional(),
+  }),
+  z.object({
+    event: z.literal("message-broadcasted"),
+    data: z.null().optional(),
+  }),
 ]);
 
 type ServerEvents = z.infer<typeof serverEventsSchema>;
@@ -90,6 +104,8 @@ type ClientEvents = {
   "reveal-results": undefined;
   "keep-alive": undefined;
   reconnect: { token: string };
+  // admin messages
+  "broadcast-message": { message: string; password: string; roomId: string };
 };
 
 export function useAppEvents() {
