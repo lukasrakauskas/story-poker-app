@@ -13,6 +13,7 @@ import { nanoid } from 'nanoid';
 import { Client } from './client.entity';
 import { omit } from 'radash';
 import { z } from 'zod';
+import { ConfigService } from '@nestjs/config';
 
 const usernameSchema = z
   .string()
@@ -69,6 +70,8 @@ export class EventsGateway
   @WebSocketServer()
   server: Server<Client>;
   rooms: Map<string, Room> = new Map();
+
+  constructor(private readonly configService: ConfigService) {}
 
   afterInit(server: Server<Client>) {
     setInterval(() => {
@@ -323,6 +326,34 @@ export class EventsGateway
 
     room.state = 'voting';
     this.notifyRoom(room, { event: 'voting-started', data: null });
+  }
+
+  @SubscribeMessage('broadcast-message')
+  onBroadcastMessage(
+    @MessageBody() data: { roomId: string; message: string; password: string },
+  ) {
+    const password = this.configService.get('PASSWORD');
+
+    if (!password) {
+      return { event: 'message-broadcasted', data: null };
+    }
+
+    if (password !== data.password) {
+      return { event: 'wrong-password', data: null };
+    }
+
+    const room = this.rooms.get(data.roomId);
+
+    if (!room) {
+      return { event: 'room-not-found', data: null };
+    }
+
+    this.notifyRoom(room, {
+      event: 'broadcasted-message',
+      data: { message: data.message },
+    });
+
+    return { event: 'message-broadcasted', data: null };
   }
 
   private notifyRoom(room: Room, message: { event: string; data: unknown }) {
