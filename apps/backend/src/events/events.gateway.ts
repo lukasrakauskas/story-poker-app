@@ -79,7 +79,7 @@ export class EventsGateway
         if (client.isAlive === false) {
           client.terminate();
           this.handleDisconnect(client);
-          return;
+          continue;
         }
 
         client.isAlive = false;

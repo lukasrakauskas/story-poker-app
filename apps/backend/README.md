@@ -29,33 +29,33 @@
 ## Installation
 
 ```bash
-$ pnpm install
+$ bun install
 ```
 
 ## Running the app
 
 ```bash
 # development
-$ pnpm run start
+$ bun run start
 
 # watch mode
-$ pnpm run start:dev
+$ bun run dev
 
 # production mode
-$ pnpm run start:prod
+$ bun run start:prod
 ```
 
 ## Test
 
 ```bash
 # unit tests
-$ pnpm run test
+$ bun run test
 
 # e2e tests
-$ pnpm run test:e2e
+$ bun run test:e2e
 
 # test coverage
-$ pnpm run test:cov
+$ bun run test:cov
 ```
 
 ## Support
