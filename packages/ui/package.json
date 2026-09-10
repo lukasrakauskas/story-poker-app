@@ -8,13 +8,11 @@
     "*.css"
   ],
   "scripts": {
-    "lint": "eslint \"**/*.ts*\""
+    "lint": "oxlint ."
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
-    "eslint": "^7.32.0",
-    "eslint-config-custom": "*",
     "react": "^18.2.0",
     "tailwind-config": "*",
     "tsconfig": "*",

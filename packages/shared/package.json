@@ -5,10 +5,9 @@
   "types": "./index.ts",
   "license": "MIT",
   "scripts": {
-    "lint": "eslint \"**/*.ts*\""
+    "lint": "oxlint ."
   },
   "devDependencies": {
-    "eslint-config-custom": "*",
     "tsconfig": "*",
     "typescript": "^5.0.4"
   }
