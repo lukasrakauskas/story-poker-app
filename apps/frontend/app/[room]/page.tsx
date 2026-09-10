@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 export default async function RoomPage({
   params,
 }: {
-  params: { room: string };
+  params: Promise<{ room: string }>;
 }) {
-  return <RoomOrJoin room={params.room} />;
+  return <RoomOrJoin room={(await params).room} />;
 }

@@ -21,12 +21,11 @@ import {
   Settings,
   SunMedium,
   Trash,
-  Twitter,
   User,
   X,
   Circle,
   CheckCircle,
-  type Icon as LucideIcon,
+  type LucideIcon,
   Unplug,
 } from "lucide-react";
 
@@ -63,7 +62,6 @@ export const Icons = {
   arrowRight: ArrowRight,
   help: HelpCircle,
   pizza: Pizza,
-  twitter: Twitter,
   check: Check,
   copy: Copy,
   copyDone: ClipboardCheck,

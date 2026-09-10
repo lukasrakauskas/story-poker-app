@@ -52,7 +52,7 @@ const serverEventsSchema = z.discriminatedUnion("event", [
   z.object({
     event: z.literal("results-revealed"),
     data: z.object({
-      results: z.record(z.number()),
+      results: z.record(z.string(), z.number()),
       users: userSchema.array(),
     }),
   }),
@@ -110,9 +110,8 @@ type ClientEvents = {
 
 export function useAppEvents() {
   const socket = useWebsocket(process.env.NEXT_PUBLIC_WS_URL ?? "");
-  const emitterRef = useRef(
-    createEmitter<ServerEventsMap & WebsocketEventsMap>()
-  );
+  const emitterRef =
+    useRef(createEmitter<ServerEventsMap & WebsocketEventsMap>());
 
   useEffect(() => {
     const onOpen = () => {

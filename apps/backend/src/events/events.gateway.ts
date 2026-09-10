@@ -8,9 +8,9 @@ import {
   OnGatewayInit,
   OnGatewayConnection,
 } from '@nestjs/websockets';
-import { Server, WebSocket } from 'ws';
+import { type Server, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
-import { Client } from './client.entity';
+import { Client } from './client.entity.js';
 import { omit } from 'radash';
 import { z } from 'zod';
 import { ConfigService } from '@nestjs/config';
@@ -65,15 +65,15 @@ export class EventsGateway
   implements
     OnGatewayConnection<Client>,
     OnGatewayDisconnect<Client>,
-    OnGatewayInit<Server<Client>>
+    OnGatewayInit<Server<typeof Client>>
 {
   @WebSocketServer()
-  server: Server<Client>;
+  server: Server<typeof Client>;
   rooms: Map<string, Room> = new Map();
 
   constructor(private readonly configService: ConfigService) {}
 
-  afterInit(server: Server<Client>) {
+  afterInit(server: Server<typeof Client>) {
     setInterval(() => {
       for (const client of server.clients) {
         if (client.isAlive === false) {
@@ -89,6 +89,8 @@ export class EventsGateway
   }
 
   handleConnection(client: Client) {
+    // Bun's ws implementation may not construct the configured Client subclass.
+    client.id ??= nanoid();
     client.isAlive = true;
     client.send(JSON.stringify({ event: 'is-alive' }));
   }

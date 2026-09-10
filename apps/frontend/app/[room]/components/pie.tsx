@@ -1,9 +1,11 @@
 import * as React from "react";
-import Pie, { ProvidedProps, PieArcDatum } from "@visx/shape/lib/shapes/Pie";
+import { Pie, type PieProvidedProps as ProvidedProps } from "@visx/shape";
 import { scaleOrdinal } from "@visx/scale";
 import { Group } from "@visx/group";
 import { animated, useTransition, to } from "@react-spring/web";
 import { cardDeck } from "../../../lib/constants";
+
+type PieArcDatum<Datum> = ProvidedProps<Datum>["arcs"][number];
 
 const getColor = scaleOrdinal({
   domain: cardDeck,

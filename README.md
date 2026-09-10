@@ -4,7 +4,7 @@ This is an official starter Turborepo.
 
 ## Getting started
 
-Install [Bun](https://bun.sh) 1.4.2 and Node.js 22+ (used by the existing Next.js, Nest CLI, and Jest tooling), then run from the repository root:
+Install [Bun](https://bun.sh) 1.4.2 and Node.js 22.12+ (or 24+) (used by the existing Next.js, Nest CLI, and Vitest tooling), then run from the repository root:
 
 ```sh
 bun install
@@ -13,7 +13,9 @@ bun run dev
 
 Commit `bun.lock` when dependencies change. CI and deployment should use `bun install --frozen-lockfile`.
 
-Run backend tests with `bun run --cwd apps/backend test` (the project uses Jest, not `bun test`).
+Run backend tests with `bun run --cwd apps/backend test` (the project uses Vitest, not `bun test`).
+
+The backend emits native ESM. TypeScript stays on 6.0.3 until Nest CLI supports TypeScript 7's compiler API; all other direct dependencies use the latest stable releases.
 
 ## What's inside?
 

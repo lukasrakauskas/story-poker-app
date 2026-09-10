@@ -20,7 +20,7 @@ export function InviteToRoom() {
   const [copied, setCopied] = useState(false);
   const { users, currentUser, planningState, changePlanningState, roomCode } =
     usePlanning();
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const handleCopyLink = () => {
     setCopied(true);
@@ -87,8 +87,8 @@ export function InviteToRoom() {
                     {user.status === "disconnected" ? (
                       <Icons.disconnected />
                     ) : (
-                      user.vote ??
-                      (user.voted ? <Icons.voted /> : <Icons.voting />)
+                      (user.vote ??
+                      (user.voted ? <Icons.voted /> : <Icons.voting />))
                     )}
                   </p>
                 </div>

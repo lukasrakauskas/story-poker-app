@@ -47,6 +47,8 @@ $ bun run start:prod
 
 ## Test
 
+Tests use Vitest with SWC to preserve Nest's decorator metadata. Run `bun run test:watch` for watch mode. The backend uses native ESM; relative TypeScript imports use `.js` extensions for the emitted files.
+
 ```bash
 # unit tests
 $ bun run test

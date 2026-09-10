@@ -4,7 +4,7 @@ import { Card } from "ui/components/card";
 import { usePlanning } from "../../../lib/planning-context";
 import { cn } from "ui/utils";
 import PieExample from "./pie";
-import ParentSize from "@visx/responsive/lib/components/ParentSize";
+import { ParentSize } from "@visx/responsive";
 
 export function Cards() {
   const { vote, castVote, results, planningState, cardSet } = usePlanning();
