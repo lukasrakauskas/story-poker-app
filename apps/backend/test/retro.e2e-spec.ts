@@ -1,0 +1,190 @@
+import { Test } from '@nestjs/testing';
+import { type INestApplication } from '@nestjs/common';
+import { WsAdapter } from '@nestjs/platform-ws';
+import { WebSocket } from 'ws';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
+import { AppModule } from '../src/app.module.js';
+
+let app: INestApplication;
+let url: string;
+let sockets: WebSocket[];
+
+function next(socket: WebSocket): Promise<RetroServerEvent> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off('message', onMessage);
+      reject(new Error('Timed out waiting for WebSocket event'));
+    }, 3000);
+    function onMessage(data: Buffer) {
+      const event = JSON.parse(data.toString());
+      if (event.event === 'is-alive') return;
+      clearTimeout(timer);
+      socket.off('message', onMessage);
+      resolve(event);
+    }
+    socket.on('message', onMessage);
+  });
+}
+async function connect(path = '/retro') {
+  const socket = new WebSocket(`${url}${path}`);
+  sockets.push(socket);
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+  });
+  return socket;
+}
+async function command(socket: WebSocket, data: RetroCommand | unknown) {
+  const response = next(socket);
+  socket.send(JSON.stringify({ event: 'retro-command', data }));
+  return response;
+}
+function state(event: RetroServerEvent) {
+  if (event.event !== 'retro-state') throw new Error(JSON.stringify(event));
+  return event.data;
+}
+
+beforeEach(async () => {
+  sockets = [];
+  const fixture = await Test.createTestingModule({
+    imports: [AppModule],
+  }).compile();
+  app = fixture.createNestApplication();
+  app.useWebSocketAdapter(new WsAdapter(app));
+  await app.listen(0, '127.0.0.1');
+  url = (await app.getUrl()).replace('http:', 'ws:');
+});
+afterEach(async () => {
+  sockets.forEach((socket) => socket.terminate());
+  await app.close();
+});
+
+describe('retrospective WebSocket route', () => {
+  it('runs a shared retrospective without leaking credentials or affecting poker', async () => {
+    const owner = await connect();
+    const guest = await connect();
+    const outsider = await connect();
+    const created = state(
+      await command(owner, {
+        type: 'create',
+        name: 'Alice',
+        title: 'Sprint 1',
+      }),
+    );
+    expect(created.room.phase).toBe('write');
+    expect(JSON.stringify(created.room)).not.toContain('token');
+    const ownerJoin = next(owner);
+    const joined = state(
+      await command(guest, {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+      }),
+    );
+    expect(state(await ownerJoin).room.members).toHaveLength(2);
+    expect(joined.self.token).not.toBe(created.self.token);
+    expect(JSON.stringify(joined)).not.toContain(created.self.token);
+    expect(await command(outsider, { type: 'advance' })).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+    const guestNote = next(guest);
+    const withNote = state(
+      await command(owner, {
+        type: 'add-note',
+        column: 'went-well',
+        text: 'Teamwork',
+      }),
+    );
+    expect(state(await guestNote).room.notes[0].text).toBe('Teamwork');
+    expect(
+      await command(guest, {
+        type: 'delete-note',
+        id: withNote.room.notes[0].id,
+      }),
+    ).toMatchObject({ event: 'retro-error', data: { code: 'forbidden' } });
+    await command(owner, { type: 'advance' });
+    const voteReceived = next(owner);
+    await command(guest, {
+      type: 'toggle-vote',
+      id: withNote.room.notes[0].id,
+    });
+    expect(state(await voteReceived).room.notes[0].voterIds).toEqual([
+      joined.self.id,
+    ]);
+    await command(owner, { type: 'advance' });
+    const actions = state(
+      await command(owner, {
+        type: 'add-action',
+        text: 'Pair more',
+        owner: 'Bobby',
+      }),
+    );
+    expect(actions.room.actions[0].text).toBe('Pair more');
+    expect(state(await command(owner, { type: 'advance' })).room.phase).toBe(
+      'closed',
+    );
+    expect(await command(owner, { type: 'advance' })).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'room-closed' },
+    });
+    // The original planning gateway still runs on the root socket route.
+    const poker = await connect('');
+    const response = next(poker);
+    poker.send(
+      JSON.stringify({ event: 'create-room', data: { name: 'Planner' } }),
+    );
+    expect(await response).toMatchObject({
+      event: 'room-joined',
+      data: { state: 'voting' },
+    });
+  });
+
+  it('resumes an identity, disconnects its old socket and validates commands', async () => {
+    const original = await connect();
+    const created = state(
+      await command(original, {
+        type: 'create',
+        name: 'Alice',
+        title: 'Retro',
+      }),
+    );
+    const replacement = await connect();
+    const displaced = next(original);
+    const resumed = state(
+      await command(replacement, {
+        type: 'resume',
+        code: created.room.code,
+        token: created.self.token,
+      }),
+    );
+    expect(resumed.self).toEqual(created.self);
+    expect(resumed.room.members).toHaveLength(1);
+    expect(await displaced).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+    expect(
+      await command(replacement, {
+        type: 'add-note',
+        column: 'ideas',
+        text: ' ',
+      }),
+    ).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-command' },
+    });
+    expect(
+      await command(replacement, {
+        type: 'create',
+        name: 'Alice',
+        title: 'Another',
+      }),
+    ).toMatchObject({ event: 'retro-error', data: { code: 'already-joined' } });
+    expect(
+      state(await command(replacement, { type: 'advance' })).room.members[0]
+        .connected,
+    ).toBe(true);
+  });
+});

@@ -1,0 +1,120 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type Server, WebSocket } from 'ws';
+import { RetroGateway } from './retro.gateway.js';
+import { RETRO_LIFETIME_MS, RetroService } from './retro.service.js';
+
+let gateway: RetroGateway;
+let service: RetroService;
+function socket() {
+  const client = {
+    readyState: WebSocket.OPEN,
+    send: vi.fn(),
+    on: vi.fn(),
+    close: vi.fn(),
+    terminate: vi.fn(),
+    ping: vi.fn(),
+  } as unknown as WebSocket;
+  gateway.handleConnection(client);
+  return client;
+}
+function latest(client: WebSocket) {
+  return JSON.parse(vi.mocked(client.send).mock.calls.at(-1)![0] as string);
+}
+beforeEach(() => {
+  vi.useFakeTimers();
+  service = new RetroService();
+  gateway = new RetroGateway(service);
+});
+afterEach(() => {
+  gateway.onModuleDestroy();
+  vi.useRealTimers();
+});
+
+describe('RetroGateway', () => {
+  it('acknowledges only the requesting socket, including rejected commands', () => {
+    const owner = socket();
+    const guest = socket();
+    gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+      requestId: 'create-1',
+    });
+    expect(latest(owner).data.requestId).toBe('create-1');
+    gateway.onCommand(guest, {
+      type: 'join',
+      name: 'Bobby',
+      code: latest(owner).data.room.code,
+      requestId: 'join-1',
+    });
+    expect(latest(guest).data.requestId).toBe('join-1');
+    expect(latest(owner).data).not.toHaveProperty('requestId');
+    gateway.onCommand(guest, { type: 'advance', requestId: 'advance-1' });
+    expect(latest(guest)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'forbidden', requestId: 'advance-1' },
+    });
+  });
+  it('expires attached rooms and cleans timers even without incoming messages', () => {
+    const owner = socket();
+    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
+    const code = latest(owner).data.room.code;
+    gateway.afterInit({ clients: new Set() } as Server);
+    gateway.afterInit({ clients: new Set() } as Server);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(RETRO_LIFETIME_MS);
+    expect(latest(owner)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'room-expired' },
+    });
+    expect(service.isExpired(code)).toBe(true);
+    gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'New room',
+    });
+    expect(latest(owner).data.room.code).not.toBe(code);
+    gateway.onModuleDestroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('marks disconnects and sends only other members their own credentials', () => {
+    const owner = socket();
+    const guest = socket();
+    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
+    const created = latest(owner).data;
+    gateway.onCommand(guest, {
+      type: 'join',
+      name: 'Bobby',
+      code: created.room.code,
+    });
+    gateway.handleDisconnect(guest);
+    expect(latest(owner).data.room.members[1].connected).toBe(false);
+    expect(latest(owner).data.self).toEqual(created.self);
+    expect(() => gateway.handleDisconnect(guest)).not.toThrow();
+  });
+
+  it('limits command floods and recovers after the rate window', () => {
+    const owner = socket();
+    for (let i = 0; i < 31; i++) gateway.onCommand(owner, null);
+    expect(latest(owner).data.code).toBe('rate-limit');
+    vi.advanceTimersByTime(1000);
+    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
+    expect(latest(owner).event).toBe('retro-state');
+  });
+
+  it('pings clients and terminates unresponsive connections', () => {
+    const owner = socket();
+    gateway.afterInit({ clients: new Set([owner]) } as Server);
+    vi.advanceTimersByTime(30_000);
+    expect(owner.ping).toHaveBeenCalledOnce();
+    const pong = vi
+      .mocked(owner.on)
+      .mock.calls.find(([event]) => event === 'pong')![1];
+    pong.call(owner);
+    vi.advanceTimersByTime(30_000);
+    expect(owner.terminate).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(30_000);
+    expect(owner.terminate).toHaveBeenCalledOnce();
+  });
+});

@@ -32,9 +32,8 @@ export function useWebsocket(url: string) {
     client.current = createSocket(url);
 
     return () => {
-      if (client.current?.readyState === WebSocket.OPEN) {
-        client.current?.close();
-      }
+      // Also close CONNECTING sockets when leaving poker for another route.
+      client.current?.close();
     };
   }, [url]);
 
