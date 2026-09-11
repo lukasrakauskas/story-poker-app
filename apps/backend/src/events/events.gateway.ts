@@ -8,53 +8,14 @@ import {
   OnGatewayInit,
   OnGatewayConnection,
 } from '@nestjs/websockets';
+import { type OnModuleDestroy } from '@nestjs/common';
 import { type Server, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
 import { Client } from './client.entity.js';
-import { omit } from 'radash';
-import { z } from 'zod';
 import { ConfigService } from '@nestjs/config';
-
-const usernameSchema = z
-  .string()
-  .min(3, 'It must be at least 3 characters')
-  .max(30, 'That is a long username, might want to trim that!');
-
-const DEFAULT_CARD_SET = [
-  '0',
-  '1/2',
-  '1',
-  '2',
-  '3',
-  '5',
-  '8',
-  '13',
-  '20',
-  '40',
-  '100',
-  '?',
-];
-
-type User = {
-  id: string;
-  name: string;
-  vote: string | null;
-  role: 'user' | 'mod';
-  token: string;
-  status: 'connected' | 'disconnected';
-};
-
-interface Room {
-  code: string;
-  users: User[];
-  state: 'voting' | 'results';
-  cardSet: string[];
-}
-
-type ClientUser = Omit<User, 'vote' | 'token'> & {
-  voted: boolean;
-  vote?: string | null;
-};
+import { RoomService } from './room.service.js';
+import { UserService } from './user.service.js';
+import type { Room, User } from './events.types.js';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -65,27 +26,37 @@ export class EventsGateway
   implements
     OnGatewayConnection<Client>,
     OnGatewayDisconnect<Client>,
-    OnGatewayInit<Server<typeof Client>>
+    OnGatewayInit<Server<typeof Client>>,
+    OnModuleDestroy
 {
   @WebSocketServer()
   server: Server<typeof Client>;
-  rooms: Map<string, Room> = new Map();
+  private heartbeat?: ReturnType<typeof setInterval>;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly rooms: RoomService,
+    private readonly users: UserService,
+  ) {}
 
   afterInit(server: Server<typeof Client>) {
-    setInterval(() => {
+    this.onModuleDestroy();
+    this.heartbeat = setInterval(() => {
       for (const client of server.clients) {
         if (client.isAlive === false) {
           client.terminate();
           this.handleDisconnect(client);
           continue;
         }
-
         client.isAlive = false;
         client.send(JSON.stringify({ event: 'is-alive' }));
       }
     }, 7000);
+  }
+
+  onModuleDestroy() {
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
   }
 
   handleConnection(client: Client) {
@@ -105,37 +76,10 @@ export class EventsGateway
     @ConnectedSocket() client: Client,
     @MessageBody() data: { name: string; cardSet?: string[] },
   ) {
-    const parsedUsername = usernameSchema.safeParse(data.name);
-
-    const customCardSet = data?.cardSet ?? [];
-    const cardSet = customCardSet.length > 0 ? customCardSet : DEFAULT_CARD_SET;
-
-    if (!parsedUsername.success) {
-      return {
-        event: 'bad-username',
-        data: { error: parsedUsername.error.format()._errors.join(', ') },
-      };
-    }
-
-    const user = this.createUser(client.id, data.name, 'mod');
-
-    const room: Room = {
-      code: nanoid(7),
-      users: [user],
-      state: 'voting',
-      cardSet,
-    };
-
-    this.rooms.set(room.code, room);
-
-    client.roomId = room.code;
-
-    const roomData = this.mapRoomUsers(room, this.hideUserVote);
-
-    return {
-      event: 'room-joined',
-      data: { ...roomData, user: { ...user, voted: !!user.vote } },
-    };
+    const result = this.rooms.create(client.id, data.name, data.cardSet);
+    if ('error' in result) return result.error;
+    client.roomId = result.room.code;
+    return this.roomJoined(result.room, result.user);
   }
 
   @SubscribeMessage('join-room')
@@ -143,41 +87,17 @@ export class EventsGateway
     @ConnectedSocket() client: Client,
     @MessageBody() data: { name: string; room: string },
   ) {
-    const room = this.rooms.get(data.room);
-
-    if (!room) {
-      return { event: 'room-not-found', data: null };
-    }
-
-    if (room.users.find((it) => it.name === data.name)) {
-      return { event: 'name-taken', data: null };
-    }
-
-    const parsedUsername = usernameSchema.safeParse(data.name);
-
-    if (!parsedUsername.success) {
-      return {
-        event: 'bad-username',
-        data: { error: parsedUsername.error.format()._errors.join(', ') },
-      };
-    }
-
-    const user = this.createUser(client.id, data.name);
-    client.roomId = room.code;
-
-    this.notifyRoom(room, {
+    // Capture existing recipients: the joining user receives room-joined instead.
+    const recipients =
+      this.rooms.get(data.room)?.users.map((user) => user.id) ?? [];
+    const result = this.rooms.join(data.room, client.id, data.name);
+    if ('error' in result) return result.error;
+    client.roomId = result.room.code;
+    this.notifyUsers(recipients, {
       event: 'user-joined',
-      data: { user: this.hideUserVote(user) },
+      data: { user: this.users.toPublic(result.user) },
     });
-
-    room.users.push(user);
-
-    const roomData = this.mapRoomUsers(room, this.hideUserVote);
-
-    return {
-      event: 'room-joined',
-      data: { ...roomData, user: { ...user, voted: !!user.vote } },
-    };
+    return this.roomJoined(result.room, result.user);
   }
 
   @SubscribeMessage('reconnect')
@@ -185,101 +105,34 @@ export class EventsGateway
     @ConnectedSocket() client: Client,
     @MessageBody() data: { token: string },
   ) {
-    const { room, user } = this.findRoomAndUserByToken(data.token);
-
-    if (!room) {
-      return { event: 'room-not-found', data: null };
-    }
-
-    if (!user) {
-      return { event: 'user-not-found', data: null };
-    }
-
+    const result = this.rooms.reconnect(data.token);
+    if ('error' in result) return result.error;
+    const { room, user } = result;
     client.roomId = room.code;
     client.id = user.id;
-    user.status = 'connected';
-
     this.notifyRoom(room, {
       event: 'user-joined',
-      data: { user: this.hideUserVote(user) },
+      data: { user: this.users.toPublic(user) },
     });
-
-    room.users = room.users.map((it) =>
-      it.id === user.id ? { ...it, status: 'connected' } : it,
-    );
-    const roomData = this.mapRoomUsers(room, this.hideUserVote);
-
-    return {
-      event: 'room-joined',
-      data: { ...roomData, user: { ...user, voted: !!user.vote } },
-    };
+    return this.roomJoined(room, user);
   }
 
-  handleDisconnect(leftUser: Client) {
-    if (!leftUser.roomId) {
-      return;
-    }
-
-    const room = this.rooms.get(leftUser.roomId);
-
-    if (!room) {
-      return;
-    }
-
-    const user = room.users.find((it) => it.id === leftUser.id);
-
-    if (!user) {
-      return;
-    }
-
-    user.status = 'disconnected';
-
-    room.users = room.users.map((it) =>
-      it.id === leftUser.id ? { ...it, status: 'disconnected' } : it,
-    );
-
-    this.notifyRoom(room, {
+  handleDisconnect(client: Client) {
+    const membership = this.rooms.disconnect(client.roomId ?? '', client.id);
+    if (!membership) return;
+    this.notifyRoom(membership.room, {
       event: 'user-left',
-      data: { user: this.hideUserVote(user) },
+      data: { user: this.users.toPublic(membership.user) },
     });
   }
 
   @SubscribeMessage('reveal-results')
   onRevealResults(@ConnectedSocket() client: Client) {
-    const room = this.rooms.get(client.roomId ?? '');
-
-    if (!room) {
-      return { event: 'room-not-found', data: null };
-    }
-
-    const user = room.users.find((it) => it.id === client.id);
-
-    if (!user) {
-      return { event: 'user-not-found', data: null };
-    }
-
-    if (user.role !== 'mod') {
-      return { event: 'user-not-mod', data: null };
-    }
-
-    const results = room.users.reduce((it, current) => {
-      if (current.vote == null) {
-        return it;
-      }
-
-      return {
-        ...it,
-        [current.vote]: (it?.[current.vote] ?? 0) + 1,
-      };
-    }, {});
-
-    const users = room.users.map(this.mapUser);
-
-    room.users = room.users.map((it) => ({ ...it, vote: null }));
-    room.state = 'results';
-    this.notifyRoom(room, {
+    const result = this.rooms.revealResults(client.roomId ?? '', client.id);
+    if ('error' in result) return result.error;
+    this.notifyRoom(result.room, {
       event: 'results-revealed',
-      data: { results, users },
+      data: { results: result.results, users: result.users },
     });
   }
 
@@ -288,46 +141,23 @@ export class EventsGateway
     @ConnectedSocket() client: Client,
     @MessageBody() data: { vote: string },
   ) {
-    const room = this.rooms.get(client.roomId ?? '');
-
-    if (!room) {
-      return { event: 'room-not-found', data: null };
-    }
-
-    const user = room.users.find((it) => it.id === client.id);
-
-    if (!user) {
-      return { event: 'user-not-found', data: null };
-    }
-
-    user.vote = data.vote;
-
-    this.notifyRoom(room, {
+    const result = this.rooms.castVote(
+      client.roomId ?? '',
+      client.id,
+      data.vote,
+    );
+    if ('error' in result) return result.error;
+    this.notifyRoom(result.room, {
       event: 'user-voted',
-      data: { user: this.hideUserVote(user) },
+      data: { user: this.users.toPublic(result.user) },
     });
   }
 
   @SubscribeMessage('start-voting')
   onStartVoting(@ConnectedSocket() client: Client) {
-    const room = this.rooms.get(client.roomId ?? '');
-
-    if (!room) {
-      return { event: 'room-not-found', data: null };
-    }
-
-    const user = room.users.find((it) => it.id === client.id);
-
-    if (!user) {
-      return { event: 'user-not-found', data: null };
-    }
-
-    for (const participant of room.users) {
-      participant.vote = null;
-    }
-
-    room.state = 'voting';
-    this.notifyRoom(room, { event: 'voting-started', data: null });
+    const result = this.rooms.startVoting(client.roomId ?? '', client.id);
+    if ('error' in result) return result.error;
+    this.notifyRoom(result.room, { event: 'voting-started', data: null });
   }
 
   @SubscribeMessage('broadcast-message')
@@ -335,81 +165,39 @@ export class EventsGateway
     @MessageBody() data: { roomId: string; message: string; password: string },
   ) {
     const password = this.configService.get('PASSWORD');
-
-    if (!password) {
-      return { event: 'message-broadcasted', data: null };
-    }
-
-    if (password !== data.password) {
+    if (!password) return { event: 'message-broadcasted', data: null };
+    if (password !== data.password)
       return { event: 'wrong-password', data: null };
-    }
-
     const room = this.rooms.get(data.roomId);
-
-    if (!room) {
-      return { event: 'room-not-found', data: null };
-    }
-
+    if (!room) return { event: 'room-not-found', data: null };
     this.notifyRoom(room, {
       event: 'broadcasted-message',
       data: { message: data.message },
     });
-
     return { event: 'message-broadcasted', data: null };
   }
 
+  private roomJoined(room: Room, user: User) {
+    return { event: 'room-joined', data: this.rooms.toJoinedRoom(room, user) };
+  }
+
   private notifyRoom(room: Room, message: { event: string; data: unknown }) {
-    const userIds = room.users.map((it) => it.id);
+    this.notifyUsers(
+      room.users.map((user) => user.id),
+      message,
+    );
+  }
+
+  private notifyUsers(
+    userIds: string[],
+    message: { event: string; data: unknown },
+  ) {
+    const recipients = new Set(userIds);
+    const payload = JSON.stringify(message);
     for (const client of this.server.clients) {
-      if (userIds.includes(client.id) && client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(message));
+      if (recipients.has(client.id) && client.readyState === WebSocket.OPEN) {
+        client.send(payload);
       }
     }
-  }
-
-  private createUser(id: string, name: string, role?: 'user' | 'mod'): User {
-    return {
-      id,
-      name,
-      vote: null,
-      role: role ?? 'user',
-      token: nanoid(32),
-      status: 'connected',
-    };
-  }
-
-  private hideUserVote(user: User): ClientUser {
-    return {
-      ...omit(user, ['token', 'vote']),
-      voted: !!user.vote,
-    };
-  }
-
-  private mapUser(user: User): ClientUser {
-    return {
-      ...omit(user, ['token']),
-      voted: !!user.vote,
-    };
-  }
-
-  private mapRoomUsers<T>(room: Room, convert: (user: User) => T) {
-    const users = room.users.map(convert);
-
-    return {
-      ...room,
-      users,
-    };
-  }
-
-  private findRoomAndUserByToken(token: string) {
-    for (const room of this.rooms.values()) {
-      for (const user of room.users) {
-        if (user.token === token) {
-          return { room, user };
-        }
-      }
-    }
-
-    return { room: null, user: null };
   }
 }
