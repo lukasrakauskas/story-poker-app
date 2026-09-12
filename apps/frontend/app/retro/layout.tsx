@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { RetroProvider } from "./components/retro-provider";
 
 export const metadata: Metadata = {
   title: "Retrospective | Story Poker",
@@ -9,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function RetroLayout({ children }: { children: ReactNode }) {
-  return <RetroProvider>{children}</RetroProvider>;
+  return children;
 }

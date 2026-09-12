@@ -38,7 +38,7 @@ export function ActionItems({
         <CardTitle>Action items</CardTitle>
         <CardDescription>
           {room.phase === "closed"
-            ? "Your team’s next steps. Export them before the room expires."
+            ? "Your team’s final next steps. Check your saved history or export a backup."
             : "Agree on a next step and who will take it. The moderator records actions."}
         </CardDescription>
       </CardHeader>

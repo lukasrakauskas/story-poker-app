@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "oxlint .",
     "test:e2e": "playwright test",
+    "test:unit": "bun test tests/*.test.ts",
     "prebuild": "tsx ./scripts/runner.ts"
   },
   "dependencies": {

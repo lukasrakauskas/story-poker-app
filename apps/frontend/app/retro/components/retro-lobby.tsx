@@ -49,7 +49,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
               className="flex-1"
               variant={mode === "create" ? "default" : "outline"}
               aria-pressed={mode === "create"}
-              disabled={pending}
+              disabled={pending || connection !== "connected"}
               onClick={() => setMode("create")}
             >
               Create a room
@@ -58,7 +58,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
               className="flex-1"
               variant={mode === "join" ? "default" : "outline"}
               aria-pressed={mode === "join"}
-              disabled={pending}
+              disabled={pending || connection !== "connected"}
               onClick={() => setMode("join")}
             >
               Join a room
@@ -106,7 +106,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
                 autoComplete="off"
                 placeholder="How should the team know you?"
                 required
-                disabled={pending}
+                disabled={pending || connection !== "connected"}
               />
             </div>
             {mode === "create" ? (
@@ -119,7 +119,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="Sprint 24 · Looking back"
                   required
-                  disabled={pending}
+                  disabled={pending || connection !== "connected"}
                 />
               </div>
             ) : (
@@ -135,7 +135,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
                   spellCheck={false}
                   placeholder="Paste your room code"
                   required
-                  disabled={pending}
+                  disabled={pending || connection !== "connected"}
                 />
               </div>
             )}
@@ -158,8 +158,8 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
         </CardContent>
       </Card>
       <p className="text-center text-sm text-muted-foreground">
-        No account. No saved session. Rooms expire two hours after creation,
-        even while you’re using them.
+        No account needed. Cookies let you rejoin until the room expires two
+        hours after creation. Previous retros and actions stay on this browser.
       </p>
     </div>
   );

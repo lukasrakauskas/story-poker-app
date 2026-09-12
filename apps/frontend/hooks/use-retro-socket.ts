@@ -7,6 +7,13 @@ import type {
   RetroServerEvent,
 } from "shared/retrospective";
 
+import {
+  clearRetroToken,
+  readRetroToken,
+  saveRetroToken,
+} from "../lib/retro-session";
+import { saveRetroHistory } from "../lib/retro-history";
+
 type Connection = "connecting" | "connected" | "disconnected";
 type Failure = { code: string; message: string };
 type Pending = {
@@ -15,7 +22,7 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-/** A private socket and memory-only identity. Never queue or replay mutations. */
+/** A private socket with a room-scoped cookie identity. Never replay mutations. */
 export function useRetroSocket() {
   const socket = useRef<WebSocket | null>(null);
   const credentials = useRef<{ code: string; token: string } | null>(null);
@@ -30,6 +37,8 @@ export function useRetroSocket() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Failure | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [cookieSaved, setCookieSaved] = useState<boolean | null>(null);
+  const [historySaved, setHistorySaved] = useState<boolean | null>(null);
 
   const settle = useCallback((success: boolean) => {
     if (inFlight.current) {
@@ -44,6 +53,13 @@ export function useRetroSocket() {
     let active = true;
     let client: WebSocket;
     ready.current = false;
+    if (!credentials.current && !terminal.current) {
+      const code = window.location.pathname.match(
+        /^\/retro\/([a-zA-Z0-9_-]{1,64})\/?$/
+      )?.[1];
+      const token = code ? readRetroToken(code) : null;
+      if (code && token) credentials.current = { code, token };
+    }
     try {
       const url = new URL(process.env.NEXT_PUBLIC_WS_URL ?? "");
       url.protocol =
@@ -123,6 +139,10 @@ export function useRetroSocket() {
           }
           const { room: snapshot, self } = event.data;
           credentials.current = { code: snapshot.code, token: self.token };
+          setCookieSaved(
+            saveRetroToken(snapshot.code, self.token, snapshot.expiresAt)
+          );
+          setHistorySaved(saveRetroHistory(snapshot));
           latestRoom.current = snapshot;
           terminal.current = false;
           ready.current = true;
@@ -155,6 +175,13 @@ export function useRetroSocket() {
             event.data.code === "room-expired" ||
             event.data.code === "invalid-session"
           ) {
+            // A live tab replaced by another tab must not delete their shared
+            // valid cookie. Clear only rejected resume credentials or expired rooms.
+            if (
+              credentials.current &&
+              (event.data.code === "room-expired" || !ready.current)
+            )
+              clearRetroToken(credentials.current.code);
             terminal.current = true;
             ready.current = false;
             credentials.current = null;
@@ -220,6 +247,14 @@ export function useRetroSocket() {
         (snapshot.phase === "closed" || snapshot.expiresAt <= Date.now())
       )
         return Promise.resolve(false);
+      if (command.type === "join") {
+        const token = readRetroToken(command.code);
+        if (token) {
+          credentials.current = { code: command.code, token };
+          command = { type: "resume", ...credentials.current };
+          ready.current = false;
+        }
+      }
       setPending(true);
       setError(null);
       return new Promise((resolve) => {
@@ -267,7 +302,17 @@ export function useRetroSocket() {
     setAttempt((value) => value + 1);
   }, []);
 
-  return { room, selfId, connection, pending, error, send, retry };
+  return {
+    room,
+    selfId,
+    connection,
+    pending,
+    error,
+    send,
+    retry,
+    cookieSaved,
+    historySaved,
+  };
 }
 
 export type RetroSession = ReturnType<typeof useRetroSocket>;
