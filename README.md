@@ -2,13 +2,20 @@
 
 This is an official starter Turborepo.
 
-## Using this example
+## Getting started
 
-Run the following command:
+Install [Bun](https://bun.sh) 1.4.2 and Node.js 22.12+ (or 24+) (used by the existing Next.js, Nest CLI, and Vitest tooling), then run from the repository root:
 
 ```sh
-npx create-turbo@latest
+bun install
+bun run dev
 ```
+
+Commit `bun.lock` when dependencies change. CI and deployment should use `bun install --frozen-lockfile`.
+
+Run backend tests with `bun run --cwd apps/backend test` (the project uses Vitest, not `bun test`).
+
+The backend emits native ESM. TypeScript stays on 6.0.3 until Nest CLI supports TypeScript 7's compiler API; all other direct dependencies use the latest stable releases.
 
 ## What's inside?
 
@@ -19,7 +26,6 @@ This Turborepo includes the following packages/apps:
 - `docs`: a [Next.js](https://nextjs.org/) app
 - `web`: another [Next.js](https://nextjs.org/) app
 - `ui`: a stub React component library shared by both `web` and `docs` applications
-- `eslint-config-custom`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
 - `tsconfig`: `tsconfig.json`s used throughout the monorepo
 
 Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
@@ -29,16 +35,24 @@ Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
 This Turborepo has some additional tools already setup for you:
 
 - [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+- [Oxlint](https://oxc.rs/docs/guide/usage/linter) for code linting
+- [Oxfmt](https://oxc.rs/docs/guide/usage/formatter) for code formatting
+
+```sh
+bun run lint          # Check code
+bun run lint:fix      # Apply safe lint fixes
+bun run format       # Format files
+bun run format:check # Check formatting without writing
+```
+
+Configuration lives in `.oxlintrc.json` and `.oxfmtrc.json`. Generated output is excluded; backend files retain single quotes. Next.js no longer runs ESLint during builds, so run `bun run lint` separately in CI.
 
 ### Build
 
 To build all apps and packages, run the following command:
 
 ```
-cd my-turborepo
-pnpm build
+bun run build
 ```
 
 ### Develop
@@ -46,8 +60,7 @@ pnpm build
 To develop all apps and packages, run the following command:
 
 ```
-cd my-turborepo
-pnpm dev
+bun run dev
 ```
 
 ### Remote Caching
@@ -57,8 +70,7 @@ Turborepo can use a technique known as [Remote Caching](https://turbo.build/repo
 By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup), then enter the following commands:
 
 ```
-cd my-turborepo
-npx turbo login
+bunx turbo login
 ```
 
 This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
@@ -66,7 +78,7 @@ This will authenticate the Turborepo CLI with your [Vercel account](https://verc
 Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
 
 ```
-npx turbo link
+bunx turbo link
 ```
 
 ## Useful Links

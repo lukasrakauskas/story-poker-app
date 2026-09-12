@@ -2,15 +2,9 @@ import { nanoid } from 'nanoid';
 import { WebSocket } from 'ws';
 
 export class Client extends WebSocket {
-  #id: string;
+  #id = nanoid();
   #roomId?: string;
-  #isAlive: boolean;
-
-  constructor(args) {
-    super(args);
-    this.#id = nanoid();
-    this.#isAlive = true;
-  }
+  #isAlive = true;
 
   get id() {
     return this.#id;
