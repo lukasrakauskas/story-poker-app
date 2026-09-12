@@ -4,14 +4,13 @@ WORKDIR /app
 
 FROM base AS builder
 COPY . .
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --linker=hoisted
 RUN bun x --no-install turbo prune backend --docker
 
 FROM base AS installer
 COPY --from=builder /app/out/json/ .
 COPY --from=builder /app/out/bun.lock ./bun.lock
-COPY bunfig.toml .
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --linker=hoisted
 COPY --from=builder /app/out/full/ .
 RUN bun run build --filter=backend...
 

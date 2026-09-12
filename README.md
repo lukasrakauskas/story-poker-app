@@ -21,7 +21,7 @@ Keep the Bun versions in `package.json` and `apps/frontend/vercel.json` in sync 
 
 ### Fly.io backend deployment
 
-Keep `fly.toml` at the repository root: the backend Dockerfile needs the root `bun.lock`, `bunfig.toml`, and shared workspaces in its build context.
+Keep `fly.toml` at the repository root: the backend Dockerfile needs the root `package.json`, `bun.lock`, and shared workspaces in its build context.
 
 ```sh
 # From the repository root
@@ -38,6 +38,12 @@ bun run deploy:backend --build-only --push -a story-poker-backend --image-label 
 ```
 
 If using Fly's Git deployment settings, set the working/build directory to the **repository root**, the config path to `fly.toml`, and the Dockerfile path to `apps/backend/Dockerfile`. `--config ../../fly.toml` alone does not change the build context. If invoking Fly directly from `apps/backend`, use `flyctl deploy ../.. --config fly.toml` (the config path is relative to the selected build context).
+
+The Dockerfile explicitly selects Bun's hoisted linker in both install stages, so it does not need to copy `bunfig.toml` separately. This does **not** make a backend-only build context valid. If the deployment log still shows `--config ../../fly.toml` without a context argument, update the Fly Git deployment settings above; repository scripts cannot change that generated command. The equivalent corrected build-only command from `apps/backend` is:
+
+```sh
+flyctl deploy ../.. --build-only --push -a story-poker-backend --image-label <label> --config fly.toml
+```
 
 ### Tests and tooling
 
