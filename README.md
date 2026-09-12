@@ -13,6 +13,34 @@ bun run dev
 
 Commit `bun.lock` when dependencies change. CI and deployment should use `bun install --frozen-lockfile`.
 
+### Vercel deployment
+
+Set the Vercel project's **Root Directory** to `apps/frontend` and enable **Include source files outside of the Root Directory in the Build Step** so the shared workspaces are available. `apps/frontend/vercel.json` explicitly runs installation and builds with Bun 1.4.2 via `npx`, rather than Vercel's bundled Bun, which may not support the committed lockfile format. Installation runs from the repository root with `--frozen-lockfile`.
+
+Keep the Bun versions in `package.json` and `apps/frontend/vercel.json` in sync when upgrading. Redeploy after applying these settings.
+
+### Fly.io backend deployment
+
+Keep `fly.toml` at the repository root: the backend Dockerfile needs the root `bun.lock`, `bunfig.toml`, and shared workspaces in its build context.
+
+```sh
+# From the repository root
+bun run deploy:backend
+
+# Or from apps/backend
+bun run deploy
+```
+
+Both scripts run Fly from the repository root and forward additional CLI flags. For the build-only/push step, run this from the repository root:
+
+```sh
+bun run deploy:backend --build-only --push -a story-poker-backend --image-label <label>
+```
+
+If using Fly's Git deployment settings, set the working/build directory to the **repository root**, the config path to `fly.toml`, and the Dockerfile path to `apps/backend/Dockerfile`. `--config ../../fly.toml` alone does not change the build context. If invoking Fly directly from `apps/backend`, use `flyctl deploy ../.. --config fly.toml` (the config path is relative to the selected build context).
+
+### Tests and tooling
+
 Run backend tests with `bun run --cwd apps/backend test` (the project uses Vitest, not `bun test`).
 
 The backend emits native ESM. TypeScript stays on 6.0.3 until Nest CLI supports TypeScript 7's compiler API; all other direct dependencies use the latest stable releases.
