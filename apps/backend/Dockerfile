@@ -5,7 +5,7 @@ WORKDIR /app
 FROM base AS builder
 COPY . .
 RUN bun install --frozen-lockfile
-RUN bunx --no-install turbo prune backend --docker
+RUN bun x --no-install turbo prune backend --docker
 
 FROM base AS installer
 COPY --from=builder /app/out/json/ .

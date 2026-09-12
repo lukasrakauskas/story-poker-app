@@ -7,6 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
+    "deploy": "cd ../.. && bun run deploy:backend",
     "format": "oxfmt --write .",
     "start": "nest start",
     "dev": "nest start --watch",
