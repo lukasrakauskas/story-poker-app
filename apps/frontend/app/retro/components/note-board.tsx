@@ -5,6 +5,9 @@ import type { RetroColumn, RetroNote, RetroRoom } from "shared/retrospective";
 import type { RetroSession } from "../../../hooks/use-retro-socket";
 import { Button } from "ui/components/button";
 import { Label } from "ui/components/label";
+import { Badge } from "ui/components/badge";
+import { Textarea } from "ui/components/textarea";
+import { ItemActions } from "./item-actions";
 
 export const columns: {
   id: RetroColumn;
@@ -31,8 +34,6 @@ export const columns: {
     accent: "border-t-sky-500",
   },
 ];
-export const textAreaClass =
-  "flex min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
 type BoardProps = {
   room: RetroRoom;
@@ -111,10 +112,9 @@ export function NoteBoard({ room, selfId, disabled, send }: BoardProps) {
           <div className="mb-4 space-y-1">
             <h2 id={`heading-${column.id}`} className="font-semibold">
               {column.title}{" "}
-              <span className="ml-1 text-sm font-normal text-muted-foreground">
-                ({room.notes.filter((note) => note.column === column.id).length}
-                )
-              </span>
+              <Badge variant="secondary" className="ml-1 tabular-nums">
+                {room.notes.filter((note) => note.column === column.id).length}
+              </Badge>
             </h2>
             <p className="text-sm text-muted-foreground">{column.prompt}</p>
           </div>
@@ -170,10 +170,10 @@ function AddNote({
       }}
     >
       <Label htmlFor={`new-${column}`}>Add a note</Label>
-      <textarea
+      <Textarea
         id={`new-${column}`}
         maxLength={1000}
-        className={textAreaClass}
+        className="min-h-24 resize-y"
         value={text}
         onChange={(event) => setText(event.target.value)}
         placeholder="One thought per note…"
@@ -216,15 +216,27 @@ function NoteCard({
     "Former member";
   return (
     <article className="space-y-3 rounded-lg border bg-card p-4 text-card-foreground shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span className="break-words">
+      <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
+        <span className="min-w-0 break-words">
           {author}
           {own ? " (you)" : ""}
         </span>
         {showColumn && (
-          <span>
+          <Badge variant="outline" className="shrink-0">
             {columns.find((column) => column.id === note.column)?.title}
-          </span>
+          </Badge>
+        )}
+        {canEdit && (
+          <ItemActions
+            kind="note"
+            text={note.text}
+            disabled={disabled || editing}
+            onEdit={() => {
+              setText(note.text);
+              setEditing(true);
+            }}
+            onDelete={() => send({ type: "delete-note", id: note.id })}
+          />
         )}
       </div>
       {editing && canEdit ? (
@@ -240,10 +252,10 @@ function NoteCard({
           }}
         >
           <Label htmlFor={`edit-${note.id}`}>Edit your note</Label>
-          <textarea
+          <Textarea
             id={`edit-${note.id}`}
             maxLength={1000}
-            className={textAreaClass}
+            className="min-h-24 resize-y"
             value={text}
             onChange={(event) => setText(event.target.value)}
             required
@@ -268,34 +280,6 @@ function NoteCard({
         <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
           {note.text}
         </p>
-      )}
-      {canEdit && !editing && (
-        <div className="flex gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled}
-            aria-label={`Edit your note: ${note.text}`}
-            onClick={() => {
-              setText(note.text);
-              setEditing(true);
-            }}
-          >
-            Edit
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled}
-            aria-label={`Delete your note: ${note.text}`}
-            onClick={() => {
-              if (window.confirm("Delete this note? This cannot be undone."))
-                void send({ type: "delete-note", id: note.id });
-            }}
-          >
-            Delete
-          </Button>
-        </div>
       )}
       {room.phase === "vote" ? (
         <Button

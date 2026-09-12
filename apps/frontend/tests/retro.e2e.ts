@@ -11,7 +11,7 @@ declare global {
 test("collaborates through all phases, reconnects, and keeps sessions memory-only", async ({
   context,
   page: owner,
-}) => {
+}, testInfo) => {
   await context.addInitScript(() => {
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
@@ -92,6 +92,101 @@ test("collaborates through all phases, reconnects, and keeps sessions memory-onl
     owner.getByLabel("Add a note", { exact: true }).nth(0)
   ).toHaveValue("");
 
+  // Ticket controls are tucked into a keyboard-accessible menu, owner-only.
+  const noteActions = owner.getByRole("button", {
+    name: "Actions for note: Teamwork was excellent",
+    exact: true,
+  });
+  await expect(
+    guest.getByRole("button", {
+      name: "Actions for note: Teamwork was excellent",
+      exact: true,
+    })
+  ).toHaveCount(0);
+  await expect(
+    owner.getByRole("menuitem", { name: "Edit", exact: true })
+  ).toHaveCount(0);
+  await noteActions.focus();
+  await owner.keyboard.press("Enter");
+  await owner.getByRole("menuitem", { name: "Edit", exact: true }).click();
+  await expect(owner.getByLabel("Edit your note")).toBeFocused();
+  await owner
+    .getByLabel("Edit your note")
+    .fill("Teamwork was excellent (edited)");
+  await owner.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(
+    guest.getByText("Teamwork was excellent (edited)", { exact: true })
+  ).toBeVisible();
+  await owner
+    .getByRole("button", {
+      name: "Actions for note: Teamwork was excellent (edited)",
+      exact: true,
+    })
+    .click();
+  await owner.getByRole("menuitem", { name: "Edit", exact: true }).click();
+  await owner.getByLabel("Edit your note").fill("Teamwork was excellent");
+  await owner.getByRole("button", { name: "Save", exact: true }).click();
+
+  await noteActions.click();
+  await owner.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  const confirmation = owner.getByRole("alertdialog");
+  await expect(
+    confirmation.getByRole("heading", { name: "Delete this note?" })
+  ).toBeVisible();
+  await confirmation
+    .getByRole("button", { name: "Cancel", exact: true })
+    .click();
+  await expect(noteActions).toBeFocused();
+  await expect(
+    guest.getByText("Teamwork was excellent", { exact: true })
+  ).toBeVisible();
+
+  await owner
+    .getByLabel("Add a note", { exact: true })
+    .nth(2)
+    .fill("Temporary idea");
+  await owner
+    .getByRole("button", { name: "Add to ideas", exact: true })
+    .click();
+  await owner
+    .getByRole("button", {
+      name: "Actions for note: Temporary idea",
+      exact: true,
+    })
+    .click();
+  await owner.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  await confirmation
+    .getByRole("button", { name: "Delete note", exact: true })
+    .click();
+  await expect(owner.getByText("Temporary idea", { exact: true })).toHaveCount(
+    0
+  );
+  await expect(guest.getByText("Temporary idea", { exact: true })).toHaveCount(
+    0
+  );
+
+  await owner.screenshot({
+    path: testInfo.outputPath("retro-board.png"),
+    fullPage: true,
+  });
+  await owner.setViewportSize({ width: 390, height: 844 });
+  await noteActions.click();
+  await expect(
+    owner.getByRole("menuitem", { name: "Edit", exact: true })
+  ).toBeVisible();
+  expect(
+    await owner.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth
+    )
+  ).toBe(true);
+  await owner.screenshot({
+    path: testInfo.outputPath("retro-mobile-menu.png"),
+    fullPage: true,
+  });
+  await owner.keyboard.press("Escape");
+  await expect(noteActions).toBeFocused();
+  await owner.setViewportSize({ width: 1280, height: 720 });
+
   await owner.evaluate(() => window.retroTestSocket.close());
   await owner.getByRole("button", { name: "Retry connection" }).click();
   await expect(
@@ -100,6 +195,9 @@ test("collaborates through all phases, reconnects, and keeps sessions memory-onl
   await owner
     .getByRole("button", { name: "Start voting", exact: true })
     .click();
+  await expect(
+    owner.getByRole("button", { name: /^Actions for note:/ })
+  ).toHaveCount(0);
   await guest
     .getByRole("button", {
       name: "Vote for note: Teamwork was excellent",
@@ -126,6 +224,28 @@ test("collaborates through all phases, reconnects, and keeps sessions memory-onl
     })
     .click();
   await expect(guest.getByText("Done", { exact: true })).toBeVisible();
+
+  await expect(
+    guest.getByRole("button", { name: /^Actions for action:/ })
+  ).toHaveCount(0);
+  await owner.getByLabel("Next step", { exact: true }).fill("Temporary action");
+  await owner.getByRole("button", { name: "Add action", exact: true }).click();
+  await owner
+    .getByRole("button", {
+      name: "Actions for action: Temporary action",
+      exact: true,
+    })
+    .click();
+  await owner.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  await confirmation
+    .getByRole("button", { name: "Delete action", exact: true })
+    .click();
+  await expect(
+    owner.getByText("Temporary action", { exact: true })
+  ).toHaveCount(0);
+  await expect(
+    guest.getByText("Temporary action", { exact: true })
+  ).toHaveCount(0);
 
   const downloading = owner.waitForEvent("download");
   await owner.getByRole("button", { name: "Export JSON", exact: true }).click();

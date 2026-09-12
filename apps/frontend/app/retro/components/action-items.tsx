@@ -13,7 +13,10 @@ import {
 } from "ui/components/card";
 import { Input } from "ui/components/input";
 import { Label } from "ui/components/label";
-import { textAreaClass } from "./note-board";
+import { Textarea } from "ui/components/textarea";
+import { Checkbox } from "ui/components/checkbox";
+import { Badge } from "ui/components/badge";
+import { ItemActions } from "./item-actions";
 
 export function ActionItems({
   room,
@@ -46,20 +49,19 @@ export function ActionItems({
               <li key={action.id} className="space-y-2 rounded-md border p-3">
                 <div className="flex items-start gap-3">
                   {editable ? (
-                    <input
-                      type="checkbox"
-                      className="mt-1 h-4 w-4 shrink-0 accent-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    <Checkbox
+                      className="mt-1 shrink-0"
                       checked={action.done}
                       disabled={disabled}
                       aria-label={`Mark action ${action.done ? "incomplete" : "complete"}: ${action.text}`}
-                      onChange={() =>
+                      onCheckedChange={() =>
                         void send({ type: "toggle-action", id: action.id })
                       }
                     />
                   ) : (
-                    <span className="pt-0.5 text-xs text-muted-foreground">
+                    <Badge variant={action.done ? "secondary" : "outline"}>
                       {action.done ? "Done" : "Open"}
-                    </span>
+                    </Badge>
                   )}
                   <div className="min-w-0 flex-1">
                     <p
@@ -71,21 +73,17 @@ export function ActionItems({
                       Owner: {action.owner || "Unassigned"}
                     </p>
                   </div>
+                  {editable && (
+                    <ItemActions
+                      kind="action"
+                      text={action.text}
+                      disabled={disabled}
+                      onDelete={() =>
+                        send({ type: "delete-action", id: action.id })
+                      }
+                    />
+                  )}
                 </div>
-                {editable && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={disabled}
-                    aria-label={`Delete action: ${action.text}`}
-                    onClick={() => {
-                      if (window.confirm("Delete this action item?"))
-                        void send({ type: "delete-action", id: action.id });
-                    }}
-                  >
-                    Delete
-                  </Button>
-                )}
               </li>
             ))}
           </ul>
@@ -115,10 +113,10 @@ export function ActionItems({
           >
             <div className="space-y-2">
               <Label htmlFor="action-text">Next step</Label>
-              <textarea
+              <Textarea
                 id="action-text"
                 maxLength={1000}
-                className={textAreaClass}
+                className="min-h-24 resize-y"
                 value={text}
                 onChange={(event) => setText(event.target.value)}
                 placeholder="A specific, achievable change…"
