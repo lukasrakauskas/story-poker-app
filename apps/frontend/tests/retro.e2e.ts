@@ -8,8 +8,9 @@ declare global {
   }
 }
 
-test("collaborates through all phases, reconnects, and keeps sessions memory-only", async ({
+test("collaborates, rejoins with cookies, and saves final retros with Markdown export", async ({
   context,
+  browser,
   page: owner,
 }, testInfo) => {
   await context.addInitScript(() => {
@@ -21,7 +22,9 @@ test("collaborates through all phases, reconnects, and keeps sessions memory-onl
       }
     };
   });
-  const guest = await context.newPage();
+  // Different participants use separate browser profiles; tabs share rejoin cookies.
+  const guestContext = await browser.newContext();
+  const guest = await guestContext.newPage();
   const errors: string[] = [];
   for (const page of [owner, guest]) {
     page.on("pageerror", (error) => errors.push(error.message));
@@ -37,7 +40,19 @@ test("collaborates through all phases, reconnects, and keeps sessions memory-onl
     owner.getByRole("heading", { name: "Browser retrospective" })
   ).toBeVisible();
   await expect(owner.getByLabel("Room link")).toHaveValue(owner.url());
-  await guest.goto(owner.url());
+  const roomUrl = owner.url();
+  const cookies = await context.cookies(roomUrl);
+  const credential = cookies.find((cookie) =>
+    cookie.name.startsWith("retro-session-")
+  )!;
+  expect(credential).toBeTruthy();
+  expect(credential.path).toBe("/retro");
+  expect(credential.sameSite).toBe("Lax");
+  expect(credential.expires * 1000).toBeGreaterThan(Date.now());
+  expect(credential.expires * 1000).toBeLessThanOrEqual(
+    Date.now() + 2 * 60 * 60 * 1000
+  );
+  await guest.goto(roomUrl);
   await guest.getByLabel("Your name").fill("Bobby");
   await guest
     .getByRole("button", { name: "Join retrospective", exact: true })
@@ -187,6 +202,19 @@ test("collaborates through all phases, reconnects, and keeps sessions memory-onl
   await expect(noteActions).toBeFocused();
   await owner.setViewportSize({ width: 1280, height: 720 });
 
+  await owner.reload();
+  await expect(
+    owner.getByRole("complementary").getByText("Alice (you)", { exact: true })
+  ).toBeVisible();
+  await expect(noteActions).toBeVisible();
+  await expect(
+    owner.getByRole("button", { name: "Start voting", exact: true })
+  ).toBeEnabled();
+  expect(
+    (await context.cookies(roomUrl)).find(
+      (cookie) => cookie.name === credential.name
+    )?.value
+  ).toBe(credential.value);
   await owner.evaluate(() => window.retroTestSocket.close());
   await owner.getByRole("button", { name: "Retry connection" }).click();
   await expect(
@@ -279,15 +307,94 @@ test("collaborates through all phases, reconnects, and keeps sessions memory-onl
   await owner.getByRole("menuitem", { name: "Dark", exact: true }).click();
   await expect(owner.locator("html")).toHaveClass(/dark/);
   expect(await owner.evaluate(() => sessionStorage.length)).toBe(0);
-  expect(
-    await owner.evaluate(() =>
-      Object.keys(localStorage).filter((key) => key !== "theme")
+  const saved = await owner.evaluate(() =>
+    Object.entries(localStorage).filter(([key]) =>
+      key.startsWith("retro-history-v1:")
     )
-  ).toEqual([]);
+  );
+  expect(saved).toHaveLength(1);
+  expect(saved[0][1]).not.toContain(credential.value);
+  expect(saved[0][1]).not.toContain('"token"');
+  expect(JSON.parse(saved[0][1]).room.phase).toBe("closed");
   await guest.reload();
   await expect(
-    guest.getByRole("button", { name: "Join retrospective", exact: true })
+    guest.getByRole("complementary").getByText("Bobby (you)", { exact: true })
   ).toBeVisible();
-  await expect(guest.getByLabel("Your name")).toHaveValue("");
+  await expect(
+    guest.getByRole("heading", {
+      name: "Retrospective complete · read-only",
+      exact: true,
+    })
+  ).toBeVisible();
+
+  // Saved history is independent of both the room token and the live server.
+  await context.clearCookies();
+  await context.routeWebSocket("**/retro", (socket) => socket.close());
+  await owner
+    .getByRole("link", { name: "Previous retrospectives", exact: true })
+    .click();
+  await expect(
+    owner.getByRole("heading", { name: "Browser retrospective", exact: true })
+  ).toBeVisible();
+  await expect(
+    owner.getByText("Completed · final actions", { exact: false })
+  ).toBeVisible();
+  await expect(
+    owner.getByText("Pair on flaky tests", { exact: true })
+  ).toBeVisible();
+  await expect(owner.getByText("Done · Bobby", { exact: true })).toBeVisible();
+  await owner.reload();
+  await expect(
+    owner.getByText("Pair on flaky tests", { exact: true })
+  ).toBeVisible();
+  await owner
+    .getByText("View saved notes and participants", { exact: true })
+    .click();
+  await expect(
+    owner.getByText("Teamwork was excellent", { exact: true })
+  ).toBeVisible();
+
+  expect(
+    await owner.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth
+    )
+  ).toBe(true);
+
+  const markdownDownload = owner.waitForEvent("download");
+  await owner
+    .getByRole("button", { name: "Export Markdown", exact: true })
+    .click();
+  const markdownFile = await markdownDownload;
+  expect(markdownFile.suggestedFilename()).toMatch(/\.md$/);
+  const markdown = await readFile((await markdownFile.path())!, "utf8");
+  expect(markdown).toContain("# Browser retrospective");
+  expect(markdown).toContain("- [x] Pair on flaky tests");
+  expect(markdown).toContain("Bobby");
+  expect(markdown).not.toContain(credential.value);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await owner
+    .getByRole("button", { name: "Copy Markdown", exact: true })
+    .click();
+  await expect
+    .poll(() => owner.evaluate(() => navigator.clipboard.readText()))
+    .toBe(markdown);
+  await owner.evaluate(() =>
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      value: () => Promise.reject(new Error("Blocked")),
+    })
+  );
+  await owner
+    .getByRole("button", { name: "Copy Markdown", exact: true })
+    .click();
+  await expect(owner.getByRole("textbox", { name: /Markdown/i })).toHaveValue(
+    markdown
+  );
+  await owner
+    .getByRole("button", { name: "Delete saved retro", exact: true })
+    .click();
+  await expect(owner.getByText(/No saved retrospectives yet/)).toBeVisible();
+  await owner.reload();
+  await expect(owner.getByText(/No saved retrospectives yet/)).toBeVisible();
   expect(errors).toEqual([]);
+  await guestContext.close();
 });

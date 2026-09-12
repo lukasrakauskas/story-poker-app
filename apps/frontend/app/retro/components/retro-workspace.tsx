@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { RetroPhase } from "shared/retrospective";
 import { Button } from "ui/components/button";
-import { useRetro } from "./retro-provider";
+import { RetroProvider, useRetro } from "./retro-provider";
 import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
 import { ActionItems } from "./action-items";
@@ -40,14 +40,31 @@ const phases: {
     id: "closed",
     label: "Closed",
     description:
-      "This retrospective is complete and read-only. Save the takeaways before the room expires.",
+      "This retrospective is complete and read-only. Find the saved snapshot in Previous retrospectives, or export a backup.",
   },
 ];
 
 export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
-  const { room, selfId, connection, pending, error, retry, send } = useRetro();
+  return (
+    <RetroProvider>
+      <Workspace initialCode={initialCode} />
+    </RetroProvider>
+  );
+}
+
+function Workspace({ initialCode }: { initialCode?: string }) {
+  const {
+    room,
+    selfId,
+    connection,
+    pending,
+    error,
+    retry,
+    send,
+    cookieSaved,
+    historySaved,
+  } = useRetro();
   const [now, setNow] = useState<number | null>(null);
-  const hasRoom = room !== null;
   useEffect(() => {
     // Synchronize the browser clock after hydration, then keep the expiry boundary current.
     // oxlint-disable-next-line react/set-state-in-effect
@@ -55,15 +72,6 @@ export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  useEffect(() => {
-    if (!hasRoom) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [hasRoom]);
 
   const expired =
     error?.code === "room-expired" ||
@@ -94,6 +102,17 @@ export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-5 px-4 py-6 sm:px-8">
+      <nav
+        className="flex flex-wrap gap-4 text-sm"
+        aria-label="Retrospective navigation"
+      >
+        <a className="underline underline-offset-4" href="/retro">
+          Start or join a room
+        </a>
+        <a className="underline underline-offset-4" href="/retro/history">
+          Previous retrospectives
+        </a>
+      </nav>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3">
         <output className="text-sm">
           <span
@@ -124,33 +143,56 @@ export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
           <p className="font-medium">{error.message}</p>
           {invalid && (
             <p>
-              Your identity could not be restored. The last snapshot is
-              read-only. Rejoin with a new identity; you cannot reclaim your old
-              notes or moderator role.
+              This connection no longer owns the session. The last snapshot is
+              read-only. If you reopened the room in another tab, use that tab
+              or reopen it here. If the saved credential was rejected, join with
+              a new name; the old notes and moderator role cannot be reclaimed.
             </p>
           )}
           {(invalid || error.code === "room-expired") && (
             <a
               className="inline-block underline underline-offset-4"
               href={
-                invalid && room
-                  ? `/retro/${encodeURIComponent(room.code)}`
+                invalid && (room?.code || initialCode)
+                  ? `/retro/${encodeURIComponent(room?.code || initialCode!)}`
                   : "/retro"
               }
             >
               {invalid
-                ? "Rejoin as a new participant"
+                ? room
+                  ? "Reopen room"
+                  : "Rejoin as a new participant"
                 : "Start or join another room"}
             </a>
           )}
         </div>
       )}
       <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
-        <strong>Keep this tab open.</strong> Your identity is held only in
-        memory. Reloading or leaving loses your identity, note ownership, and
-        moderator access. Reconnecting in this tab can restore your session.
-        Rooms expire permanently two hours after creation.
+        <strong>No account needed.</strong> A cookie remembers your identity on
+        this browser until the room expires, two hours after creation. Return to
+        the room link to rejoin. Notes, names, and action items are saved
+        locally in Previous retrospectives. Browser data is not a backup or
+        shared across devices. Opening the same room in another tab moves your
+        live connection there.
       </div>
+      {cookieSaved === false && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not save your rejoin cookie. Keep this tab open to retain your
+          identity and moderator access.
+        </p>
+      )}
+      {historySaved === false && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not save this snapshot in browser history. Storage may be
+          blocked or full. Export a copy before leaving.
+        </p>
+      )}
+      {historySaved === true && (
+        <p className="text-xs text-muted-foreground">
+          Latest snapshot saved on this browser
+          {room?.phase === "closed" ? " with final action items" : ""}.
+        </p>
+      )}
       {!room ? (
         <RetroLobby initialCode={initialCode} />
       ) : (
@@ -187,8 +229,8 @@ export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
             {(expired || (minutes !== null && minutes <= 15)) && (
               <p role="alert" className="text-sm font-medium">
                 {expired
-                  ? "This room has expired. You can still export the last snapshot from this tab; no further changes are possible."
-                  : "This room expires soon. Export your notes and actions now so you don’t lose them."}
+                  ? "This room has expired. The last snapshot is read-only and can still be exported. Check Previous retrospectives for your saved copy."
+                  : "This live room expires soon. Check that your latest snapshot is saved, or export a backup now."}
               </p>
             )}
             <ol
