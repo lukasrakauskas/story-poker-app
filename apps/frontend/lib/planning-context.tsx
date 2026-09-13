@@ -42,6 +42,7 @@ interface PlanningData {
   castVote: (vote: string) => void;
   removeVote: () => void;
   changePlanningState: () => void;
+  claimModerator: () => void;
   promoteUser: (userId: string) => void;
   kickUser: (userId: string) => void;
   changeAvatar: (avatar: number) => void;
@@ -68,6 +69,7 @@ export const PlanningContext = createContext<PlanningData>({
   castVote: () => {},
   removeVote: () => {},
   changePlanningState: () => {},
+  claimModerator: () => {},
   promoteUser: () => {},
   kickUser: () => {},
   changeAvatar: () => {},
@@ -145,6 +147,10 @@ export function PlanningProvider({
   const changePlanningState = () => {
     if (planningState === "voting") app.send("reveal-results");
     if (planningState === "results") app.send("start-voting");
+  };
+
+  const claimModerator = () => {
+    app.send("claim-moderator");
   };
 
   const promoteUser = (userId: string) => {
@@ -378,6 +384,15 @@ export function PlanningProvider({
       });
     });
 
+    const unsubModeratorOnline = app.on("moderator-online", () => {
+      toast({
+        title: "A moderator is online",
+        description:
+          "You can only claim the role when all moderators are offline.",
+        variant: "destructive",
+      });
+    });
+
     const unsubMessageBroadcasted = app.on("broadcasted-message", (data) => {
       toast({ title: data.message, duration: 10000 });
     });
@@ -409,6 +424,7 @@ export function PlanningProvider({
       unsubKicked();
       unsubTargetUserNotFound();
       unsubUserNotMod();
+      unsubModeratorOnline();
       unsubMessageBroadcasted();
       window.removeEventListener("beforeunload", handleClose);
     };
@@ -433,6 +449,7 @@ export function PlanningProvider({
         castVote,
         removeVote,
         changePlanningState,
+        claimModerator,
         promoteUser,
         kickUser,
         changeAvatar,

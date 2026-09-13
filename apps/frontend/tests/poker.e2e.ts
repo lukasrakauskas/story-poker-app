@@ -119,6 +119,53 @@ test("room controls persist and protect a planning session", async ({
   }
 });
 
+test("a participant can claim moderator when all moderators are offline", async ({
+  page,
+  browser,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Scan to join" })
+  ).toBeVisible();
+
+  const roomUrl = page.url();
+  const guestContext = await browser.newContext();
+  const guest = await guestContext.newPage();
+  try {
+    await guest.goto(roomUrl);
+    await guest.getByLabel("Name", { exact: true }).fill("Bobby");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(page.getByText("2 online", { exact: true })).toBeVisible();
+    await expect(
+      guest.getByRole("button", { name: "Claim moderator role" })
+    ).toHaveCount(0);
+
+    await page.close();
+    await expect(
+      guest.getByText(
+        "All moderators are offline. Claim the role to keep the room moving.",
+        { exact: true }
+      )
+    ).toBeVisible();
+    await guest
+      .getByRole("button", { name: "Claim moderator role", exact: true })
+      .click();
+
+    await expect(
+      guest.getByRole("button", { name: "Reveal results", exact: true })
+    ).toBeVisible();
+    const self = guest
+      .getByLabel("People in the room")
+      .getByRole("listitem")
+      .filter({ hasText: "Bobby (you)" });
+    await expect(self.getByText("Moderator", { exact: true })).toBeVisible();
+  } finally {
+    await guestContext.close();
+  }
+});
+
 test("poker voting and results fill the viewport without incidental scrolling", async ({
   page,
   browser,

@@ -180,6 +180,18 @@ export class EventsGateway
     this.notifyRoom(result.room, { event: 'voting-started', data: null });
   }
 
+  @SubscribeMessage('claim-moderator')
+  onClaimModerator(@ConnectedSocket() client: Client) {
+    const result = this.rooms.claimModerator(client.roomId ?? '', client.id);
+    if ('error' in result) return result.error;
+    this.notifyRoom(result.room, {
+      event: 'user-updated',
+      data: {
+        user: this.users.toPublic(result.user, result.room.state === 'results'),
+      },
+    });
+  }
+
   @SubscribeMessage('promote-user')
   onPromoteUser(
     @ConnectedSocket() client: Client,

@@ -182,6 +182,22 @@ export class RoomService {
     return membership;
   }
 
+  claimModerator(code: string, id: string): RoomResult<Membership> {
+    const membership = this.findMember(code, id);
+    if ('error' in membership) return membership;
+    if (membership.user.role === 'mod') return membership;
+    if (
+      membership.room.users.some(
+        (user) => user.role === 'mod' && user.status === 'connected',
+      )
+    ) {
+      return { error: { event: 'moderator-online', data: null } };
+    }
+
+    membership.user.role = 'mod';
+    return membership;
+  }
+
   promoteUser(
     code: string,
     moderatorId: string,

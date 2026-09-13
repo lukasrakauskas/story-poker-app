@@ -50,6 +50,7 @@ export function InviteToRoom() {
     roomCode,
     requiresPassword,
     avatars,
+    claimModerator,
     promoteUser,
     kickUser,
     changeAvatar,
@@ -59,6 +60,9 @@ export function InviteToRoom() {
   const connected = users.filter((user) => user.status === "connected");
   const voted = connected.filter((user) => user.voted).length;
   const revealed = planningState === "results";
+  const moderatorsOffline = !users.some(
+    (user) => user.role === "mod" && user.status === "connected"
+  );
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const roomLink = `${origin}/${roomCode}`;
 
@@ -294,6 +298,20 @@ export function InviteToRoom() {
               )}
               {revealed ? "Start voting" : "Reveal results"}
             </Button>
+          ) : moderatorsOffline ? (
+            <div className="space-y-2">
+              <p className="text-center text-xs text-muted-foreground">
+                All moderators are offline. Claim the role to keep the room
+                moving.
+              </p>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={claimModerator}
+              >
+                <ShieldCheck aria-hidden="true" /> Claim moderator role
+              </Button>
+            </div>
           ) : (
             <p className="text-center text-xs text-muted-foreground">
               {revealed
