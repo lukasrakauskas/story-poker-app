@@ -28,6 +28,7 @@ export type RoomError = {
     | 'user-not-found'
     | 'target-user-not-found'
     | 'user-not-mod'
+    | 'moderator-online'
     | 'name-taken'
     | 'bad-username'
     | 'wrong-room-password'

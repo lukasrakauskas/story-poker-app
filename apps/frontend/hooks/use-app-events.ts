@@ -22,6 +22,7 @@ const emptyErrorEvents = [
   "user-not-found",
   "target-user-not-found",
   "user-not-mod",
+  "moderator-online",
   "name-taken",
   "wrong-room-password",
   "invalid-card-set",
@@ -95,6 +96,7 @@ type ClientEvents = {
   "reveal-results": undefined;
   "keep-alive": undefined;
   reconnect: { token: string; room: string };
+  "claim-moderator": undefined;
   "promote-user": { userId: string };
   "kick-user": { userId: string };
   "change-avatar": { avatar: number };

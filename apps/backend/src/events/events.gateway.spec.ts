@@ -241,6 +241,24 @@ describe('room membership', () => {
     expect(JSON.stringify(joined)).not.toContain('secret');
   });
 
+  it('lets a user claim moderator when no moderator is online', () => {
+    const owner = client('owner');
+    const room = create(owner);
+    const guest = client('guest');
+    gateway.onJoinRoom(guest, { name: 'Guest', room: room.code });
+
+    expect(gateway.onClaimModerator(guest)).toEqual({
+      event: 'moderator-online',
+      data: null,
+    });
+    gateway.handleDisconnect(owner);
+    expect(gateway.onClaimModerator(guest)).toBeUndefined();
+    expect(messages(guest).at(-1)).toMatchObject({
+      event: 'user-updated',
+      data: { user: { id: 'guest', role: 'mod' } },
+    });
+  });
+
   it('broadcasts avatar and moderator changes and removes kicked users', () => {
     const owner = client('owner');
     const room = create(owner);

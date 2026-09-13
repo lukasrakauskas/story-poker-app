@@ -138,6 +138,29 @@ describe('RoomService', () => {
     });
   });
 
+  it('lets a user claim the role only when all moderators are offline', () => {
+    const { room, user: owner } = success(rooms.create('one', 'Alice'));
+    const { user: moderator } = success(rooms.join(room.code, 'two', 'Bobby'));
+    const { user: claimant } = success(rooms.join(room.code, 'three', 'Carol'));
+    success(rooms.promoteUser(room.code, owner.id, moderator.id));
+
+    expect(rooms.claimModerator(room.code, claimant.id)).toEqual({
+      error: { event: 'moderator-online', data: null },
+    });
+    rooms.disconnect(room.code, owner.id);
+    expect(rooms.claimModerator(room.code, claimant.id)).toEqual({
+      error: { event: 'moderator-online', data: null },
+    });
+    rooms.disconnect(room.code, moderator.id);
+    expect(success(rooms.claimModerator(room.code, claimant.id)).user).toBe(
+      claimant,
+    );
+    expect(claimant.role).toBe('mod');
+    expect(success(rooms.claimModerator(room.code, claimant.id)).user).toBe(
+      claimant,
+    );
+  });
+
   it('returns empty results for a round without votes', () => {
     const { room, user } = success(rooms.create('one', 'Alice'));
     expect(success(rooms.revealResults(room.code, user.id)).results).toEqual(
