@@ -84,11 +84,11 @@ export function Results({
           : "Split vote";
 
   return (
-    <section aria-label="Vote results" className="my-auto">
-      <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1.3fr)_minmax(12rem,0.7fr)] lg:gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
+    <section aria-label="Vote results" className="min-h-0 flex-1">
+      <div className="grid h-full min-h-0 sm:grid-cols-3">
         <figure
           aria-label={distributionLabel}
-          className="mx-auto h-80 w-full max-w-2xl sm:h-[clamp(20rem,calc(100vh-12.5rem),32rem)]"
+          className="h-80 w-full sm:col-span-2 sm:h-full sm:min-h-0 sm:max-h-[60vh] sm:self-center"
         >
           <ChartContainer
             aria-hidden="true"
@@ -113,7 +113,7 @@ export function Results({
           </ChartContainer>
         </figure>
 
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0 space-y-5 p-4 text-left sm:col-span-1 sm:self-center">
           <div className="min-w-0 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-medium">Estimate breakdown</h2>

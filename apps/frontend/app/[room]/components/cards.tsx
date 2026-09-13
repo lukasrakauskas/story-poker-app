@@ -47,7 +47,7 @@ export function Cards() {
       <CardContent
         className={cn(
           "flex min-h-0 flex-1 flex-col overflow-y-auto",
-          revealed ? "p-2 sm:p-3 lg:p-4" : "p-4 sm:p-6"
+          revealed ? "p-0" : "p-4 sm:p-6"
         )}
       >
         {revealed ? (
