@@ -20,7 +20,12 @@ export function Cards() {
 
   return (
     <Card className="min-h-0 min-w-0 gap-0 overflow-hidden py-0">
-      <CardHeader className="shrink-0 gap-3 border-b p-4 sm:p-6">
+      <CardHeader
+        className={cn(
+          "shrink-0 border-b p-4",
+          revealed ? "gap-0" : "gap-3 sm:p-6"
+        )}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
             <Layers
@@ -33,13 +38,18 @@ export function Cards() {
             {revealed ? "Revealed" : "Private voting"}
           </Badge>
         </div>
-        <CardDescription>
+        <CardDescription className={cn(revealed && "sr-only")}>
           {revealed
             ? "Compare estimates and discuss the differences before your next round."
             : "Pick a card. Your estimate stays hidden until the moderator reveals the results."}
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
+      <CardContent
+        className={cn(
+          "flex min-h-0 flex-1 flex-col overflow-y-auto",
+          revealed ? "p-2 sm:p-3 lg:p-4" : "p-4 sm:p-6"
+        )}
+      >
         {revealed ? (
           <Results results={results} cardSet={cardSet} />
         ) : (

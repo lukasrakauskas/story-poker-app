@@ -85,10 +85,10 @@ export function Results({
 
   return (
     <section aria-label="Vote results" className="my-auto">
-      <div className="grid items-center gap-5 sm:grid-cols-[minmax(0,1.3fr)_minmax(13rem,0.85fr)] lg:gap-8">
+      <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1.3fr)_minmax(12rem,0.7fr)] lg:gap-4 xl:grid-cols-[minmax(0,1fr)_17rem]">
         <figure
           aria-label={distributionLabel}
-          className="mx-auto h-72 w-full max-w-xl sm:h-80 lg:h-96 xl:h-[28rem]"
+          className="mx-auto h-80 w-full max-w-2xl sm:h-[clamp(20rem,calc(100vh-12.5rem),32rem)]"
         >
           <ChartContainer
             aria-hidden="true"
