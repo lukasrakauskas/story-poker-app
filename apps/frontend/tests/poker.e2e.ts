@@ -175,6 +175,23 @@ test("poker voting and results fill the viewport without incidental scrolling", 
       page.getByLabel("Estimates and vote counts").getByRole("listitem")
     ).toHaveCount(2);
     await expect(page.getByText("Split vote", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("figure", {
+        name: "Vote distribution: 3: 1 vote (50%); 5: 1 vote (50%)",
+      })
+    ).toBeVisible();
+    const highlights = page.getByLabel("Result highlights");
+    await expect(
+      highlights.getByText("Most voted", { exact: true })
+    ).toBeVisible();
+    await expect(highlights.getByText("3 & 5", { exact: true })).toBeVisible();
+    await expect(
+      highlights.getByText("Middle ground", { exact: true })
+    ).toBeVisible();
+    await expect(highlights.getByText("5", { exact: true })).toBeVisible();
+    await expect(
+      highlights.getByText("Closest card to the average (4)", { exact: true })
+    ).toBeVisible();
     for (const viewport of [
       { width: 1280, height: 720 },
       { width: 900, height: 600 },
