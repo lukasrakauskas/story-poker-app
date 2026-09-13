@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   UserRoundX,
   Users,
+  X,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Avatar, AvatarFallback, AvatarImage } from "ui/components/avatar";
@@ -23,14 +24,6 @@ import {
   CardDescription,
   CardHeader,
 } from "ui/components/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "ui/components/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +41,7 @@ export function InviteToRoom() {
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
     "idle"
   );
+  const [showQrCode, setShowQrCode] = useState(true);
   const {
     users,
     currentUser,
@@ -96,39 +90,6 @@ export function InviteToRoom() {
                 <LockKeyhole aria-hidden="true" className="size-3" />
                 <span className="sr-only">Password protected</span>
               </Badge>
-            )}
-            {currentUser?.role === "mod" && (
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Show room QR code"
-                  >
-                    <QrCode aria-hidden="true" />
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-sm">
-                  <DialogHeader>
-                    <DialogTitle>Scan to join</DialogTitle>
-                    <DialogDescription>
-                      Scan this code to open the room link. The room password is
-                      not included.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="mx-auto rounded-xl bg-white p-4">
-                    <QRCodeSVG
-                      value={roomLink}
-                      size={224}
-                      level="M"
-                      title={`Join planning room ${roomCode}`}
-                    />
-                  </div>
-                  <p className="break-all text-center text-xs text-muted-foreground">
-                    {roomLink}
-                  </p>
-                </DialogContent>
-              </Dialog>
             )}
             <Badge
               variant="outline"
@@ -323,7 +284,7 @@ export function InviteToRoom() {
             );
           })}
         </ul>
-        <div className="mt-auto shrink-0 border-t pt-4">
+        <div className="mt-auto shrink-0 space-y-4 border-t pt-4">
           {currentUser?.role === "mod" ? (
             <Button className="w-full" onClick={changePlanningState}>
               {revealed ? (
@@ -339,6 +300,41 @@ export function InviteToRoom() {
                 ? "The moderator will start the next round."
                 : "The moderator will reveal results when the team is ready."}
             </p>
+          )}
+          {currentUser?.role === "mod" && showQrCode && (
+            <section aria-labelledby="room-qr-title" className="border-t pt-4">
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div>
+                  <h3
+                    id="room-qr-title"
+                    className="flex items-center gap-2 text-sm font-medium"
+                  >
+                    <QrCode aria-hidden="true" className="size-4" /> Scan to
+                    join
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    The room password is not included.
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0"
+                  aria-label="Dismiss room QR code"
+                  onClick={() => setShowQrCode(false)}
+                >
+                  <X aria-hidden="true" />
+                </Button>
+              </div>
+              <div className="mx-auto w-fit rounded-lg bg-white p-2">
+                <QRCodeSVG
+                  value={roomLink}
+                  size={128}
+                  level="M"
+                  title={`Join planning room ${roomCode}`}
+                />
+              </div>
+            </section>
           )}
         </div>
       </CardContent>
