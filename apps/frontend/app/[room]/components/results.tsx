@@ -102,7 +102,7 @@ export function Results({
                 nameKey="estimate"
                 innerRadius={0}
                 outerRadius="98%"
-                paddingAngle={data.length > 1 ? 1 : 0}
+                paddingAngle={0}
                 stroke="hsl(var(--background))"
                 strokeWidth={3}
                 labelLine={false}
