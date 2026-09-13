@@ -40,11 +40,13 @@ test("room controls persist and protect a planning session", async ({
   await page.getByLabel("Room password (optional)").fill("secret");
   await page.getByRole("button", { name: "Create room", exact: true }).click();
 
-  await page.getByRole("button", { name: "Show room QR code" }).click();
   await expect(
     page.getByRole("heading", { name: "Scan to join" })
   ).toBeVisible();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Dismiss room QR code" }).click();
+  await expect(page.getByRole("heading", { name: "Scan to join" })).toHaveCount(
+    0
+  );
 
   await page.getByRole("button", { name: "Estimate 3" }).click();
   await expect(page.getByText("1 of 1 voted", { exact: true })).toBeVisible();
@@ -70,11 +72,17 @@ test("room controls persist and protect a planning session", async ({
     await guest.getByLabel("Room password (optional)").fill("secret");
     await guest.getByRole("button", { name: "Join room", exact: true }).click();
     await expect(page.getByText("2 online", { exact: true })).toBeVisible();
+    await expect(
+      guest.getByRole("heading", { name: "Scan to join" })
+    ).toHaveCount(0);
 
     await page.getByRole("button", { name: "Manage Bobby" }).click();
     await page.getByRole("menuitem", { name: "Make moderator" }).click();
     await expect(
       guest.getByRole("button", { name: "Reveal results", exact: true })
+    ).toBeVisible();
+    await expect(
+      guest.getByRole("heading", { name: "Scan to join" })
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Estimate 3" }).click();
