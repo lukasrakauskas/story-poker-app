@@ -68,7 +68,9 @@ test("room controls persist and protect a planning session", async ({
     await guest.goto(page.url());
     await guest.getByLabel("Name", { exact: true }).fill("Bobby");
     await guest.getByRole("button", { name: "Join room", exact: true }).click();
-    await expect(guest.getByText("Incorrect room password")).toBeVisible();
+    await expect(
+      guest.getByText("Incorrect room password", { exact: true })
+    ).toBeVisible();
     await guest.getByLabel("Room password (optional)").fill("secret");
     await guest.getByRole("button", { name: "Join room", exact: true }).click();
     await expect(page.getByText("2 online", { exact: true })).toBeVisible();
@@ -175,6 +177,22 @@ test("poker voting and results fill the viewport without incidental scrolling", 
       page.getByLabel("Estimates and vote counts").getByRole("listitem")
     ).toHaveCount(2);
     await expect(page.getByText("Split vote", { exact: true })).toBeVisible();
+    const distribution = page.getByRole("figure", {
+      name: "Vote distribution: 3: 1 vote (50%); 5: 1 vote (50%)",
+    });
+    await expect(distribution).toBeVisible();
+    const highlights = page.getByLabel("Result highlights");
+    await expect(
+      highlights.getByText("Most voted", { exact: true })
+    ).toBeVisible();
+    await expect(highlights.getByText("3 & 5", { exact: true })).toBeVisible();
+    await expect(
+      highlights.getByText("Middle ground", { exact: true })
+    ).toBeVisible();
+    await expect(highlights.getByText("5", { exact: true })).toBeVisible();
+    await expect(
+      highlights.getByText("Closest card to the average (4)", { exact: true })
+    ).toBeVisible();
     for (const viewport of [
       { width: 1280, height: 720 },
       { width: 900, height: 600 },
@@ -182,6 +200,13 @@ test("poker voting and results fill the viewport without incidental scrolling", 
     ]) {
       await page.setViewportSize(viewport);
       await expectFitsViewport(page);
+      const chartLayout = await distribution.evaluate((element) => ({
+        height: element.getBoundingClientRect().height,
+        width: element.getBoundingClientRect().width,
+        parentWidth: element.parentElement!.getBoundingClientRect().width,
+      }));
+      expect(chartLayout.height).toBeLessThanOrEqual(viewport.height * 0.6 + 1);
+      expect(chartLayout.width / chartLayout.parentWidth).toBeCloseTo(2 / 3, 2);
       // A short result list must not need a hidden inner scrollbar either.
       await expect
         .poll(() =>
