@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useWebsocket } from "./use-websocket";
 import z from "zod";
 import { createEmitter } from "../lib/event-emitter";
@@ -10,11 +10,29 @@ const userSchema = z.object({
   role: z.enum(["user", "mod"]),
   vote: z.string().nullable().optional(),
   status: z.enum(["connected", "disconnected"]),
+  avatar: z.number().int().nonnegative().nullable(),
 });
 
-const currentUserSchema = userSchema.merge(z.object({ token: z.string() }));
+const currentUserSchema = userSchema.extend({ token: z.string() });
 
 export type User = z.infer<typeof userSchema>;
+
+const emptyErrorEvents = [
+  "room-not-found",
+  "user-not-found",
+  "target-user-not-found",
+  "user-not-mod",
+  "name-taken",
+  "wrong-room-password",
+  "invalid-card-set",
+  "invalid-vote",
+  "voting-not-active",
+  "cannot-kick-self",
+  "invalid-avatar",
+  "kicked",
+  "wrong-password",
+  "message-broadcasted",
+] as const;
 
 const serverEventsSchema = z.discriminatedUnion("event", [
   z.object({
@@ -25,30 +43,21 @@ const serverEventsSchema = z.discriminatedUnion("event", [
       user: currentUserSchema,
       state: z.enum(["voting", "results"]),
       cardSet: z.array(z.string()),
+      results: z.record(z.string(), z.number()),
+      requiresPassword: z.boolean(),
     }),
   }),
+  ...["user-joined", "user-left", "user-voted", "user-updated"].map((event) =>
+    z.object({
+      event: z.literal(event),
+      data: z.object({ user: userSchema }),
+    })
+  ),
   z.object({
-    event: z.literal("user-joined"),
-    data: z.object({
-      user: userSchema,
-    }),
+    event: z.literal("user-removed"),
+    data: z.object({ userId: z.string() }),
   }),
-  z.object({
-    event: z.literal("user-left"),
-    data: z.object({
-      user: userSchema,
-    }),
-  }),
-  z.object({
-    event: z.literal("user-voted"),
-    data: z.object({
-      user: userSchema,
-    }),
-  }),
-  z.object({
-    event: z.literal("voting-started"),
-    data: z.null(),
-  }),
+  z.object({ event: z.literal("voting-started"), data: z.null() }),
   z.object({
     event: z.literal("results-revealed"),
     data: z.object({
@@ -56,36 +65,18 @@ const serverEventsSchema = z.discriminatedUnion("event", [
       users: userSchema.array(),
     }),
   }),
-  z.object({
-    event: z.literal("is-alive"),
-    data: z.null().optional(),
-  }),
-  z.object({
-    event: z.literal("room-not-found"),
-    data: z.null().optional(),
-  }),
-  z.object({
-    event: z.literal("name-taken"),
-    data: z.null().optional(),
-  }),
+  z.object({ event: z.literal("is-alive"), data: z.null().optional() }),
   z.object({
     event: z.literal("bad-username"),
     data: z.object({ error: z.string() }),
   }),
   z.object({
     event: z.literal("broadcasted-message"),
-    data: z.object({
-      message: z.string(),
-    }),
+    data: z.object({ message: z.string() }),
   }),
-  z.object({
-    event: z.literal("wrong-password"),
-    data: z.null().optional(),
-  }),
-  z.object({
-    event: z.literal("message-broadcasted"),
-    data: z.null().optional(),
-  }),
+  ...emptyErrorEvents.map((event) =>
+    z.object({ event: z.literal(event), data: z.null().optional() })
+  ),
 ]);
 
 type ServerEvents = z.infer<typeof serverEventsSchema>;
@@ -93,39 +84,45 @@ type ServerEventsMap = { [T in ServerEvents as T["event"]]: T["data"] };
 
 type WebsocketEventsMap = {
   connected: undefined;
-  disconnected: undefined;
+  disconnected: { code: number };
 };
 
 type ClientEvents = {
-  "create-room": { name: string; cardSet?: string[] };
-  "join-room": { name: string; room: string };
-  "cast-vote": { vote: string };
+  "create-room": { name: string; cardSet?: string[]; password?: string };
+  "join-room": { name: string; room: string; password?: string };
+  "cast-vote": { vote: string | null };
   "start-voting": undefined;
   "reveal-results": undefined;
   "keep-alive": undefined;
-  reconnect: { token: string };
-  // admin messages
+  reconnect: { token: string; room: string };
+  "promote-user": { userId: string };
+  "kick-user": { userId: string };
+  "change-avatar": { avatar: number };
   "broadcast-message": { message: string; password: string; roomId: string };
 };
 
 export function useAppEvents() {
   const socket = useWebsocket(process.env.NEXT_PUBLIC_WS_URL ?? "");
-  const emitterRef =
-    useRef(createEmitter<ServerEventsMap & WebsocketEventsMap>());
+  const [emitter] = useState(() =>
+    createEmitter<ServerEventsMap & WebsocketEventsMap>()
+  );
 
   useEffect(() => {
-    const onOpen = () => {
-      emitterRef.current.emit("connected", undefined);
+    const onOpen = () => emitter.emit("connected", undefined);
+    const onClose = (event: CloseEvent) => {
+      emitter.emit("disconnected", { code: event.code });
     };
-
-    const onClose = () => {
-      emitterRef.current.emit("disconnected", undefined);
-    };
-
-    const onMessage = (socketEvent: any) => {
-      const parsedMessage = JSON.parse(socketEvent?.data ?? "");
-      const { event, data } = serverEventsSchema.parse(parsedMessage);
-      emitterRef.current.emit(event, data);
+    const onMessage = (socketEvent: MessageEvent) => {
+      try {
+        const parsedMessage = JSON.parse(String(socketEvent.data ?? ""));
+        const parsedEvent = serverEventsSchema.safeParse(parsedMessage);
+        if (parsedEvent.success) {
+          const { event, data } = parsedEvent.data;
+          emitter.emit(event, data as never);
+        }
+      } catch {
+        // Ignore malformed server messages and keep the connection active.
+      }
     };
 
     socket.on("open", onOpen);
@@ -137,19 +134,24 @@ export function useAppEvents() {
       socket.off("message", onMessage);
       socket.off("close", onClose);
     };
-  }, [socket]);
+  }, [emitter, socket]);
 
-  function send<T extends keyof ClientEvents>(
-    event: T,
-    data?: ClientEvents[T]
-  ) {
-    socket.send(JSON.stringify({ event, data }));
-  }
+  const send = useCallback(
+    <T extends keyof ClientEvents>(event: T, data?: ClientEvents[T]) => {
+      socket.send(JSON.stringify({ event, data }));
+    },
+    [socket]
+  );
 
-  return {
-    send,
-    ...emitterRef.current,
-    reconnect: socket.reconnect,
-    close: socket.close,
-  };
+  return useMemo(
+    () => ({
+      send,
+      on: emitter.on.bind(emitter),
+      off: emitter.off.bind(emitter),
+      reconnect: socket.reconnect,
+      close: socket.close,
+      isOpen: socket.isOpen,
+    }),
+    [emitter, send, socket]
+  );
 }

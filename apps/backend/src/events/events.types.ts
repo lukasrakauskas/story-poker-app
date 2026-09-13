@@ -5,6 +5,7 @@ export type User = {
   role: 'user' | 'mod';
   token: string;
   status: 'connected' | 'disconnected';
+  avatar: number | null;
 };
 
 export interface Room {
@@ -12,6 +13,8 @@ export interface Room {
   users: User[];
   state: 'voting' | 'results';
   cardSet: string[];
+  results: Record<string, number>;
+  password: string | null;
 }
 
 export type ClientUser = Omit<User, 'vote' | 'token'> & {
@@ -23,9 +26,16 @@ export type RoomError = {
   event:
     | 'room-not-found'
     | 'user-not-found'
+    | 'target-user-not-found'
     | 'user-not-mod'
     | 'name-taken'
-    | 'bad-username';
+    | 'bad-username'
+    | 'wrong-room-password'
+    | 'invalid-card-set'
+    | 'invalid-vote'
+    | 'voting-not-active'
+    | 'cannot-kick-self'
+    | 'invalid-avatar';
   data: { error: string } | null;
 };
 

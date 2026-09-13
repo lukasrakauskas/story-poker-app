@@ -3,7 +3,7 @@ import { Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import Providers from "./providers";
 import { SiteHeader } from "../components/site-header";
-import avatars from "./avatars.json";
+import { AVATARS } from "../lib/avatars";
 import { Metadata } from "next";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -45,7 +45,7 @@ export default async function RootLayout({
       <body
         className={`${inter.className} flex h-dvh flex-col overflow-hidden`}
       >
-        <Providers avatars={avatars}>
+        <Providers avatars={AVATARS}>
           <SiteHeader />
           <div id="app-content" className="min-h-0 flex-1 overflow-auto">
             {children}

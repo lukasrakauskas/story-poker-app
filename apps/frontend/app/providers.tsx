@@ -10,7 +10,7 @@ export default function Providers({
   avatars,
 }: {
   children: React.ReactNode;
-  avatars: string[];
+  avatars: readonly string[];
 }) {
   const pathname = usePathname();
   const isRetro = pathname === "/retro" || pathname.startsWith("/retro/");
