@@ -329,7 +329,7 @@ export function InviteToRoom() {
               <div className="mx-auto w-fit rounded-lg bg-white p-2">
                 <QRCodeSVG
                   value={roomLink}
-                  size={128}
+                  size={256}
                   level="M"
                   title={`Join planning room ${roomCode}`}
                 />
