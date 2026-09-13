@@ -23,18 +23,24 @@ export function UserAuthForm({
   const pathname = usePathname();
   const { state } = usePlanning();
   const [name, setName] = React.useState("");
+  const [password, setPassword] = React.useState("");
 
   const { createRoom, joinRoom, roomCode } = usePlanning();
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault();
     const url = new URL(window.location.href);
-    const cardSet = url.searchParams.get("cardSet")?.split(",") ?? [];
+    const cardSet =
+      url.searchParams
+        .get("cardSet")
+        ?.split(",")
+        .map((card) => card.trim())
+        .filter(Boolean) ?? [];
 
     if (!roomCode) {
-      createRoom(name, cardSet);
+      createRoom(name, cardSet, password);
     } else {
-      joinRoom(name, roomCode);
+      joinRoom(name, roomCode, password);
     }
   }
 
@@ -50,17 +56,34 @@ export function UserAuthForm({
     <div className={cn("grid gap-6", className)} {...props}>
       <form onSubmit={onSubmit}>
         <div className="grid gap-2">
-          <div className="grid gap-1">
-            <Label className="sr-only" htmlFor="name">
-              Name
-            </Label>
+          <div className="grid gap-1.5">
+            <Label htmlFor="name">Name</Label>
             <Input
               id="name"
               type="text"
               autoCapitalize="none"
               autoCorrect="off"
-              disabled={state === "connecting" || state === "joining"}
+              autoComplete="nickname"
+              minLength={3}
+              maxLength={30}
+              required
+              disabled={isLoading}
               onChange={(event) => setName(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="room-password">
+              Room password{" "}
+              <span className="text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="room-password"
+              type="password"
+              autoComplete={roomCode ? "current-password" : "new-password"}
+              maxLength={100}
+              disabled={isLoading}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
             />
           </div>
           <Button disabled={isLoading}>

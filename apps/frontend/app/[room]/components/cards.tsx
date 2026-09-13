@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Layers } from "lucide-react";
+import { Check, Layers, X } from "lucide-react";
 import { Badge } from "ui/components/badge";
 import { Button } from "ui/components/button";
 import {
@@ -14,7 +14,8 @@ import { cn } from "ui/utils";
 import { Results } from "./results";
 
 export function Cards() {
-  const { vote, castVote, results, planningState, cardSet } = usePlanning();
+  const { vote, castVote, removeVote, results, planningState, cardSet } =
+    usePlanning();
   const revealed = planningState === "results";
 
   return (
@@ -72,11 +73,18 @@ export function Cards() {
                 ))}
               </fieldset>
             </div>
-            <output className="mt-5 shrink-0 text-center text-sm text-muted-foreground">
-              {vote === null
-                ? "No estimate selected yet."
-                : `Your estimate: ${vote}. You can change it until results are revealed.`}
-            </output>
+            <div className="mt-5 flex shrink-0 flex-wrap items-center justify-center gap-2 text-sm text-muted-foreground">
+              <output>
+                {vote === null
+                  ? "No estimate selected yet."
+                  : `Your estimate: ${vote}. You can change or remove it until results are revealed.`}
+              </output>
+              {vote !== null && (
+                <Button variant="ghost" size="sm" onClick={removeVote}>
+                  <X aria-hidden="true" /> Remove vote
+                </Button>
+              )}
+            </div>
           </>
         )}
       </CardContent>

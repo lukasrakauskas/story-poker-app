@@ -74,9 +74,15 @@ export class EventsGateway
   @SubscribeMessage('create-room')
   onCreateRoom(
     @ConnectedSocket() client: Client,
-    @MessageBody() data: { name: string; cardSet?: string[] },
+    @MessageBody()
+    data: { name: string; cardSet?: string[]; password?: string },
   ) {
-    const result = this.rooms.create(client.id, data.name, data.cardSet);
+    const result = this.rooms.create(
+      client.id,
+      data.name,
+      data.cardSet,
+      data.password,
+    );
     if ('error' in result) return result.error;
     client.roomId = result.room.code;
     return this.roomJoined(result.room, result.user);
@@ -85,17 +91,25 @@ export class EventsGateway
   @SubscribeMessage('join-room')
   onJoinRoom(
     @ConnectedSocket() client: Client,
-    @MessageBody() data: { name: string; room: string },
+    @MessageBody()
+    data: { name: string; room: string; password?: string },
   ) {
     // Capture existing recipients: the joining user receives room-joined instead.
     const recipients =
       this.rooms.get(data.room)?.users.map((user) => user.id) ?? [];
-    const result = this.rooms.join(data.room, client.id, data.name);
+    const result = this.rooms.join(
+      data.room,
+      client.id,
+      data.name,
+      data.password,
+    );
     if ('error' in result) return result.error;
     client.roomId = result.room.code;
     this.notifyUsers(recipients, {
       event: 'user-joined',
-      data: { user: this.users.toPublic(result.user) },
+      data: {
+        user: this.users.toPublic(result.user, result.room.state === 'results'),
+      },
     });
     return this.roomJoined(result.room, result.user);
   }
@@ -103,16 +117,17 @@ export class EventsGateway
   @SubscribeMessage('reconnect')
   onReconnect(
     @ConnectedSocket() client: Client,
-    @MessageBody() data: { token: string },
+    @MessageBody() data: { token: string; room?: string },
   ) {
-    const result = this.rooms.reconnect(data.token);
+    const result = this.rooms.reconnect(data.token, data.room);
     if ('error' in result) return result.error;
     const { room, user } = result;
+    this.replaceConnection(client, user.id);
     client.roomId = room.code;
     client.id = user.id;
     this.notifyRoom(room, {
       event: 'user-joined',
-      data: { user: this.users.toPublic(user) },
+      data: { user: this.users.toPublic(user, room.state === 'results') },
     });
     return this.roomJoined(room, user);
   }
@@ -122,7 +137,12 @@ export class EventsGateway
     if (!membership) return;
     this.notifyRoom(membership.room, {
       event: 'user-left',
-      data: { user: this.users.toPublic(membership.user) },
+      data: {
+        user: this.users.toPublic(
+          membership.user,
+          membership.room.state === 'results',
+        ),
+      },
     });
   }
 
@@ -139,7 +159,7 @@ export class EventsGateway
   @SubscribeMessage('cast-vote')
   onCastVote(
     @ConnectedSocket() client: Client,
-    @MessageBody() data: { vote: string },
+    @MessageBody() data: { vote: string | null },
   ) {
     const result = this.rooms.castVote(
       client.roomId ?? '',
@@ -160,6 +180,70 @@ export class EventsGateway
     this.notifyRoom(result.room, { event: 'voting-started', data: null });
   }
 
+  @SubscribeMessage('promote-user')
+  onPromoteUser(
+    @ConnectedSocket() client: Client,
+    @MessageBody() data: { userId: string },
+  ) {
+    const result = this.rooms.promoteUser(
+      client.roomId ?? '',
+      client.id,
+      data.userId,
+    );
+    if ('error' in result) return result.error;
+    this.notifyRoom(result.room, {
+      event: 'user-updated',
+      data: {
+        user: this.users.toPublic(result.user, result.room.state === 'results'),
+      },
+    });
+  }
+
+  @SubscribeMessage('kick-user')
+  onKickUser(
+    @ConnectedSocket() client: Client,
+    @MessageBody() data: { userId: string },
+  ) {
+    const result = this.rooms.kickUser(
+      client.roomId ?? '',
+      client.id,
+      data.userId,
+    );
+    if ('error' in result) return result.error;
+
+    this.notifyUsers([result.user.id], { event: 'kicked', data: null });
+    for (const target of this.server.clients) {
+      if (target.id === result.user.id) {
+        target.roomId = '';
+        target.id = nanoid();
+        target.close(4001, 'Removed from room');
+      }
+    }
+    this.notifyRoom(result.room, {
+      event: 'user-removed',
+      data: { userId: result.user.id },
+    });
+  }
+
+  @SubscribeMessage('change-avatar')
+  onChangeAvatar(
+    @ConnectedSocket() client: Client,
+    @MessageBody() data: { avatar: number },
+  ) {
+    const result = this.rooms.changeAvatar(
+      client.roomId ?? '',
+      client.id,
+      data.avatar,
+    );
+    if ('error' in result) return result.error;
+    this.notifyRoom(result.room, {
+      event: 'user-updated',
+      data: {
+        user: this.users.toPublic(result.user, result.room.state === 'results'),
+      },
+    });
+  }
+
   @SubscribeMessage('broadcast-message')
   onBroadcastMessage(
     @MessageBody() data: { roomId: string; message: string; password: string },
@@ -175,6 +259,16 @@ export class EventsGateway
       data: { message: data.message },
     });
     return { event: 'message-broadcasted', data: null };
+  }
+
+  private replaceConnection(client: Client, userId: string) {
+    for (const existing of this.server.clients) {
+      if (existing !== client && existing.id === userId) {
+        existing.roomId = '';
+        existing.id = nanoid();
+        existing.close(4000, 'Reconnected elsewhere');
+      }
+    }
   }
 
   private roomJoined(room: Room, user: User) {

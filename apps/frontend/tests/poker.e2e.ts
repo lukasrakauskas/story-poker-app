@@ -31,6 +31,84 @@ async function expectFitsViewport(page: Page) {
     });
 }
 
+test("room controls persist and protect a planning session", async ({
+  page,
+  browser,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByLabel("Room password (optional)").fill("secret");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+
+  await page.getByRole("button", { name: "Show room QR code" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Scan to join" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "Estimate 3" }).click();
+  await expect(page.getByText("1 of 1 voted", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Remove vote" }).click();
+  await expect(page.getByText("0 of 1 voted", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Estimate 3" })
+  ).toHaveAttribute("aria-pressed", "false");
+
+  await page.getByRole("button", { name: "Change your avatar" }).click();
+  await page.getByRole("menuitem", { name: "Use avatar 2" }).click();
+  await expect(
+    page.getByRole("button", { name: "Change your avatar" }).locator("img")
+  ).toHaveAttribute("src", /Amogus\.webp/);
+
+  const guestContext = await browser.newContext();
+  const guest = await guestContext.newPage();
+  try {
+    await guest.goto(page.url());
+    await guest.getByLabel("Name", { exact: true }).fill("Bobby");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(guest.getByText("Incorrect room password")).toBeVisible();
+    await guest.getByLabel("Room password (optional)").fill("secret");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(page.getByText("2 online", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Manage Bobby" }).click();
+    await page.getByRole("menuitem", { name: "Make moderator" }).click();
+    await expect(
+      guest.getByRole("button", { name: "Reveal results", exact: true })
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Estimate 3" }).click();
+    await guest.getByRole("button", { name: "Estimate 5" }).click();
+    await guest
+      .getByRole("button", { name: "Reveal results", exact: true })
+      .click();
+    await expect(page.getByText("2 votes cast", { exact: true })).toBeVisible();
+
+    await guest.reload();
+    await expect(
+      guest.getByText("2 votes cast", { exact: true })
+    ).toBeVisible();
+    await expect(
+      guest.getByLabel("People in the room").getByText("5")
+    ).toBeVisible();
+    await expect(
+      guest.getByRole("button", { name: "Join room", exact: true })
+    ).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Manage Bobby" }).click();
+    await page.getByRole("menuitem", { name: "Remove from room" }).click();
+    await expect(
+      guest.getByText("Removed from room", { exact: true })
+    ).toBeVisible();
+    await expect(
+      guest.getByRole("button", { name: "Join room", exact: true })
+    ).toBeVisible();
+    await expect(page.getByText("1 online", { exact: true })).toBeVisible();
+  } finally {
+    await guestContext.close();
+  }
+});
+
 test("poker voting and results fill the viewport without incidental scrolling", async ({
   page,
   browser,

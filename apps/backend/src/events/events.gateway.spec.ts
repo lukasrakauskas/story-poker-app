@@ -18,13 +18,19 @@ function client(id: string) {
     readyState: 1,
     send: vi.fn(),
     terminate: vi.fn(),
+    close: vi.fn(),
   } as unknown as Client;
   clients.add(socket);
   return socket;
 }
 
-function create(socket: Client, name = 'Moderator', cardSet?: string[]) {
-  const response = gateway.onCreateRoom(socket, { name, cardSet });
+function create(
+  socket: Client,
+  name = 'Moderator',
+  cardSet?: string[],
+  password?: string,
+) {
+  const response = gateway.onCreateRoom(socket, { name, cardSet, password });
   expect(response.event).toBe('room-joined');
   if (!response.data || !('code' in response.data))
     throw new Error('Room creation failed');
@@ -120,6 +126,8 @@ describe('connection lifecycle', () => {
     });
     expect(replacement.id).toBe('owner');
     expect(replacement.roomId).toBe(room.code);
+    expect(owner.roomId).toBe('');
+    expect(owner.close).toHaveBeenCalledWith(4000, 'Reconnected elsewhere');
     expect(messages(replacement).at(-1).data.user).not.toHaveProperty('token');
     expect(gateway.onReconnect(replacement, { token: 'invalid' })).toEqual({
       event: 'room-not-found',
@@ -213,10 +221,73 @@ describe('room membership', () => {
     gateway.onCastVote(owner, { vote: '3' });
     expect(messages(guest)).toEqual([]);
   });
+
+  it('requires the configured room password and does not expose it', () => {
+    const owner = client('owner');
+    const room = create(owner, 'Moderator', undefined, 'secret');
+    const guest = client('guest');
+    expect(
+      gateway.onJoinRoom(guest, { name: 'Guest', room: room.code }),
+    ).toEqual({ event: 'wrong-room-password', data: null });
+    const joined = gateway.onJoinRoom(guest, {
+      name: 'Guest',
+      room: room.code,
+      password: 'secret',
+    });
+    expect(joined).toMatchObject({
+      event: 'room-joined',
+      data: { requiresPassword: true },
+    });
+    expect(JSON.stringify(joined)).not.toContain('secret');
+  });
+
+  it('broadcasts avatar and moderator changes and removes kicked users', () => {
+    const owner = client('owner');
+    const room = create(owner);
+    const guest = client('guest');
+    const joined = gateway.onJoinRoom(guest, {
+      name: 'Guest',
+      room: room.code,
+    });
+    if (!joined.data || !('user' in joined.data)) {
+      throw new Error('Room join failed');
+    }
+    const guestToken = joined.data.user.token;
+
+    gateway.onChangeAvatar(guest, { avatar: 3 });
+    expect(messages(owner).at(-1)).toMatchObject({
+      event: 'user-updated',
+      data: { user: { id: 'guest', avatar: 3 } },
+    });
+    expect(gateway.onPromoteUser(guest, { userId: 'guest' })).toEqual({
+      event: 'user-not-mod',
+      data: null,
+    });
+    gateway.onPromoteUser(owner, { userId: 'guest' });
+    expect(messages(guest).at(-1)).toMatchObject({
+      event: 'user-updated',
+      data: { user: { id: 'guest', role: 'mod' } },
+    });
+    expect(gateway.onKickUser(owner, { userId: 'owner' })).toEqual({
+      event: 'cannot-kick-self',
+      data: null,
+    });
+    gateway.onKickUser(owner, { userId: 'guest' });
+    expect(messages(guest).at(-1)).toEqual({ event: 'kicked', data: null });
+    expect(guest.close).toHaveBeenCalledWith(4001, 'Removed from room');
+    expect(messages(owner).at(-1)).toEqual({
+      event: 'user-removed',
+      data: { userId: 'guest' },
+    });
+    expect(gateway.onReconnect(client('new'), { token: guestToken })).toEqual({
+      event: 'room-not-found',
+      data: null,
+    });
+  });
 });
 
 describe('voting', () => {
-  it('reveals counts only for moderators, omits tokens and resets votes', () => {
+  it('reveals counts only for moderators and restores the latest state', () => {
     const owner = client('owner');
     const room = create(owner);
     const guest = client('guest');
@@ -232,6 +303,7 @@ describe('voting', () => {
       name: 'Guest',
       role: 'user',
       status: 'connected',
+      avatar: null,
       voted: true,
     });
     expect(gateway.onRevealResults(guest)).toEqual({
@@ -246,13 +318,32 @@ describe('voting', () => {
       revealed.data.users.map((user: { vote: string | null }) => user.vote),
     ).toEqual(['5', '5', null]);
     expect(JSON.stringify(revealed)).not.toContain('token');
+    const replacement = client('new');
     expect(
-      gateway.onReconnect(client('new'), { token: room.user.token }),
-    ).toMatchObject({ data: { state: 'results', user: { vote: null } } });
-    // Existing protocol permits any member to start voting, even after casting in results state.
-    gateway.onCastVote(guest, { vote: '8' });
-    gateway.onStartVoting(guest);
-    expect(messages(owner).at(-1)).toEqual({
+      gateway.onReconnect(replacement, {
+        token: room.user.token,
+        room: room.code,
+      }),
+    ).toMatchObject({
+      data: {
+        state: 'results',
+        results: { '5': 2 },
+        user: { vote: '5' },
+        users: expect.arrayContaining([
+          expect.objectContaining({ id: 'guest', vote: '5' }),
+        ]),
+      },
+    });
+    expect(gateway.onCastVote(guest, { vote: '8' })).toEqual({
+      event: 'voting-not-active',
+      data: null,
+    });
+    expect(gateway.onStartVoting(guest)).toEqual({
+      event: 'user-not-mod',
+      data: null,
+    });
+    gateway.onStartVoting(replacement);
+    expect(messages(replacement).at(-1)).toEqual({
       event: 'voting-started',
       data: null,
     });

@@ -24,6 +24,7 @@ export class UserService {
       vote: null,
       token: nanoid(32),
       status: 'connected',
+      avatar: null,
     };
   }
 
@@ -31,11 +32,11 @@ export class UserService {
     return {
       ...omit(user, ['token', 'vote']),
       ...(revealVote ? { vote: user.vote } : {}),
-      voted: !!user.vote,
+      voted: user.vote !== null,
     };
   }
 
   toSelf(user: User) {
-    return { ...user, voted: !!user.vote };
+    return { ...user, voted: user.vote !== null };
   }
 }
