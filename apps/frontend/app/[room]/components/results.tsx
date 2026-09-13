@@ -74,26 +74,21 @@ export function Results({
     );
   }
 
+  const resultBadge =
+    data.length === 1
+      ? "All votes match"
+      : leaders.length === 1 && highest > total / 2
+        ? `Majority: ${leaderLabel}`
+        : leaders.length === 1
+          ? `Most picked: ${leaderLabel}`
+          : "Split vote";
+
   return (
-    <section aria-label="Vote results" className="my-auto space-y-5">
-      <div className="flex flex-wrap justify-center gap-2">
-        <Badge variant="secondary">
-          {total} {total === 1 ? "vote" : "votes"} cast
-        </Badge>
-        <Badge variant="outline">
-          {data.length === 1
-            ? "All votes match"
-            : leaders.length === 1 && highest > total / 2
-              ? `Majority: ${leaderLabel}`
-              : leaders.length === 1
-                ? `Most picked: ${leaderLabel}`
-                : "Split vote"}
-        </Badge>
-      </div>
-      <div className="grid items-center gap-5 sm:grid-cols-[minmax(0,1.35fr)_minmax(13rem,0.8fr)] lg:gap-8">
+    <section aria-label="Vote results" className="my-auto">
+      <div className="grid items-center gap-5 sm:grid-cols-[minmax(0,1.3fr)_minmax(13rem,0.85fr)] lg:gap-8">
         <figure
           aria-label={distributionLabel}
-          className="mx-auto h-64 w-full max-w-lg sm:h-72 lg:h-80 xl:h-96"
+          className="mx-auto h-72 w-full max-w-xl sm:h-80 lg:h-96 xl:h-[28rem]"
         >
           <ChartContainer
             aria-hidden="true"
@@ -106,7 +101,7 @@ export function Results({
                 dataKey="count"
                 nameKey="estimate"
                 innerRadius={0}
-                outerRadius="94%"
+                outerRadius="98%"
                 paddingAngle={data.length > 1 ? 1 : 0}
                 stroke="hsl(var(--background))"
                 strokeWidth={3}
@@ -118,36 +113,17 @@ export function Results({
           </ChartContainer>
         </figure>
 
-        <div className="min-w-0 space-y-4">
-          <dl aria-label="Result highlights" className="grid grid-cols-2 gap-2">
-            <div className="min-w-0 rounded-lg border bg-muted/40 p-3">
-              <dt className="text-xs font-medium text-muted-foreground">
-                Most voted
-              </dt>
-              <dd className="mt-1 break-words text-xl font-semibold">
-                {leaderLabel}
-              </dd>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {highest} {highest === 1 ? "vote" : "votes"}
-                {leaders.length > 1 ? " each" : ""} ·{" "}
-                {Math.round((highest / total) * 100)}%
-              </p>
-            </div>
-            <div className="min-w-0 rounded-lg border bg-muted/40 p-3">
-              <dt className="text-xs font-medium text-muted-foreground">
-                Middle ground
-              </dt>
-              <dd className="mt-1 break-words text-xl font-semibold">
-                {middleGround.estimate}
-              </dd>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {middleGround.description}
-              </p>
-            </div>
-          </dl>
-
+        <div className="min-w-0 space-y-5">
           <div className="min-w-0 space-y-3">
-            <h2 className="text-sm font-medium">Estimate breakdown</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-medium">Estimate breakdown</h2>
+              <div className="flex flex-wrap gap-1.5">
+                <Badge variant="secondary">
+                  {total} {total === 1 ? "vote" : "votes"} cast
+                </Badge>
+                <Badge variant="outline">{resultBadge}</Badge>
+              </div>
+            </div>
             <ul aria-label="Estimates and vote counts" className="space-y-3">
               {data.map((item) => (
                 <li key={item.estimate} className="space-y-1.5">
@@ -176,6 +152,33 @@ export function Results({
               ))}
             </ul>
           </div>
+
+          <dl aria-label="Result highlights" className="grid grid-cols-2 gap-2">
+            <div className="min-w-0 rounded-lg border bg-muted/40 p-3">
+              <dt className="text-xs font-medium text-muted-foreground">
+                Most voted
+              </dt>
+              <dd className="mt-1 break-words text-xl font-semibold">
+                {leaderLabel}
+              </dd>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {highest} {highest === 1 ? "vote" : "votes"}
+                {leaders.length > 1 ? " each" : ""} ·{" "}
+                {Math.round((highest / total) * 100)}%
+              </p>
+            </div>
+            <div className="min-w-0 rounded-lg border bg-muted/40 p-3">
+              <dt className="text-xs font-medium text-muted-foreground">
+                Middle ground
+              </dt>
+              <dd className="mt-1 break-words text-xl font-semibold">
+                {middleGround.estimate}
+              </dd>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {middleGround.description}
+              </p>
+            </div>
+          </dl>
         </div>
       </div>
     </section>
