@@ -72,9 +72,24 @@ describe('RetroApplicationService', () => {
       'Guest thought',
     );
 
+    const ready = application.execute('guest-connection', {
+      type: 'toggle-ready',
+    });
+    expect(
+      state(ready, 'owner-connection').room.members.find(
+        (member) => member.name === 'Bobby',
+      )?.ready,
+    ).toBe(true);
+    expect(
+      state(ready, 'guest-connection').room.members.find(
+        (member) => member.name === 'Bobby',
+      )?.ready,
+    ).toBe(true);
+
     const reveal = application.execute('owner-connection', { type: 'advance' });
     const ownerVoting = state(reveal, 'owner-connection').room;
     expect(ownerVoting.notes).toHaveLength(2);
+    expect(ownerVoting.members.every((member) => !member.ready)).toBe(true);
     expect(state(reveal, 'guest-connection').room.notes).toHaveLength(2);
 
     const voted = application.execute('guest-connection', {

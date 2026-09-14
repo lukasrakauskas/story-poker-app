@@ -59,7 +59,15 @@ const room: RetroRoom = {
   title: "Sprint retro",
   phase: "discuss",
   expiresAt: 1800000000000,
-  members: [{ id: "alice", name: "Alice", moderator: true, connected: true }],
+  members: [
+    {
+      id: "alice",
+      name: "Alice",
+      moderator: true,
+      connected: true,
+      ready: false,
+    },
+  ],
   notes: [
     {
       id: "note",
@@ -100,7 +108,13 @@ test("write-phase history and exports retain only the current participant's note
     phase: "write",
     members: [
       ...room.members,
-      { id: "bob", name: "Bob", moderator: false, connected: true },
+      {
+        id: "bob",
+        name: "Bob",
+        moderator: false,
+        connected: true,
+        ready: false,
+      },
     ],
     notes: [
       room.notes[0],

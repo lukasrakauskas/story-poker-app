@@ -281,9 +281,51 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBe(false);
 
   await owner
+    .getByLabel("Add a note", { exact: true })
+    .nth(0)
+    .fill("Unsent writing draft");
+  await expect(
+    owner.getByRole("button", { name: "Mark writing done", exact: true })
+  ).toBeDisabled();
+  await expect(
+    owner.getByText(/Submit or clear your note drafts/)
+  ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Mark writing done", exact: true })
+    .click();
+  await expect(
+    owner.getByText("1 of 2 active participants ready", { exact: true })
+  ).toBeVisible();
+
+  await owner
     .getByRole("button", { name: "Start voting", exact: true })
     .click();
   const phaseConfirmation = owner.getByRole("alertdialog");
+  await expect(
+    phaseConfirmation.getByText(/You have an unsent note draft/)
+  ).toBeVisible();
+  await expect(
+    phaseConfirmation.getByText(
+      "Not ready: Alice. Advancing now will end this phase for them.",
+      {
+        exact: true,
+      }
+    )
+  ).toBeVisible();
+  await phaseConfirmation
+    .getByRole("button", { name: "Cancel", exact: true })
+    .click();
+  await owner.getByLabel("Add a note", { exact: true }).nth(0).fill("");
+  await owner
+    .getByRole("button", { name: "Mark writing done", exact: true })
+    .click();
+  await expect(
+    owner.getByText("2 of 2 active participants ready", { exact: true })
+  ).toBeVisible();
+
+  await owner
+    .getByRole("button", { name: "Start voting", exact: true })
+    .click();
   await expect(
     phaseConfirmation.getByRole("heading", { name: "Start voting?" })
   ).toBeVisible();
@@ -354,6 +396,21 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
       exact: true,
     })
   ).toHaveText("Voted");
+  await expect(
+    owner.getByText("0 of 2 active participants ready", { exact: true })
+  ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Mark voting done", exact: true })
+    .click();
+  await expect(
+    owner.getByText("1 of 2 active participants ready", { exact: true })
+  ).toBeVisible();
+  await owner
+    .getByRole("button", { name: "Mark voting done", exact: true })
+    .click();
+  await expect(
+    owner.getByText("2 of 2 active participants ready", { exact: true })
+  ).toBeVisible();
   await owner
     .getByRole("button", { name: "Start discussion", exact: true })
     .click();

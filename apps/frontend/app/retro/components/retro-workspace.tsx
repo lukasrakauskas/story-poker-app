@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { RetroPhase } from "shared/retrospective";
+import type { RetroColumn, RetroPhase } from "shared/retrospective";
+import { Button } from "ui/components/button";
 import { RetroProvider, useRetro } from "./retro-provider";
 import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
@@ -67,6 +68,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     historySaved,
   } = useRetro();
   const [now, setNow] = useState<number | null>(null);
+  const [draftColumns, setDraftColumns] = useState<RetroColumn[]>([]);
   useEffect(() => {
     // Synchronize the browser clock after hydration, then keep the expiry boundary current.
     // oxlint-disable-next-line react/set-state-in-effect
@@ -86,9 +88,17 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     invalid ||
     room?.phase === "closed" ||
     !selfId;
-  const moderator = !!room?.members.find((member) => member.id === selfId)
-    ?.moderator;
+  const self = room?.members.find((member) => member.id === selfId);
+  const moderator = !!self?.moderator;
   const current = phases.find((phase) => phase.id === room?.phase);
+  const readinessPhase = room?.phase === "write" || room?.phase === "vote";
+  const activeMembers = readinessPhase
+    ? (room?.members ?? []).filter((member) => member.connected)
+    : [];
+  const readyMembers = activeMembers.filter((member) => member.ready);
+  const notReadyNames = activeMembers
+    .filter((member) => !member.ready)
+    .map((member) => member.name);
   const remaining = room
     ? Math.max(0, 3 - room.notes.filter((note) => note.votedBySelf).length)
     : 3;
@@ -194,6 +204,41 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                     {remaining} of 3 votes remaining
                   </output>
                 )}
+                {readinessPhase && self && (
+                  <div className="flex flex-wrap items-center gap-2 pt-2">
+                    <Button
+                      size="sm"
+                      variant={self.ready ? "secondary" : "outline"}
+                      disabled={
+                        disabled ||
+                        (room.phase === "write" &&
+                          !self.ready &&
+                          draftColumns.length > 0)
+                      }
+                      onClick={() => void send({ type: "toggle-ready" })}
+                    >
+                      {self.ready
+                        ? "Mark as not ready"
+                        : room.phase === "write"
+                          ? "Mark writing done"
+                          : "Mark voting done"}
+                    </Button>
+                    {room.phase === "write" &&
+                      !self.ready &&
+                      draftColumns.length > 0 && (
+                        <span className="text-xs font-medium text-destructive">
+                          Submit or clear your note drafts before marking
+                          writing done.
+                        </span>
+                      )}
+                  </div>
+                )}
+                {readinessPhase && moderator && (
+                  <output className="block text-sm font-medium">
+                    {readyMembers.length} of {activeMembers.length} active
+                    participants ready
+                  </output>
+                )}
                 {!moderator && room.phase !== "closed" && (
                   <p className="text-xs text-muted-foreground">
                     The moderator moves the team to the next phase.
@@ -205,7 +250,13 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                   phase={room.phase}
                   label={current.next}
                   disabled={disabled}
-                  onConfirm={() => send({ type: "advance" })}
+                  notReadyNames={notReadyNames}
+                  hasUnsentDraft={draftColumns.length > 0}
+                  onConfirm={async () => {
+                    const success = await send({ type: "advance" });
+                    if (success) setDraftColumns([]);
+                    return success;
+                  }}
                 />
               )}
             </div>
@@ -231,6 +282,15 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                 selfId={selfId}
                 disabled={disabled}
                 send={send}
+                onDraftChange={(column, hasDraft) =>
+                  setDraftColumns((currentDrafts) =>
+                    hasDraft
+                      ? currentDrafts.includes(column)
+                        ? currentDrafts
+                        : [...currentDrafts, column]
+                      : currentDrafts.filter((item) => item !== column)
+                  )
+                }
               />
               {room.phase === "closed" && (
                 <RetroExport room={room} selfId={selfId} />

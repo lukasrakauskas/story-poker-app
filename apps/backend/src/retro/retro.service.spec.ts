@@ -168,6 +168,46 @@ describe('retrospective workflow', () => {
     ).toThrow('write phase');
   });
 
+  it('tracks current-phase readiness across joins, disconnects, and resumes', () => {
+    expect(
+      service.snapshot(owner).members.map((member) => member.ready),
+    ).toEqual([false, false]);
+    service.mutate(owner, { type: 'toggle-ready' });
+    service.mutate(guest, { type: 'toggle-ready' });
+    expect(
+      service.snapshot(owner).members.map((member) => member.ready),
+    ).toEqual([true, true]);
+
+    service.disconnect(guest);
+    expect(service.snapshot(owner).members[1]).toMatchObject({
+      connected: false,
+      ready: true,
+    });
+    const late = service.join(owner.code, 'Carol');
+    expect(service.snapshot(late).members[2]).toMatchObject({
+      connected: true,
+      ready: false,
+    });
+    service.resume(guest.code, guest.token);
+    expect(service.snapshot(guest).members[1]).toMatchObject({
+      connected: true,
+      ready: true,
+    });
+
+    service.mutate(owner, { type: 'advance' });
+    expect(
+      service.snapshot(owner).members.every((member) => !member.ready),
+    ).toBe(true);
+    service.mutate(guest, { type: 'toggle-ready' });
+    expect(service.snapshot(owner).members[1].ready).toBe(true);
+    service.mutate(guest, { type: 'toggle-ready' });
+    expect(service.snapshot(owner).members[1].ready).toBe(false);
+    service.mutate(owner, { type: 'advance' });
+    expect(() => service.mutate(guest, { type: 'toggle-ready' })).toThrow(
+      'writing or voting',
+    );
+  });
+
   it('keeps open voting blind and anonymous while preserving own selections', () => {
     const ids = [add('One'), add('Two'), add('Three'), add('Four')];
     service.mutate(owner, { type: 'advance' });

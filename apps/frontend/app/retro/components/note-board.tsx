@@ -40,9 +40,16 @@ type BoardProps = {
   selfId: string | null;
   disabled: boolean;
   send: RetroSession["send"];
+  onDraftChange?: (column: RetroColumn, hasDraft: boolean) => void;
 };
 
-export function NoteBoard({ room, selfId, disabled, send }: BoardProps) {
+export function NoteBoard({
+  room,
+  selfId,
+  disabled,
+  send,
+  onDraftChange,
+}: BoardProps) {
   const remaining = Math.max(
     0,
     3 - room.notes.filter((note) => note.votedBySelf).length
@@ -138,7 +145,12 @@ export function NoteBoard({ room, selfId, disabled, send }: BoardProps) {
               </p>
             )}
             {room.phase === "write" && (
-              <AddNote column={column.id} disabled={disabled} send={send} />
+              <AddNote
+                column={column.id}
+                disabled={disabled}
+                send={send}
+                onDraftChange={onDraftChange}
+              />
             )}
           </div>
         </section>
@@ -151,10 +163,12 @@ function AddNote({
   column,
   disabled,
   send,
+  onDraftChange,
 }: {
   column: RetroColumn;
   disabled: boolean;
   send: RetroSession["send"];
+  onDraftChange?: (column: RetroColumn, hasDraft: boolean) => void;
 }) {
   const [text, setText] = useState("");
   return (
@@ -163,8 +177,10 @@ function AddNote({
       onSubmit={async (event) => {
         event.preventDefault();
         if (!text.trim() || disabled) return;
-        if (await send({ type: "add-note", column, text: text.trim() }))
+        if (await send({ type: "add-note", column, text: text.trim() })) {
           setText("");
+          onDraftChange?.(column, false);
+        }
       }}
     >
       <Label htmlFor={`new-${column}`}>Add a note</Label>
@@ -173,7 +189,10 @@ function AddNote({
         maxLength={1000}
         className="min-h-24 resize-y"
         value={text}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => {
+          setText(event.target.value);
+          onDraftChange?.(column, event.target.value.length > 0);
+        }}
         placeholder="One thought per note…"
         required
         disabled={disabled}

@@ -35,6 +35,8 @@ type StoredNote = Omit<RetroNote, 'voteCount' | 'votedBySelf'> & {
 type StoredRoom = Omit<RetroRoom, 'members' | 'notes'> & {
   members: CollaborationParticipant[];
   notes: StoredNote[];
+  /** Internal current-phase readiness, kept separate from participant identity. */
+  readyMemberIds: Set<string>;
 };
 type Mutation = Exclude<RetroCommand, { type: 'create' | 'join' | 'resume' }>;
 
@@ -66,6 +68,7 @@ export class RetroService {
         members: [member],
         notes: [],
         actions: [],
+        readyMemberIds: new Set(),
       }),
     );
     if (!room)
@@ -114,6 +117,7 @@ export class RetroService {
 
   snapshot(session: RetroSession): RetroRoom {
     const { room, member } = this.authorize(session);
+    const { readyMemberIds, ...publicRoom } = room;
     // Writing is private even for moderators. Advancing to vote changes the
     // phase before one broadcast reveals the complete board to everyone.
     const notes =
@@ -124,12 +128,13 @@ export class RetroService {
     // mutable internal state. Open voting contains only the recipient's own
     // selections; aggregate totals become public in discuss/closed.
     return structuredClone({
-      ...room,
+      ...publicRoom,
       members: room.members.map(({ id, name, role, connected }) => ({
         id,
         name,
         moderator: role === 'moderator',
         connected,
+        ready: readyMemberIds.has(id),
       })),
       notes: notes.map(({ voterIds, ...note }) => ({
         ...note,
@@ -158,8 +163,19 @@ export class RetroService {
           discuss: 'closed',
         } as const;
         room.phase = next[room.phase];
+        room.readyMemberIds.clear();
         return;
       }
+      case 'toggle-ready':
+        if (room.phase !== 'write' && room.phase !== 'vote')
+          throw new RetroError(
+            'wrong-phase',
+            'Readiness is only available while writing or voting.',
+          );
+        if (room.readyMemberIds.has(member.id))
+          room.readyMemberIds.delete(member.id);
+        else room.readyMemberIds.add(member.id);
+        return;
       case 'add-note':
         this.requirePhase(room, 'write');
         if (room.notes.length >= MAX_NOTES)

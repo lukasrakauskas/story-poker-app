@@ -5,6 +5,8 @@ export interface RetroMember {
   name: string;
   moderator: boolean;
   connected: boolean;
+  /** Readiness for the current write/vote phase; reset when the phase changes. */
+  ready: boolean;
 }
 export interface RetroNote {
   id: string;
@@ -39,6 +41,7 @@ export type RetroCommand =
   | { type: "edit-note"; id: string; text: string }
   | { type: "delete-note"; id: string }
   | { type: "toggle-vote"; id: string }
+  | { type: "toggle-ready" }
   | { type: "advance" }
   | { type: "add-action"; text: string; owner: string }
   | { type: "toggle-action"; id: string }

@@ -24,6 +24,8 @@ const roomBaseSchema = z.object({
         name: z.string().max(30),
         moderator: z.boolean(),
         connected: z.boolean(),
+        // Version 2 archives created before phase readiness omit this field.
+        ready: z.boolean().default(false),
       })
     )
     .max(30),

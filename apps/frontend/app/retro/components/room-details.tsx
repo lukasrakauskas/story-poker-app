@@ -110,7 +110,12 @@ export function RoomDetails({
                     )}
                   </div>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {member.connected ? "Online" : "Offline"}
+                    {!member.connected
+                      ? "Offline"
+                      : (room.phase === "write" || room.phase === "vote") &&
+                          member.ready
+                        ? "Ready"
+                        : "Online"}
                   </span>
                 </li>
               ))}
