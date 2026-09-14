@@ -8,6 +8,7 @@ import { EventsGateway } from './events.gateway.js';
 import type { Client } from './client.entity.js';
 
 let gateway: EventsGateway;
+let rooms: RoomService;
 let clients: Set<Client>;
 let config: ConfigService;
 
@@ -47,12 +48,14 @@ beforeEach(() => {
   clients = new Set();
   config = new ConfigService();
   const users = new UserService();
-  gateway = new EventsGateway(config, new RoomService(users), users);
+  rooms = new RoomService(users);
+  gateway = new EventsGateway(config, rooms, users);
   gateway.server = { clients } as typeof gateway.server;
 });
 
 afterEach(() => {
   gateway.onModuleDestroy();
+  rooms.onModuleDestroy();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -85,6 +88,7 @@ describe('connection lifecycle', () => {
     expect(owner.terminate).toHaveBeenCalledOnce();
     expect(messages(owner).at(-1)).toMatchObject({ event: 'user-left' });
     gateway.onModuleDestroy();
+    rooms.onModuleDestroy();
     expect(vi.getTimerCount()).toBe(0);
   });
   it('initializes a plain WebSocket without replacing its identity', () => {

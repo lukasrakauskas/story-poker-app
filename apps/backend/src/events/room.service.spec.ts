@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { RoomService } from './room.service.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { EMPTY_ROOM_RETENTION_MS, RoomService } from './room.service.js';
 import { UserService } from './user.service.js';
 import type { RoomResult } from './events.types.js';
 
@@ -166,5 +166,49 @@ describe('RoomService', () => {
     expect(success(rooms.revealResults(room.code, user.id)).results).toEqual(
       {},
     );
+  });
+
+  it('expires an empty room after the reconnect retention period', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, user } = success(rooms.create('one', 'Alice'));
+      rooms.disconnect(room.code, user.id);
+
+      vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS - 1);
+      expect(rooms.get(room.code)).toBe(room);
+      vi.advanceTimersByTime(1);
+      expect(rooms.get(room.code)).toBeUndefined();
+      expect(rooms.join(room.code, 'two', 'Bobby')).toEqual({
+        error: { event: 'room-not-found', data: null },
+      });
+      expect(rooms.reconnect(user.token, room.code)).toEqual({
+        error: { event: 'room-not-found', data: null },
+      });
+    } finally {
+      rooms.onModuleDestroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('postpones expiration after reconnecting and clears timers on shutdown', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, user } = success(rooms.create('one', 'Alice'));
+      rooms.disconnect(room.code, user.id);
+      vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS / 2);
+      success(rooms.reconnect(user.token, room.code));
+      vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS);
+      expect(rooms.get(room.code)).toBe(room);
+
+      rooms.disconnect(room.code, user.id);
+      expect(vi.getTimerCount()).toBe(1);
+      rooms.onModuleDestroy();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS);
+      expect(rooms.get(room.code)).toBe(room);
+    } finally {
+      rooms.onModuleDestroy();
+      vi.useRealTimers();
+    }
   });
 });

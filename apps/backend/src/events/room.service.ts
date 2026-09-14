@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import { UserService } from './user.service.js';
 import type { Room, RoomResult, User, ClientUser } from './events.types.js';
@@ -21,16 +21,32 @@ const MAX_CARD_COUNT = 30;
 const MAX_CARD_LENGTH = 20;
 const MAX_PASSWORD_LENGTH = 100;
 
+// Empty rooms remain available briefly so every participant can reconnect after
+// a transient network outage or backend restart.
+export const EMPTY_ROOM_RETENTION_MS = 15 * 60 * 1000;
+
 type Membership = { room: Room; user: User };
+type RoomExpiration = {
+  inactiveSince: number;
+  timer: ReturnType<typeof setTimeout>;
+};
 
 @Injectable()
-export class RoomService {
+export class RoomService implements OnModuleDestroy {
   private readonly rooms = new Map<string, Room>();
+  private readonly expirations = new Map<string, RoomExpiration>();
 
   constructor(private readonly users: UserService) {}
 
   get(code: string) {
     return this.rooms.get(code);
+  }
+
+  onModuleDestroy() {
+    for (const expiration of this.expirations.values()) {
+      clearTimeout(expiration.timer);
+    }
+    this.expirations.clear();
   }
 
   create(
@@ -89,6 +105,7 @@ export class RoomService {
 
     const user = this.users.create(id, name);
     room.users.push(user);
+    this.cancelExpiration(room.code);
     return { room, user };
   }
 
@@ -103,6 +120,7 @@ export class RoomService {
       const user = room.users.find((candidate) => candidate.token === token);
       if (user) {
         user.status = 'connected';
+        this.cancelExpiration(room.code);
         return { room, user };
       }
     }
@@ -115,6 +133,9 @@ export class RoomService {
       return;
     }
     membership.user.status = 'disconnected';
+    if (membership.room.users.every((user) => user.status === 'disconnected')) {
+      this.scheduleExpiration(membership.room);
+    }
     return membership;
   }
 
@@ -305,5 +326,32 @@ export class RoomService {
 
   private resetVotes(room: Room) {
     for (const user of room.users) user.vote = null;
+  }
+
+  private scheduleExpiration(room: Room) {
+    this.cancelExpiration(room.code);
+    const inactiveSince = Date.now();
+    const timer = setTimeout(() => {
+      const expiration = this.expirations.get(room.code);
+      if (expiration?.inactiveSince !== inactiveSince) return;
+
+      const current = this.rooms.get(room.code);
+      if (
+        current === room &&
+        current.users.every((user) => user.status === 'disconnected')
+      ) {
+        this.rooms.delete(room.code);
+      }
+      this.expirations.delete(room.code);
+    }, EMPTY_ROOM_RETENTION_MS);
+    timer.unref?.();
+    this.expirations.set(room.code, { inactiveSince, timer });
+  }
+
+  private cancelExpiration(code: string) {
+    const expiration = this.expirations.get(code);
+    if (!expiration) return;
+    clearTimeout(expiration.timer);
+    this.expirations.delete(code);
   }
 }
