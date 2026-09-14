@@ -5,6 +5,7 @@ import { OFFLINE_USER_RETENTION_MS, RoomService } from './room.service.js';
 import { UserService } from './user.service.js';
 import { ConfigService } from '@nestjs/config';
 import { EventsGateway } from './events.gateway.js';
+import { INVALID_COMMAND_ERROR } from './events.schema.js';
 import type { Client } from './client.entity.js';
 
 let gateway: EventsGateway;
@@ -70,6 +71,91 @@ it('wires gateway services through Nest dependency injection', async () => {
   await testingModule.close();
 });
 
+describe('runtime command validation', () => {
+  it('rejects malformed payloads before reading fields or calling services', () => {
+    const socket = client('malformed');
+    socket.isAlive = false;
+    const serviceSpies = [
+      vi.spyOn(rooms, 'get'),
+      vi.spyOn(rooms, 'create'),
+      vi.spyOn(rooms, 'join'),
+      vi.spyOn(rooms, 'reconnect'),
+      vi.spyOn(rooms, 'castVote'),
+      vi.spyOn(rooms, 'revealResults'),
+      vi.spyOn(rooms, 'startVoting'),
+      vi.spyOn(rooms, 'claimModerator'),
+      vi.spyOn(rooms, 'promoteUser'),
+      vi.spyOn(rooms, 'kickUser'),
+      vi.spyOn(rooms, 'changeAvatar'),
+      vi.spyOn(config, 'get'),
+    ];
+    const invalidCommands: [string, () => unknown][] = [
+      ['keep-alive data', () => gateway.onKeepAlive(socket, {})],
+      [
+        'inspect unknown field',
+        () => gateway.onInspectRoom({ room: 'room', extra: true }),
+      ],
+      ['create missing data', () => gateway.onCreateRoom(socket, undefined)],
+      [
+        'create unknown field',
+        () => gateway.onCreateRoom(socket, { name: 'Alice', extra: true }),
+      ],
+      [
+        'create oversized name',
+        () => gateway.onCreateRoom(socket, { name: 'a'.repeat(129) }),
+      ],
+      [
+        'join wrong room type',
+        () => gateway.onJoinRoom(socket, { name: 'Alice', room: 42 }),
+      ],
+      [
+        'reconnect missing room',
+        () => gateway.onReconnect(socket, { token: 'token' }),
+      ],
+      ['vote missing value', () => gateway.onCastVote(socket, {})],
+      [
+        'vote oversized value',
+        () => gateway.onCastVote(socket, { vote: '1'.repeat(21) }),
+      ],
+      [
+        'avatar wrong type',
+        () => gateway.onChangeAvatar(socket, { avatar: 'first' }),
+      ],
+      ['promote missing user', () => gateway.onPromoteUser(socket, {})],
+      [
+        'kick unknown field',
+        () => gateway.onKickUser(socket, { userId: 'user', extra: true }),
+      ],
+      [
+        'claim moderator data',
+        () => gateway.onClaimModerator(socket, { userId: 'user' }),
+      ],
+      ['reveal data', () => gateway.onRevealResults(socket, {})],
+      ['start data', () => gateway.onStartVoting(socket, {})],
+      [
+        'oversized broadcast',
+        () =>
+          gateway.onBroadcastMessage({
+            roomId: 'room',
+            message: 'a'.repeat(1001),
+            password: 'secret',
+          }),
+      ],
+    ];
+
+    for (const [label, invoke] of invalidCommands) {
+      expect(invoke(), label).toEqual(INVALID_COMMAND_ERROR);
+    }
+    for (const spy of serviceSpies) expect(spy).not.toHaveBeenCalled();
+    expect(socket.isAlive).toBe(false);
+
+    expect(
+      gateway.onCreateRoom(socket, { name: 'Healthy client' }),
+    ).toMatchObject({ event: 'room-joined' });
+    expect(socket.readyState).toBe(1);
+  });
+});
+
 describe('connection lifecycle', () => {
   it('terminates unresponsive clients and cleans up the heartbeat on shutdown', () => {
     vi.useFakeTimers();
@@ -120,6 +206,7 @@ describe('connection lifecycle', () => {
     const replacement = client('replacement');
     const response = gateway.onReconnect(replacement, {
       token: room.user.token,
+      room: room.code,
     });
     expect(response).toMatchObject({
       event: 'room-joined',
@@ -133,7 +220,12 @@ describe('connection lifecycle', () => {
     expect(owner.roomId).toBe('');
     expect(owner.close).toHaveBeenCalledWith(4000, 'Reconnected elsewhere');
     expect(messages(replacement).at(-1).data.user).not.toHaveProperty('token');
-    expect(gateway.onReconnect(replacement, { token: 'invalid' })).toEqual({
+    expect(
+      gateway.onReconnect(replacement, {
+        token: 'invalid',
+        room: room.code,
+      }),
+    ).toEqual({
       event: 'room-not-found',
       data: null,
     });
@@ -361,7 +453,12 @@ describe('room membership', () => {
       event: 'user-removed',
       data: { userId: 'guest' },
     });
-    expect(gateway.onReconnect(client('new'), { token: guestToken })).toEqual({
+    expect(
+      gateway.onReconnect(client('new'), {
+        token: guestToken,
+        room: room.code,
+      }),
+    ).toEqual({
       event: 'room-not-found',
       data: null,
     });
@@ -430,7 +527,10 @@ describe('voting', () => {
       data: null,
     });
     expect(
-      gateway.onReconnect(client('newer'), { token: room.user.token }),
+      gateway.onReconnect(client('newer'), {
+        token: room.user.token,
+        room: room.code,
+      }),
     ).toMatchObject({
       data: {
         state: 'voting',
@@ -461,21 +561,25 @@ describe('voting', () => {
     });
   });
 
-  it.each(['onCastVote', 'onRevealResults', 'onStartVoting'] as const)(
-    '%s rejects missing rooms and users',
-    (method) => {
-      const unknown = client('unknown');
-      expect(gateway[method](unknown, { vote: '1' })).toEqual({
-        event: 'room-not-found',
-        data: null,
-      });
-      unknown.roomId = create(client('owner')).code;
-      expect(gateway[method](unknown, { vote: '1' })).toEqual({
-        event: 'user-not-found',
-        data: null,
-      });
-    },
-  );
+  it.each([
+    [
+      'onCastVote',
+      (socket: Client) => gateway.onCastVote(socket, { vote: '1' }),
+    ],
+    ['onRevealResults', (socket: Client) => gateway.onRevealResults(socket)],
+    ['onStartVoting', (socket: Client) => gateway.onStartVoting(socket)],
+  ])('%s rejects missing rooms and users', (_method, invoke) => {
+    const unknown = client('unknown');
+    expect(invoke(unknown)).toEqual({
+      event: 'room-not-found',
+      data: null,
+    });
+    unknown.roomId = create(client('owner')).code;
+    expect(invoke(unknown)).toEqual({
+      event: 'user-not-found',
+      data: null,
+    });
+  });
 });
 
 it('authorizes administrative broadcasts and handles missing rooms', () => {

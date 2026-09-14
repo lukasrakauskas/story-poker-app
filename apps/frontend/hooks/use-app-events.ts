@@ -80,6 +80,10 @@ const serverEventsSchema = z.discriminatedUnion("event", [
     data: z.object({ error: z.string() }),
   }),
   z.object({
+    event: z.literal("invalid-command"),
+    data: z.object({ error: z.string() }),
+  }),
+  z.object({
     event: z.literal("broadcasted-message"),
     data: z.object({ message: z.string() }),
   }),

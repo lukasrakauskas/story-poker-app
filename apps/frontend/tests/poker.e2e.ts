@@ -50,6 +50,40 @@ async function planningLayoutAnchors(page: Page) {
   });
 }
 
+test("rejects malformed commands without closing the planning socket", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your estimate", exact: true })
+  ).toBeVisible();
+
+  await page.evaluate(() => {
+    window.__webSocketClient?.send(
+      JSON.stringify({
+        event: "change-avatar",
+        data: { avatar: "not-a-number", unexpected: true },
+      })
+    );
+  });
+  await expect(
+    page.getByText("Invalid request", { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Invalid command payload.", { exact: true })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Estimate 3", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Estimate 3", exact: true })
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => window.__webSocketClient?.readyState)).toBe(
+    1
+  );
+});
+
 test("validates planning room links before showing the join form", async ({
   page,
   browser,

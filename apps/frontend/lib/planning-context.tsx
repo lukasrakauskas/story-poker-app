@@ -375,6 +375,15 @@ export function PlanningProvider({
       });
     });
 
+    const unsubInvalidCommand = app.on("invalid-command", (data) => {
+      if (!currentUserId.current) setState("connected");
+      toast({
+        title: "Invalid request",
+        description: data.error,
+        variant: "destructive",
+      });
+    });
+
     const unsubInvalidCardSet = app.on("invalid-card-set", () => {
       setState("connected");
       toast({
@@ -455,6 +464,7 @@ export function PlanningProvider({
       unsubRoomNotFound();
       unsubUserNotFound();
       unsubBadUsername();
+      unsubInvalidCommand();
       unsubInvalidCardSet();
       unsubWrongRoomPassword();
       unsubKicked();

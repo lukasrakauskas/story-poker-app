@@ -25,6 +25,7 @@ export type ClientUser = Omit<User, 'vote' | 'token'> & {
 export type RoomError = {
   event:
     | 'room-not-found'
+    | 'invalid-command'
     | 'user-not-found'
     | 'target-user-not-found'
     | 'user-not-mod'
