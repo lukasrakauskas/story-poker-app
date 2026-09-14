@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { EventsModule } from './events.module.js';
-import { RoomService } from './room.service.js';
+import { OFFLINE_USER_RETENTION_MS, RoomService } from './room.service.js';
 import { UserService } from './user.service.js';
 import { ConfigService } from '@nestjs/config';
 import { EventsGateway } from './events.gateway.js';
@@ -138,6 +138,31 @@ describe('connection lifecycle', () => {
       data: null,
     });
     expect(() => gateway.handleDisconnect(client('unknown'))).not.toThrow();
+  });
+
+  it('broadcasts removal when an offline user expires', () => {
+    vi.useFakeTimers();
+    const owner = client('owner');
+    const room = create(owner);
+    const guest = client('guest');
+    gateway.onJoinRoom(guest, { name: 'Bobby', room: room.code });
+
+    gateway.handleDisconnect(guest);
+    expect(messages(owner).at(-1)).toMatchObject({
+      event: 'user-left',
+      data: { user: { id: 'guest', status: 'disconnected' } },
+    });
+    vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS);
+    expect(messages(owner).at(-1)).toEqual({
+      event: 'user-removed',
+      data: { userId: 'guest' },
+    });
+    expect(
+      gateway.onJoinRoom(client('replacement'), {
+        name: 'Bobby',
+        room: room.code,
+      }),
+    ).toMatchObject({ event: 'room-joined' });
   });
 });
 

@@ -32,15 +32,23 @@ export class EventsGateway
   @WebSocketServer()
   server: Server<typeof Client>;
   private heartbeat?: ReturnType<typeof setInterval>;
+  private readonly unsubscribeUserExpired: () => void;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly rooms: RoomService,
     private readonly users: UserService,
-  ) {}
+  ) {
+    this.unsubscribeUserExpired = this.rooms.onUserExpired((room, user) => {
+      this.notifyRoom(room, {
+        event: 'user-removed',
+        data: { userId: user.id },
+      });
+    });
+  }
 
   afterInit(server: Server<typeof Client>) {
-    this.onModuleDestroy();
+    this.stopHeartbeat();
     this.heartbeat = setInterval(() => {
       for (const client of server.clients) {
         if (client.isAlive === false) {
@@ -55,8 +63,8 @@ export class EventsGateway
   }
 
   onModuleDestroy() {
-    if (this.heartbeat) clearInterval(this.heartbeat);
-    this.heartbeat = undefined;
+    this.stopHeartbeat();
+    this.unsubscribeUserExpired();
   }
 
   handleConnection(client: Client) {
@@ -271,6 +279,11 @@ export class EventsGateway
       data: { message: data.message },
     });
     return { event: 'message-broadcasted', data: null };
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
   }
 
   private replaceConnection(client: Client, userId: string) {

@@ -21,20 +21,25 @@ const MAX_CARD_COUNT = 30;
 const MAX_CARD_LENGTH = 20;
 const MAX_PASSWORD_LENGTH = 100;
 
-// Empty rooms remain available briefly so every participant can reconnect after
-// a transient network outage or backend restart.
+// Empty rooms remain available briefly so participants can recover from a
+// transient network outage.
 export const EMPTY_ROOM_RETENTION_MS = 15 * 60 * 1000;
+// Offline participants remain visible and can reconnect for five minutes.
+export const OFFLINE_USER_RETENTION_MS = 5 * 60 * 1000;
 
 type Membership = { room: Room; user: User };
-type RoomExpiration = {
+type Expiration = {
   inactiveSince: number;
   timer: ReturnType<typeof setTimeout>;
 };
+type UserExpiredListener = (room: Room, user: User) => void;
 
 @Injectable()
 export class RoomService implements OnModuleDestroy {
   private readonly rooms = new Map<string, Room>();
-  private readonly expirations = new Map<string, RoomExpiration>();
+  private readonly expirations = new Map<string, Expiration>();
+  private readonly userExpirations = new Map<User, Expiration>();
+  private readonly userExpiredListeners = new Set<UserExpiredListener>();
 
   constructor(private readonly users: UserService) {}
 
@@ -42,11 +47,21 @@ export class RoomService implements OnModuleDestroy {
     return this.rooms.get(code);
   }
 
+  onUserExpired(listener: UserExpiredListener) {
+    this.userExpiredListeners.add(listener);
+    return () => this.userExpiredListeners.delete(listener);
+  }
+
   onModuleDestroy() {
-    for (const expiration of this.expirations.values()) {
+    for (const expiration of [
+      ...this.expirations.values(),
+      ...this.userExpirations.values(),
+    ]) {
       clearTimeout(expiration.timer);
     }
     this.expirations.clear();
+    this.userExpirations.clear();
+    this.userExpiredListeners.clear();
   }
 
   create(
@@ -120,6 +135,7 @@ export class RoomService implements OnModuleDestroy {
       const user = room.users.find((candidate) => candidate.token === token);
       if (user) {
         user.status = 'connected';
+        this.cancelUserExpiration(user);
         this.cancelExpiration(room.code);
         return { room, user };
       }
@@ -133,6 +149,7 @@ export class RoomService implements OnModuleDestroy {
       return;
     }
     membership.user.status = 'disconnected';
+    this.scheduleUserExpiration(membership.room, membership.user);
     if (membership.room.users.every((user) => user.status === 'disconnected')) {
       this.scheduleExpiration(membership.room);
     }
@@ -257,6 +274,7 @@ export class RoomService implements OnModuleDestroy {
     membership.room.users = membership.room.users.filter(
       (candidate) => candidate.id !== userId,
     );
+    this.cancelUserExpiration(user);
     return { room: membership.room, user };
   }
 
@@ -326,6 +344,38 @@ export class RoomService implements OnModuleDestroy {
 
   private resetVotes(room: Room) {
     for (const user of room.users) user.vote = null;
+  }
+
+  private scheduleUserExpiration(room: Room, user: User) {
+    this.cancelUserExpiration(user);
+    const inactiveSince = Date.now();
+    const timer = setTimeout(() => {
+      const expiration = this.userExpirations.get(user);
+      if (expiration?.inactiveSince !== inactiveSince) return;
+      this.userExpirations.delete(user);
+
+      const current = this.rooms.get(room.code);
+      if (
+        current !== room ||
+        user.status !== 'disconnected' ||
+        !current.users.includes(user)
+      ) {
+        return;
+      }
+      current.users = current.users.filter(
+        (participant) => participant !== user,
+      );
+      for (const listener of this.userExpiredListeners) listener(current, user);
+    }, OFFLINE_USER_RETENTION_MS);
+    timer.unref?.();
+    this.userExpirations.set(user, { inactiveSince, timer });
+  }
+
+  private cancelUserExpiration(user: User) {
+    const expiration = this.userExpirations.get(user);
+    if (!expiration) return;
+    clearTimeout(expiration.timer);
+    this.userExpirations.delete(user);
   }
 
   private scheduleExpiration(room: Room) {

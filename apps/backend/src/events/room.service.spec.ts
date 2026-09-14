@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EMPTY_ROOM_RETENTION_MS, RoomService } from './room.service.js';
+import {
+  EMPTY_ROOM_RETENTION_MS,
+  OFFLINE_USER_RETENTION_MS,
+  RoomService,
+} from './room.service.js';
 import { UserService } from './user.service.js';
 import type { RoomResult } from './events.types.js';
 
@@ -195,17 +199,61 @@ describe('RoomService', () => {
     try {
       const { room, user } = success(rooms.create('one', 'Alice'));
       rooms.disconnect(room.code, user.id);
-      vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS / 2);
+      vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS / 2);
       success(rooms.reconnect(user.token, room.code));
       vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS);
       expect(rooms.get(room.code)).toBe(room);
 
       rooms.disconnect(room.code, user.id);
-      expect(vi.getTimerCount()).toBe(1);
+      expect(vi.getTimerCount()).toBe(2);
       rooms.onModuleDestroy();
       expect(vi.getTimerCount()).toBe(0);
       vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS);
       expect(rooms.get(room.code)).toBe(room);
+    } finally {
+      rooms.onModuleDestroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('removes an offline user from an active room and releases the name', () => {
+    vi.useFakeTimers();
+    try {
+      const expired = vi.fn();
+      rooms.onUserExpired(expired);
+      const { room, user: owner } = success(rooms.create('one', 'Alice'));
+      const { user: guest } = success(rooms.join(room.code, 'two', 'Bobby'));
+
+      rooms.disconnect(room.code, guest.id);
+      vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS - 1);
+      expect(room.users).toContain(guest);
+      vi.advanceTimersByTime(1);
+      expect(room.users).toEqual([owner]);
+      expect(expired).toHaveBeenCalledWith(room, guest);
+      expect(success(rooms.join(room.code, 'three', 'Bobby')).user.name).toBe(
+        'Bobby',
+      );
+    } finally {
+      rooms.onModuleDestroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an offline user when they reconnect before user expiration', () => {
+    vi.useFakeTimers();
+    try {
+      const expired = vi.fn();
+      rooms.onUserExpired(expired);
+      const { room } = success(rooms.create('one', 'Alice'));
+      const { user: guest } = success(rooms.join(room.code, 'two', 'Bobby'));
+
+      rooms.disconnect(room.code, guest.id);
+      vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS - 1);
+      success(rooms.reconnect(guest.token, room.code));
+      vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS);
+      expect(room.users).toContain(guest);
+      expect(guest.status).toBe('connected');
+      expect(expired).not.toHaveBeenCalled();
     } finally {
       rooms.onModuleDestroy();
       vi.useRealTimers();
