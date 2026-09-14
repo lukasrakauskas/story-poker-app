@@ -167,6 +167,41 @@ describe('connection lifecycle', () => {
 });
 
 describe('room membership', () => {
+  it('reports whether a room link is available and password protected', () => {
+    const open = create(client('open'));
+    const protectedRoom = create(
+      client('protected'),
+      'Protected owner',
+      undefined,
+      'secret',
+    );
+
+    expect(gateway.onInspectRoom({ room: open.code })).toEqual({
+      event: 'room-info',
+      data: {
+        code: open.code,
+        available: true,
+        requiresPassword: false,
+      },
+    });
+    expect(gateway.onInspectRoom({ room: protectedRoom.code })).toEqual({
+      event: 'room-info',
+      data: {
+        code: protectedRoom.code,
+        available: true,
+        requiresPassword: true,
+      },
+    });
+    expect(gateway.onInspectRoom({ room: 'missing' })).toEqual({
+      event: 'room-info',
+      data: {
+        code: 'missing',
+        available: false,
+        requiresPassword: false,
+      },
+    });
+  });
+
   it('creates independent rooms with default or custom cards and private tokens', () => {
     const first = create(client('first'));
     const second = create(client('second'), 'Another', ['yes', 'no']);

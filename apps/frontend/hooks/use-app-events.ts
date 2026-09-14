@@ -37,6 +37,14 @@ const emptyErrorEvents = [
 
 const serverEventsSchema = z.discriminatedUnion("event", [
   z.object({
+    event: z.literal("room-info"),
+    data: z.object({
+      code: z.string(),
+      available: z.boolean(),
+      requiresPassword: z.boolean(),
+    }),
+  }),
+  z.object({
     event: z.literal("room-joined"),
     data: z.object({
       code: z.string(),
@@ -89,6 +97,7 @@ type WebsocketEventsMap = {
 };
 
 type ClientEvents = {
+  "inspect-room": { room: string };
   "create-room": { name: string; cardSet?: string[]; password?: string };
   "join-room": { name: string; room: string; password?: string };
   "cast-vote": { vote: string | null };

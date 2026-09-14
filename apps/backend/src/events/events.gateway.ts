@@ -79,6 +79,19 @@ export class EventsGateway
     client.isAlive = true;
   }
 
+  @SubscribeMessage('inspect-room')
+  onInspectRoom(@MessageBody() data: { room: string }) {
+    const room = this.rooms.get(data.room);
+    return {
+      event: 'room-info',
+      data: {
+        code: data.room,
+        available: room !== undefined,
+        requiresPassword: room ? room.password !== null : false,
+      },
+    };
+  }
+
   @SubscribeMessage('create-room')
   onCreateRoom(
     @ConnectedSocket() client: Client,

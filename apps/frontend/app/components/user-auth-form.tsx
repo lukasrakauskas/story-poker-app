@@ -25,6 +25,7 @@ export function UserAuthForm({
   const [name, setName] = React.useState("");
   const [nameError, setNameError] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const creatingRoom = React.useRef(false);
 
   const { createRoom, joinRoom, roomCode } = usePlanning();
 
@@ -48,7 +49,8 @@ export function UserAuthForm({
         .map((card) => card.trim())
         .filter(Boolean) ?? [];
 
-    if (!roomCode) {
+    if (pathname === "/") {
+      creatingRoom.current = true;
       createRoom(normalizedName, cardSet, password);
     } else {
       joinRoom(normalizedName, roomCode, password);
@@ -56,7 +58,7 @@ export function UserAuthForm({
   }
 
   React.useEffect(() => {
-    if (roomCode && pathname === "/") {
+    if (creatingRoom.current && roomCode && pathname === "/") {
       router.replace(`/${roomCode}`);
     }
   }, [roomCode, pathname, router]);

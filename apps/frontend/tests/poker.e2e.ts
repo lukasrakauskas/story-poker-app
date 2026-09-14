@@ -50,6 +50,48 @@ async function planningLayoutAnchors(page: Page) {
   });
 }
 
+test("validates planning room links before showing the join form", async ({
+  page,
+  browser,
+}) => {
+  await page.goto("/missing-room");
+  await expect(
+    page.getByRole("heading", { name: "Planning room unavailable" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Join room", exact: true })
+  ).toHaveCount(0);
+  await page
+    .getByRole("link", { name: "Create a planning room", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Create a planning room", exact: true })
+  ).toBeVisible();
+
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your estimate", exact: true })
+  ).toBeVisible();
+
+  const guestContext = await browser.newContext();
+  const guest = await guestContext.newPage();
+  try {
+    await guest.goto(page.url());
+    await expect(
+      guest.getByRole("heading", {
+        name: "Join a planning room",
+        exact: true,
+      })
+    ).toBeVisible();
+    await expect(
+      guest.getByRole("button", { name: "Join room", exact: true })
+    ).toBeVisible();
+  } finally {
+    await guestContext.close();
+  }
+});
+
 test("participant names are normalized and validated on create and join", async ({
   page,
   browser,
