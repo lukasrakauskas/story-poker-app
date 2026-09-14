@@ -26,9 +26,13 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   const guestContext = await browser.newContext();
   const guest = await guestContext.newPage();
   const errors: string[] = [];
+  const nativeDialogs: string[] = [];
   for (const page of [owner, guest]) {
     page.on("pageerror", (error) => errors.push(error.message));
-    page.on("dialog", (dialog) => dialog.accept());
+    page.on("dialog", async (dialog) => {
+      nativeDialogs.push(dialog.message());
+      await dialog.dismiss();
+    });
   }
   await owner.goto("/retro");
   await owner.getByLabel("Your name").fill("Alice");
@@ -223,6 +227,13 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await owner
     .getByRole("button", { name: "Start voting", exact: true })
     .click();
+  const phaseConfirmation = owner.getByRole("alertdialog");
+  await expect(
+    phaseConfirmation.getByRole("heading", { name: "Start voting?" })
+  ).toBeVisible();
+  await phaseConfirmation
+    .getByRole("button", { name: "Confirm start voting", exact: true })
+    .click();
   await expect(
     owner.getByRole("button", { name: /^Actions for note:/ })
   ).toHaveCount(0);
@@ -237,6 +248,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeVisible();
   await owner
     .getByRole("button", { name: "Start discussion", exact: true })
+    .click();
+  await expect(
+    phaseConfirmation.getByRole("heading", { name: "Start discussion?" })
+  ).toBeVisible();
+  await phaseConfirmation
+    .getByRole("button", { name: "Confirm start discussion", exact: true })
     .click();
   await owner
     .getByLabel("Next step", { exact: true })
@@ -289,6 +306,14 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   expect(JSON.stringify(exported)).not.toContain("token");
   await owner
     .getByRole("button", { name: "Close retrospective", exact: true })
+    .click();
+  await expect(
+    phaseConfirmation.getByRole("heading", {
+      name: "Close this retrospective?",
+    })
+  ).toBeVisible();
+  await phaseConfirmation
+    .getByRole("button", { name: "Confirm close retrospective", exact: true })
     .click();
   await expect(
     guest.getByRole("heading", {
@@ -392,9 +417,19 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await owner
     .getByRole("button", { name: "Delete saved retro", exact: true })
     .click();
+  const historyConfirmation = owner.getByRole("alertdialog");
+  await expect(
+    historyConfirmation.getByRole("heading", {
+      name: "Delete this saved retrospective?",
+    })
+  ).toBeVisible();
+  await historyConfirmation
+    .getByRole("button", { name: "Delete saved retro", exact: true })
+    .click();
   await expect(owner.getByText(/No saved retrospectives yet/)).toBeVisible();
   await owner.reload();
   await expect(owner.getByText(/No saved retrospectives yet/)).toBeVisible();
   expect(errors).toEqual([]);
+  expect(nativeDialogs).toEqual([]);
   await guestContext.close();
 });

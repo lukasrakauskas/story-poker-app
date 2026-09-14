@@ -8,6 +8,7 @@ import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
 import { ActionItems } from "./action-items";
 import { RoomDetails } from "./room-details";
+import { PhaseAdvanceDialog } from "./phase-advance-dialog";
 
 const phases: {
   id: RetroPhase;
@@ -269,21 +270,13 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                   </p>
                 )}
               </div>
-              {moderator && current?.next && (
-                <Button
+              {moderator && current?.next && room.phase !== "closed" && (
+                <PhaseAdvanceDialog
+                  phase={room.phase}
+                  label={current.next}
                   disabled={disabled}
-                  onClick={() => {
-                    const message =
-                      room.phase === "write"
-                        ? "Start voting? Notes will be locked for everyone. You cannot return to writing."
-                        : room.phase === "vote"
-                          ? "Start discussion? Voting will end for everyone. You cannot return to voting."
-                          : "Close this retrospective? All notes and actions will become read-only. This cannot be undone.";
-                    if (window.confirm(message)) void send({ type: "advance" });
-                  }}
-                >
-                  {current.next}
-                </Button>
+                  onConfirm={() => send({ type: "advance" })}
+                />
               )}
             </div>
           </header>
