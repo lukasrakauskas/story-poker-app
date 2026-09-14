@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type { RetroCommand, RetroNote, RetroRoom } from 'shared/retrospective';
+import type {
+  RetroCommand,
+  RetroGroup,
+  RetroNote,
+  RetroRoom,
+} from 'shared/retrospective';
 import {
   ParticipantService,
   type CollaborationParticipant,
@@ -35,9 +40,14 @@ type StoredNote = Omit<RetroNote, 'voteCount' | 'votedBySelf'> & {
   /** Server-only voter identities used for authorization and vote budgets. */
   voterIds: string[];
 };
-type StoredRoom = Omit<RetroRoom, 'members' | 'notes'> & {
+type StoredGroup = Omit<RetroGroup, 'voteCount' | 'votedBySelf'> & {
+  /** Server-only voter identities used for authorization and vote budgets. */
+  voterIds: string[];
+};
+type StoredRoom = Omit<RetroRoom, 'members' | 'notes' | 'groups'> & {
   members: CollaborationParticipant[];
   notes: StoredNote[];
+  groups: StoredGroup[];
   /** Internal current-phase readiness, kept separate from participant identity. */
   readyMemberIds: Set<string>;
 };
@@ -70,6 +80,7 @@ export class RetroService {
         expiresAt: Date.now() + RETRO_LIFETIME_MS,
         members: [member],
         notes: [],
+        groups: [],
         actions: [],
         readyMemberIds: new Set(),
       }),
@@ -120,7 +131,7 @@ export class RetroService {
 
   snapshot(session: RetroSession): RetroRoom {
     const { room, member } = this.authorize(session);
-    const { readyMemberIds, ...publicRoom } = room;
+    const { readyMemberIds, groups, ...publicRoom } = room;
     // Writing is private even for moderators. Advancing to vote changes the
     // phase before one broadcast reveals the complete board to everyone.
     const notes =
@@ -141,6 +152,17 @@ export class RetroService {
       })),
       notes: notes.map(({ voterIds, ...note }) => ({
         ...note,
+        voteCount:
+          !note.groupId && (room.phase === 'discuss' || room.phase === 'closed')
+            ? voterIds.length
+            : null,
+        votedBySelf:
+          !note.groupId &&
+          room.phase === 'vote' &&
+          voterIds.includes(member.id),
+      })),
+      groups: groups.map(({ voterIds, ...group }) => ({
+        ...group,
         voteCount:
           room.phase === 'discuss' || room.phase === 'closed'
             ? voterIds.length
@@ -173,8 +195,8 @@ export class RetroService {
           (candidate) => candidate.id !== removed.id,
         );
         room.readyMemberIds.delete(removed.id);
-        for (const note of room.notes)
-          note.voterIds = note.voterIds.filter((id) => id !== removed.id);
+        for (const target of [...room.notes, ...room.groups])
+          target.voterIds = target.voterIds.filter((id) => id !== removed.id);
         return { removedMemberId: removed.id };
       }
       case 'transfer-moderator': {
@@ -210,7 +232,8 @@ export class RetroService {
       case 'advance': {
         this.requireModerator(member);
         const next = {
-          write: 'vote',
+          write: 'group',
+          group: 'vote',
           vote: 'discuss',
           discuss: 'closed',
         } as const;
@@ -241,6 +264,7 @@ export class RetroService {
           authorName: member.name,
           column: command.column,
           text: command.text,
+          groupId: null,
           voterIds: [],
         });
         return;
@@ -265,30 +289,70 @@ export class RetroService {
             );
         } else {
           this.requireModerator(member);
-          if (room.phase !== 'vote' && room.phase !== 'discuss')
+          if (
+            room.phase !== 'group' &&
+            room.phase !== 'vote' &&
+            room.phase !== 'discuss'
+          )
             throw new RetroError(
               'wrong-phase',
               'Notes cannot be moderated in this phase.',
             );
         }
         room.notes = room.notes.filter((candidate) => candidate.id !== note.id);
+        this.cleanupGroups(room);
+        return;
+      }
+      case 'group-notes': {
+        this.requireModerator(member);
+        this.requirePhase(room, 'group');
+        const noteIds = new Set(command.noteIds);
+        if (noteIds.size < 2)
+          throw new RetroError(
+            'invalid-command',
+            'Choose at least two different notes to create a theme.',
+          );
+        const notes = [...noteIds].map((id) => this.note(room, id));
+        for (const note of notes) note.groupId = null;
+        this.cleanupGroups(room);
+        const group: StoredGroup = {
+          id: nanoid(),
+          title: command.title,
+          voterIds: [],
+        };
+        room.groups.push(group);
+        for (const note of notes) note.groupId = group.id;
+        return;
+      }
+      case 'ungroup-note': {
+        this.requireModerator(member);
+        this.requirePhase(room, 'group');
+        const note = this.note(room, command.id);
+        if (!note.groupId)
+          throw new RetroError('not-found', 'That note is not in a theme.');
+        note.groupId = null;
+        this.cleanupGroups(room);
         return;
       }
       case 'toggle-vote': {
         this.requirePhase(room, 'vote');
-        const note = this.note(room, command.id);
-        if (note.voterIds.includes(member.id)) {
-          note.voterIds = note.voterIds.filter((id) => id !== member.id);
+        const target = this.voteTarget(room, command.id);
+        if (target.voterIds.includes(member.id)) {
+          target.voterIds = target.voterIds.filter((id) => id !== member.id);
         } else {
-          const used = room.notes.filter((note) =>
-            note.voterIds.includes(member.id),
+          const targets = [
+            ...room.notes.filter((note) => !note.groupId),
+            ...room.groups,
+          ];
+          const used = targets.filter((candidate) =>
+            candidate.voterIds.includes(member.id),
           ).length;
           if (used >= VOTES_PER_MEMBER)
             throw new RetroError(
               'vote-limit',
               'You have used all three votes. Remove a vote to move it.',
             );
-          note.voterIds.push(member.id);
+          target.voterIds.push(member.id);
         }
         return;
       }
@@ -396,6 +460,28 @@ export class RetroService {
         'wrong-phase',
         `This action is only available during the ${phase} phase.`,
       );
+  }
+
+  private cleanupGroups(room: StoredRoom) {
+    const retained = new Set<string>();
+    for (const group of room.groups) {
+      const notes = room.notes.filter((note) => note.groupId === group.id);
+      if (notes.length >= 2) retained.add(group.id);
+      else for (const note of notes) note.groupId = null;
+    }
+    room.groups = room.groups.filter((group) => retained.has(group.id));
+  }
+
+  private voteTarget(room: StoredRoom, id: string): StoredNote | StoredGroup {
+    const group = room.groups.find((candidate) => candidate.id === id);
+    if (group) return group;
+    const note = this.note(room, id);
+    if (note.groupId)
+      throw new RetroError(
+        'invalid-command',
+        'Vote for the note theme instead of an individual grouped note.',
+      );
+    return note;
   }
 
   private note(room: StoredRoom, id: string) {

@@ -38,10 +38,26 @@ export function roomAsMarkdown(
         `- ${escapeMarkdown(member.name)}${member.moderator ? " (moderator)" : ""}`
     ),
   ];
+  if (snapshot.groups.length) {
+    lines.push("", "## Themes");
+    for (const group of [...snapshot.groups].sort(
+      (a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1)
+    )) {
+      const votes =
+        group.voteCount === null ? "" : ` · ${group.voteCount} votes`;
+      lines.push("", `### ${escapeMarkdown(group.title)}${votes}`);
+      for (const note of snapshot.notes.filter(
+        (item) => item.groupId === group.id
+      ))
+        lines.push(
+          `- ${escapeMarkdown(note.text)} — ${escapeMarkdown(note.authorName)}`
+        );
+    }
+  }
   for (const column of columns) {
     lines.push("", `## ${column.title}`);
     for (const note of snapshot.notes
-      .filter((item) => item.column === column.id)
+      .filter((item) => !item.groupId && item.column === column.id)
       .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))) {
       const author = note.authorName;
       const votes =
@@ -74,10 +90,24 @@ export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
       (member) => `- ${member.name}${member.moderator ? " (moderator)" : ""}`
     ),
   ];
+  if (snapshot.groups.length) {
+    lines.push("", "Themes");
+    for (const group of [...snapshot.groups].sort(
+      (a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1)
+    )) {
+      const votes =
+        group.voteCount === null ? "" : ` [${group.voteCount} votes]`;
+      lines.push("", `${group.title}${votes}`);
+      for (const note of snapshot.notes.filter(
+        (item) => item.groupId === group.id
+      ))
+        lines.push(`- ${note.text} — ${note.authorName}`);
+    }
+  }
   for (const column of columns) {
     lines.push("", column.title);
     for (const note of snapshot.notes
-      .filter((item) => item.column === column.id)
+      .filter((item) => !item.groupId && item.column === column.id)
       .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))) {
       const author = note.authorName;
       const votes = note.voteCount === null ? "" : `[${note.voteCount} votes] `;

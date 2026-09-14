@@ -87,11 +87,16 @@ describe('RetroApplicationService', () => {
     ).toBe(true);
 
     const reveal = application.execute('owner-connection', { type: 'advance' });
-    const ownerVoting = state(reveal, 'owner-connection').room;
-    expect(ownerVoting.notes).toHaveLength(2);
-    expect(ownerVoting.members.every((member) => !member.ready)).toBe(true);
+    const ownerGrouping = state(reveal, 'owner-connection').room;
+    expect(ownerGrouping.phase).toBe('group');
+    expect(ownerGrouping.notes).toHaveLength(2);
+    expect(ownerGrouping.members.every((member) => !member.ready)).toBe(true);
     expect(state(reveal, 'guest-connection').room.notes).toHaveLength(2);
 
+    const voting = application.execute('owner-connection', {
+      type: 'advance',
+    });
+    const ownerVoting = state(voting, 'owner-connection').room;
     const voted = application.execute('guest-connection', {
       type: 'toggle-vote',
       id: ownerVoting.notes[0].id,

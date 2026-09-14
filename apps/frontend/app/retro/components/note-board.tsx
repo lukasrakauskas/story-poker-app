@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { RetroColumn, RetroNote, RetroRoom } from "shared/retrospective";
+import type {
+  RetroColumn,
+  RetroGroup,
+  RetroNote,
+  RetroRoom,
+} from "shared/retrospective";
 import type { RetroSession } from "../../../hooks/use-retro-socket";
 import { Button } from "ui/components/button";
 import { Label } from "ui/components/label";
@@ -52,10 +57,64 @@ export function NoteBoard({
 }: BoardProps) {
   const remaining = Math.max(
     0,
-    3 - room.notes.filter((note) => note.votedBySelf).length
+    3 -
+      room.notes.filter((note) => note.votedBySelf).length -
+      room.groups.filter((group) => group.votedBySelf).length
   );
+  const ungrouped = room.notes.filter((note) => !note.groupId);
+  if (room.phase === "vote") {
+    return (
+      <section aria-labelledby="voting-targets" className="space-y-4">
+        <div>
+          <h2 id="voting-targets" className="text-xl font-semibold">
+            Vote on themes and notes
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Each theme is one voting target. Ungrouped notes remain individual
+            choices.
+          </p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {room.groups.map((group) => (
+            <ThemeCard
+              key={group.id}
+              group={group}
+              room={room}
+              selfId={selfId}
+              disabled={disabled}
+              send={send}
+              remaining={remaining}
+            />
+          ))}
+          {ungrouped.map((note) => (
+            <NoteCard
+              key={note.id}
+              note={note}
+              room={room}
+              selfId={selfId}
+              disabled={disabled}
+              send={send}
+              remaining={remaining}
+              showColumn
+            />
+          ))}
+        </div>
+      </section>
+    );
+  }
   if (room.phase === "discuss" || room.phase === "closed") {
-    const ranked = [...room.notes].sort(
+    const ranked = [
+      ...room.groups.map((group) => ({
+        id: group.id,
+        voteCount: group.voteCount,
+        group,
+      })),
+      ...ungrouped.map((note) => ({
+        id: note.id,
+        voteCount: note.voteCount,
+        note,
+      })),
+    ].sort(
       (a, b) =>
         (b.voteCount ?? 0) - (a.voteCount ?? 0) || a.id.localeCompare(b.id)
     );
@@ -66,14 +125,14 @@ export function NoteBoard({
             Discussion priorities
           </h2>
           <p className="text-sm text-muted-foreground">
-            Most-voted notes first. Start at the top and capture your next
-            steps.
+            Most-voted themes and notes first. Start at the top and capture your
+            next steps.
           </p>
         </div>
         {ranked.length ? (
           <ol className="space-y-3">
-            {ranked.map((note, index) => (
-              <li key={note.id} className="flex items-start gap-3">
+            {ranked.map((target, index) => (
+              <li key={target.id} className="flex items-start gap-3">
                 <span
                   className="pt-4 text-sm tabular-nums text-muted-foreground"
                   aria-label={`Rank ${index + 1}`}
@@ -81,15 +140,26 @@ export function NoteBoard({
                   {index + 1}.
                 </span>
                 <div className="min-w-0 flex-1">
-                  <NoteCard
-                    note={note}
-                    room={room}
-                    selfId={selfId}
-                    disabled={disabled}
-                    send={send}
-                    remaining={remaining}
-                    showColumn
-                  />
+                  {"group" in target ? (
+                    <ThemeCard
+                      group={target.group}
+                      room={room}
+                      selfId={selfId}
+                      disabled={disabled}
+                      send={send}
+                      remaining={remaining}
+                    />
+                  ) : (
+                    <NoteCard
+                      note={target.note}
+                      room={room}
+                      selfId={selfId}
+                      disabled={disabled}
+                      send={send}
+                      remaining={remaining}
+                      showColumn
+                    />
+                  )}
                 </div>
               </li>
             ))}
@@ -156,6 +226,66 @@ export function NoteBoard({
         </section>
       ))}
     </section>
+  );
+}
+
+function ThemeCard({
+  group,
+  room,
+  selfId,
+  disabled,
+  send,
+  remaining,
+}: BoardProps & { group: RetroGroup; remaining: number }) {
+  const moderator = room.members.some(
+    (member) => member.id === selfId && member.moderator
+  );
+  const notes = room.notes.filter((note) => note.groupId === group.id);
+  return (
+    <article className="space-y-3 rounded-lg border bg-card p-4 text-card-foreground shadow-sm">
+      <div>
+        <Badge variant="secondary">Theme</Badge>
+        <h3 className="mt-2 font-semibold">{group.title}</h3>
+      </div>
+      <ul className="space-y-2 border-l-2 pl-3">
+        {notes.map((note) => (
+          <li
+            key={note.id}
+            className="flex items-start justify-between gap-2 text-sm"
+          >
+            <div className="min-w-0">
+              <p className="whitespace-pre-wrap break-words">{note.text}</p>
+              <p className="text-xs text-muted-foreground">{note.authorName}</p>
+            </div>
+            {moderator &&
+              (room.phase === "vote" || room.phase === "discuss") && (
+                <ItemActions
+                  kind="note"
+                  text={note.text}
+                  disabled={disabled}
+                  onDelete={() => send({ type: "delete-note", id: note.id })}
+                />
+              )}
+          </li>
+        ))}
+      </ul>
+      {room.phase === "vote" ? (
+        <Button
+          size="sm"
+          variant={group.votedBySelf ? "default" : "outline"}
+          aria-pressed={group.votedBySelf}
+          aria-label={`${group.votedBySelf ? "Remove vote from" : "Vote for"} theme: ${group.title}`}
+          disabled={disabled || (!group.votedBySelf && remaining === 0)}
+          onClick={() => void send({ type: "toggle-vote", id: group.id })}
+        >
+          {group.votedBySelf ? "Voted" : "Vote"}
+        </Button>
+      ) : (
+        <p className="text-xs font-medium text-muted-foreground">
+          {group.voteCount ?? 0} {group.voteCount === 1 ? "vote" : "votes"}
+        </p>
+      )}
+    </article>
   );
 }
 
@@ -232,7 +362,10 @@ function NoteCard({
   const canEdit = room.phase === "write" && own;
   const canDelete =
     (room.phase === "write" && own) ||
-    (moderator && (room.phase === "vote" || room.phase === "discuss"));
+    (moderator &&
+      (room.phase === "group" ||
+        room.phase === "vote" ||
+        room.phase === "discuss"));
   const voted = note.votedBySelf;
   const author = note.authorName;
   return (
@@ -245,6 +378,11 @@ function NoteCard({
         {showColumn && (
           <Badge variant="outline" className="shrink-0">
             {columns.find((column) => column.id === note.column)?.title}
+          </Badge>
+        )}
+        {room.phase === "group" && note.groupId && (
+          <Badge variant="secondary" className="shrink-0">
+            {room.groups.find((group) => group.id === note.groupId)?.title}
           </Badge>
         )}
         {(canEdit || canDelete) && (
@@ -318,7 +456,7 @@ function NoteCard({
           {voted ? "Voted" : "Vote"}
         </Button>
       ) : (
-        room.phase !== "write" && (
+        (room.phase === "discuss" || room.phase === "closed") && (
           <p className="text-xs font-medium text-muted-foreground">
             {note.voteCount ?? 0} {note.voteCount === 1 ? "vote" : "votes"}
           </p>

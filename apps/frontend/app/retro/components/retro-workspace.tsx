@@ -6,6 +6,7 @@ import { Button } from "ui/components/button";
 import { RetroProvider, useRetro } from "./retro-provider";
 import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
+import { NoteGrouping } from "./note-grouping";
 import { ActionItems } from "./action-items";
 import { RoomDetails } from "./room-details";
 import { PhaseAdvanceDialog } from "./phase-advance-dialog";
@@ -22,7 +23,14 @@ const phases: {
     id: "write",
     label: "Write",
     description:
-      "Write independently. Only you can see your notes during this phase. Starting voting reveals every note to the team at the same time.",
+      "Write independently. Only you can see your notes during this phase. Revealing the board shows every note to the team at the same time.",
+    next: "Reveal and group notes",
+  },
+  {
+    id: "group",
+    label: "Group",
+    description:
+      "Review the revealed board. The moderator can organize related notes into themes before voting begins.",
     next: "Start voting",
   },
   {
@@ -101,7 +109,12 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     .filter((member) => !member.ready)
     .map((member) => member.name);
   const remaining = room
-    ? Math.max(0, 3 - room.notes.filter((note) => note.votedBySelf).length)
+    ? Math.max(
+        0,
+        3 -
+          room.notes.filter((note) => note.votedBySelf).length -
+          room.groups.filter((group) => group.votedBySelf).length
+      )
     : 3;
   const minutes =
     room && now !== null
@@ -178,7 +191,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
             </div>
             <ol
               aria-label="Retrospective phases"
-              className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+              className="grid grid-cols-2 gap-2 sm:grid-cols-5"
             >
               {phases.map((phase, index) => (
                 <li
@@ -279,6 +292,9 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               phase={room.phase}
             />
             <div className="order-2 min-w-0 space-y-6 xl:col-start-1 xl:row-span-2 xl:row-start-1">
+              {room.phase === "group" && moderator && (
+                <NoteGrouping room={room} disabled={disabled} send={send} />
+              )}
               <NoteBoard
                 room={room}
                 selfId={selfId}

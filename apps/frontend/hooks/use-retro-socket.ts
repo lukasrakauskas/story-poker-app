@@ -131,6 +131,7 @@ export function useRetroSocket() {
             !event.data.self.token ||
             !event.data.room?.code ||
             !Array.isArray(event.data.room.notes) ||
+            !Array.isArray(event.data.room.groups) ||
             !Array.isArray(event.data.room.members) ||
             !Array.isArray(event.data.room.actions) ||
             !Number.isFinite(event.data.room.expiresAt)

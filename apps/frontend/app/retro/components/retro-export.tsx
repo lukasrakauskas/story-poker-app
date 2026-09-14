@@ -132,7 +132,7 @@ export function RetroExport({
         <CardTitle>Keep the takeaways</CardTitle>
         <CardDescription>
           {room.phase === "write"
-            ? "This browser-local snapshot contains only your private writing. The complete board becomes available when voting starts."
+            ? "This browser-local snapshot contains only your private writing. The complete board becomes available when grouping starts."
             : room.phase === "closed"
               ? "This final snapshot is saved only in this browser and is not a durable backup. Export a file to keep elsewhere before browser data is cleared or unavailable."
               : "This browser-local snapshot contains the revealed board but may not be the final outcome. Export it at any time, including while offline."}

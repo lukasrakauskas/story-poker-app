@@ -75,10 +75,12 @@ const room: RetroRoom = {
       authorName: "Alice",
       text: "Good teamwork",
       column: "went-well",
+      groupId: null,
       voteCount: 1,
       votedBySelf: false,
     },
   ],
+  groups: [],
   actions: [
     { id: "action", text: "Fix flaky tests", owner: "Alice", done: false },
   ],
@@ -125,6 +127,7 @@ test("write-phase history and exports retain only the current participant's note
         authorName: "Bob",
         text: "Guest private thought",
         column: "ideas",
+        groupId: null,
         voteCount: null,
         votedBySelf: false,
       },
@@ -165,6 +168,29 @@ test("write-phase history and exports retain only the current participant's note
   assert.ok(!migrated.includes("Guest private thought"));
   assert.ok(!migrated.includes("voterIds"));
   assert.equal(JSON.parse(migrated).version, 2);
+});
+
+test("preserves grouped themes in history and exports", () => {
+  const grouped: RetroRoom = {
+    ...room,
+    groups: [
+      {
+        id: "theme",
+        title: "Delivery flow",
+        voteCount: 2,
+        votedBySelf: false,
+      },
+    ],
+    notes: [{ ...room.notes[0], groupId: "theme", voteCount: null }],
+  };
+  assert.equal(saveRetroHistory(grouped), true);
+  assert.equal(
+    readRetroHistory().entries[0].room.groups[0].title,
+    "Delivery flow"
+  );
+  const markdown = roomAsMarkdown(grouped);
+  assert.match(markdown, /### Delivery flow · 2 votes/);
+  assert.match(markdown, /Good teamwork — Alice/);
 });
 
 test("retains note author snapshots after a participant is removed", () => {

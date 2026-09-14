@@ -1,5 +1,5 @@
 export type RetroColumn = "went-well" | "improve" | "ideas";
-export type RetroPhase = "write" | "vote" | "discuss" | "closed";
+export type RetroPhase = "write" | "group" | "vote" | "discuss" | "closed";
 export interface RetroMember {
   id: string;
   name: string;
@@ -15,6 +15,15 @@ export interface RetroNote {
   authorName: string;
   column: RetroColumn;
   text: string;
+  groupId: string | null;
+  /** Hidden until discussion starts so open voting stays blind. */
+  voteCount: number | null;
+  /** Recipient-specific selection state; never identifies another voter. */
+  votedBySelf: boolean;
+}
+export interface RetroGroup {
+  id: string;
+  title: string;
   /** Hidden until discussion starts so open voting stays blind. */
   voteCount: number | null;
   /** Recipient-specific selection state; never identifies another voter. */
@@ -33,6 +42,7 @@ export interface RetroRoom {
   expiresAt: number;
   members: RetroMember[];
   notes: RetroNote[];
+  groups: RetroGroup[];
   actions: RetroAction[];
 }
 export type RetroCommand =
@@ -42,6 +52,8 @@ export type RetroCommand =
   | { type: "add-note"; column: RetroColumn; text: string }
   | { type: "edit-note"; id: string; text: string }
   | { type: "delete-note"; id: string }
+  | { type: "group-notes"; title: string; noteIds: string[] }
+  | { type: "ungroup-note"; id: string }
   | { type: "remove-member"; memberId: string }
   | { type: "toggle-vote"; id: string }
   | { type: "toggle-ready" }

@@ -83,7 +83,7 @@ export function RoomDetails({
           <CardDescription>
             Anyone with the link can join. Notes stay visible only to their
             author while the team writes, then everyone sees the complete,
-            attributed board when voting starts.
+            attributed board when grouping starts.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

@@ -119,6 +119,7 @@ describe('retrospective workflow', () => {
     expect(() => add()).toThrow('300-note limit');
     service.mutate(owner, { type: 'advance' });
     service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, { type: 'advance' });
     for (let i = 0; i < 100; i++)
       service.mutate(owner, {
         type: 'add-action',
@@ -201,6 +202,7 @@ describe('retrospective workflow', () => {
     expect(() =>
       service.mutate(guest, { type: 'delete-note', id: ownerNote }),
     ).toThrow('moderator');
+    service.mutate(owner, { type: 'advance' });
     service.mutate(guest, { type: 'toggle-vote', id: ownerNote });
     service.mutate(guest, { type: 'toggle-vote', id: guestNoteIds[0] });
     service.mutate(owner, { type: 'delete-note', id: guestNoteIds[0] });
@@ -312,6 +314,10 @@ describe('retrospective workflow', () => {
     expect(
       service.snapshot(owner).members.every((member) => !member.ready),
     ).toBe(true);
+    expect(() => service.mutate(guest, { type: 'toggle-ready' })).toThrow(
+      'writing or voting',
+    );
+    service.mutate(owner, { type: 'advance' });
     service.mutate(guest, { type: 'toggle-ready' });
     expect(service.snapshot(owner).members[1].ready).toBe(true);
     service.mutate(guest, { type: 'toggle-ready' });
@@ -322,8 +328,91 @@ describe('retrospective workflow', () => {
     );
   });
 
+  it('groups revealed notes into stable theme voting targets', () => {
+    const first = add('Slow reviews');
+    const second = add('Long feedback loops');
+    service.mutate(guest, {
+      type: 'add-note',
+      column: 'ideas',
+      text: 'Pair earlier',
+    });
+    const ungrouped = service.snapshot(guest).notes[0].id;
+    service.mutate(owner, { type: 'advance' });
+
+    expect(() =>
+      service.mutate(guest, {
+        type: 'group-notes',
+        title: 'Review flow',
+        noteIds: [first, second],
+      }),
+    ).toThrow('moderator');
+    service.mutate(owner, {
+      type: 'group-notes',
+      title: 'Review flow',
+      noteIds: [first, second],
+    });
+    let grouped = service.snapshot(owner);
+    expect(grouped.phase).toBe('group');
+    expect(grouped.groups).toEqual([
+      expect.objectContaining({
+        title: 'Review flow',
+        voteCount: null,
+        votedBySelf: false,
+      }),
+    ]);
+    expect(
+      grouped.notes.filter((note) => note.groupId === grouped.groups[0].id),
+    ).toHaveLength(2);
+
+    service.mutate(owner, { type: 'ungroup-note', id: first });
+    expect(service.snapshot(owner).groups).toEqual([]);
+    expect(service.snapshot(owner).notes.every((note) => !note.groupId)).toBe(
+      true,
+    );
+    service.mutate(owner, {
+      type: 'group-notes',
+      title: 'Review flow',
+      noteIds: [first, second],
+    });
+    grouped = service.snapshot(owner);
+    const groupId = grouped.groups[0].id;
+    service.mutate(owner, { type: 'advance' });
+    expect(() =>
+      service.mutate(guest, { type: 'toggle-vote', id: first }),
+    ).toThrow('theme');
+    service.mutate(guest, { type: 'toggle-vote', id: groupId });
+    service.mutate(guest, { type: 'toggle-vote', id: ungrouped });
+    expect(service.snapshot(owner).groups[0]).toMatchObject({
+      voteCount: null,
+      votedBySelf: false,
+    });
+    expect(service.snapshot(guest).groups[0].votedBySelf).toBe(true);
+    expect(
+      service.snapshot(guest).notes.find((note) => note.id === ungrouped)
+        ?.votedBySelf,
+    ).toBe(true);
+
+    service.disconnect(guest);
+    service.resume(guest.code, guest.token);
+    expect(service.snapshot(guest).groups[0].votedBySelf).toBe(true);
+    service.mutate(owner, { type: 'advance' });
+    const discussed = service.snapshot(owner);
+    expect(discussed.groups[0].voteCount).toBe(1);
+    expect(
+      discussed.notes.find((note) => note.id === ungrouped)?.voteCount,
+    ).toBe(1);
+    expect(() =>
+      service.mutate(owner, {
+        type: 'group-notes',
+        title: 'Late',
+        noteIds: [first, second],
+      }),
+    ).toThrow('group phase');
+  });
+
   it('keeps open voting blind and anonymous while preserving own selections', () => {
     const ids = [add('One'), add('Two'), add('Three'), add('Four')];
+    service.mutate(owner, { type: 'advance' });
     service.mutate(owner, { type: 'advance' });
     ids
       .slice(0, 3)
@@ -384,6 +473,7 @@ describe('retrospective workflow', () => {
     ).toThrow('discuss phase');
     service.mutate(owner, { type: 'advance' });
     service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, { type: 'advance' });
     expect(() =>
       service.mutate(guest, { type: 'add-action', text: 'Do it', owner: '' }),
     ).toThrow('moderator');
@@ -427,6 +517,8 @@ it.each([
   { type: 'add-note', column: 'wrong', text: 'Hello' },
   { type: 'add-note', column: 'ideas', text: ' ' },
   { type: 'edit-note', id: 'note', text: 'x'.repeat(1001) },
+  { type: 'group-notes', title: 'Theme', noteIds: ['only-one'] },
+  { type: 'group-notes', title: ' ', noteIds: ['one', 'two'] },
   { type: 'add-action', text: 'Hello', owner: 'x'.repeat(61) },
   { type: 'resume', code: 'room', token: '' },
 ])('rejects malformed and oversized commands: %j', (command) => {

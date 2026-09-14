@@ -114,6 +114,16 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     guest.getByText("Reduce flaky tests", { exact: true })
   ).toBeVisible();
+  await guest
+    .getByLabel("Add a note", { exact: true })
+    .nth(2)
+    .fill("Remove after reveal");
+  await guest
+    .getByRole("button", { name: "Add to ideas", exact: true })
+    .click();
+  await expect(
+    guest.getByText("Remove after reveal", { exact: true })
+  ).toBeVisible();
   await expect(
     owner.getByText("Reduce flaky tests", { exact: true })
   ).toHaveCount(0);
@@ -246,7 +256,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeVisible();
   await expect(noteActions).toBeVisible();
   await expect(
-    owner.getByRole("button", { name: "Start voting", exact: true })
+    owner.getByRole("button", { name: "Reveal and group notes", exact: true })
   ).toBeEnabled();
   expect(
     (await context.cookies(roomUrl)).find(
@@ -261,7 +271,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .getByRole("button", { name: "Claim moderator role", exact: true })
     .click();
   await expect(
-    guest.getByRole("button", { name: "Start voting", exact: true })
+    guest.getByRole("button", { name: "Reveal and group notes", exact: true })
   ).toBeEnabled();
 
   await owner.getByRole("button", { name: "Retry connection" }).click();
@@ -269,13 +279,13 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     owner.getByText("Connected · changes sync live", { exact: true })
   ).toBeVisible();
   await expect(
-    owner.getByRole("button", { name: "Start voting", exact: true })
+    owner.getByRole("button", { name: "Reveal and group notes", exact: true })
   ).toHaveCount(0);
   await guest
     .getByRole("button", { name: "Transfer moderator to Alice", exact: true })
     .click();
   await expect(
-    owner.getByRole("button", { name: "Start voting", exact: true })
+    owner.getByRole("button", { name: "Reveal and group notes", exact: true })
   ).toBeEnabled();
 
   await expect(
@@ -314,7 +324,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeVisible();
 
   await owner
-    .getByRole("button", { name: "Start voting", exact: true })
+    .getByRole("button", { name: "Reveal and group notes", exact: true })
     .click();
   const phaseConfirmation = owner.getByRole("alertdialog");
   await expect(
@@ -340,26 +350,59 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeVisible();
 
   await owner
-    .getByRole("button", { name: "Start voting", exact: true })
+    .getByRole("button", { name: "Reveal and group notes", exact: true })
     .click();
   await expect(
-    phaseConfirmation.getByRole("heading", { name: "Start voting?" })
+    phaseConfirmation.getByRole("heading", {
+      name: "Reveal notes for grouping?",
+    })
   ).toBeVisible();
   await phaseConfirmation
-    .getByRole("button", { name: "Confirm start voting", exact: true })
+    .getByRole("button", {
+      name: "Confirm reveal and group notes",
+      exact: true,
+    })
     .click();
   await expect(
-    owner.getByText("Reduce flaky tests", { exact: true })
+    owner
+      .getByLabel("Retrospective notes")
+      .getByText("Reduce flaky tests", { exact: true })
   ).toBeVisible();
   await expect(
-    guest.getByText("Teamwork was excellent", { exact: true })
+    guest
+      .getByLabel("Retrospective notes")
+      .getByText("Teamwork was excellent", { exact: true })
   ).toBeVisible();
+  await owner.getByLabel("Teamwork was excellent", { exact: true }).check();
+  await owner.getByLabel("Reduce flaky tests", { exact: true }).check();
+  await owner.getByLabel("Theme name", { exact: true }).fill("Delivery flow");
+  await owner
+    .getByRole("button", { name: "Create theme from 2 notes", exact: true })
+    .click();
+  await expect(
+    guest.getByText("Delivery flow", { exact: true }).first()
+  ).toBeVisible();
+  await owner
+    .getByRole("button", {
+      name: "Remove note from theme: Reduce flaky tests",
+      exact: true,
+    })
+    .click();
+  await expect(owner.getByText("Current themes", { exact: true })).toHaveCount(
+    0
+  );
+  await owner.getByLabel("Teamwork was excellent", { exact: true }).check();
+  await owner.getByLabel("Reduce flaky tests", { exact: true }).check();
+  await owner.getByLabel("Theme name", { exact: true }).fill("Delivery flow");
+  await owner
+    .getByRole("button", { name: "Create theme from 2 notes", exact: true })
+    .click();
   await expect(
     guest.getByRole("button", { name: /^Actions for note:/ })
   ).toHaveCount(0);
   await owner
     .getByRole("button", {
-      name: "Actions for note: Reduce flaky tests",
+      name: "Actions for note: Remove after reveal",
       exact: true,
     })
     .click();
@@ -371,17 +414,26 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .getByRole("button", { name: "Delete note", exact: true })
     .click();
   await expect(
-    owner.getByText("Reduce flaky tests", { exact: true })
+    owner.getByText("Remove after reveal", { exact: true })
   ).toHaveCount(0);
   await expect(
-    guest.getByText("Reduce flaky tests", { exact: true })
+    guest.getByText("Remove after reveal", { exact: true })
   ).toHaveCount(0);
+  await owner
+    .getByRole("button", { name: "Start voting", exact: true })
+    .click();
+  await expect(
+    phaseConfirmation.getByRole("heading", { name: "Start voting?" })
+  ).toBeVisible();
+  await phaseConfirmation
+    .getByRole("button", { name: "Confirm start voting", exact: true })
+    .click();
   await expect(
     owner.getByText("Keep the takeaways", { exact: true })
   ).toHaveCount(0);
   await guest
     .getByRole("button", {
-      name: "Vote for note: Teamwork was excellent",
+      name: "Vote for theme: Delivery flow",
       exact: true,
     })
     .click();
@@ -390,13 +442,13 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeVisible();
   await expect(
     guest.getByRole("button", {
-      name: "Remove vote from note: Teamwork was excellent",
+      name: "Remove vote from theme: Delivery flow",
       exact: true,
     })
   ).toHaveText("Voted");
   await expect(
     owner.getByRole("button", {
-      name: "Vote for note: Teamwork was excellent",
+      name: "Vote for theme: Delivery flow",
       exact: true,
     })
   ).toHaveText("Vote");
@@ -411,23 +463,23 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
       })
     )
   );
-  expect(
-    ownerVoteSnapshot.room.notes.find(
-      (note: { text: string }) => note.text === "Teamwork was excellent"
-    )
-  ).toMatchObject({ voteCount: null, votedBySelf: false });
-  expect(
-    guestVoteSnapshot.room.notes.find(
-      (note: { text: string }) => note.text === "Teamwork was excellent"
-    )
-  ).toMatchObject({ voteCount: null, votedBySelf: true });
+  expect(ownerVoteSnapshot.room.groups[0]).toMatchObject({
+    title: "Delivery flow",
+    voteCount: null,
+    votedBySelf: false,
+  });
+  expect(guestVoteSnapshot.room.groups[0]).toMatchObject({
+    title: "Delivery flow",
+    voteCount: null,
+    votedBySelf: true,
+  });
   expect(JSON.stringify(ownerVoteSnapshot)).not.toContain("voterIds");
   expect(JSON.stringify(guestVoteSnapshot)).not.toContain("voterIds");
 
   await guest.reload();
   await expect(
     guest.getByRole("button", {
-      name: "Remove vote from note: Teamwork was excellent",
+      name: "Remove vote from theme: Delivery flow",
       exact: true,
     })
   ).toHaveText("Voted");
@@ -572,11 +624,16 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     owner: "Bobby",
     done: true,
   });
+  expect(exported.groups[0]).toMatchObject({
+    title: "Delivery flow",
+    voteCount: 1,
+    votedBySelf: false,
+  });
   expect(
     exported.notes.find(
       (note: { text: string }) => note.text === "Teamwork was excellent"
     )
-  ).toMatchObject({ voteCount: 1, votedBySelf: false });
+  ).toMatchObject({ groupId: exported.groups[0].id, voteCount: null });
   expect(
     exported.members.filter(
       (member: { moderator: boolean }) => member.moderator
@@ -656,6 +713,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   expect(markdownFile.suggestedFilename()).toMatch(/\.md$/);
   const markdown = await readFile((await markdownFile.path())!, "utf8");
   expect(markdown).toContain("# Browser retrospective");
+  expect(markdown).toContain("### Delivery flow · 1 votes");
   expect(markdown).toContain("- [x] Pair on flaky tests");
   expect(markdown).toContain("Bobby");
   expect(markdown).not.toContain(credential.value);

@@ -13,11 +13,18 @@ const noteFields = {
   authorName: z.string().max(30).default("Former member"),
   column: z.enum(["went-well", "improve", "ideas"]),
   text: z.string().max(1000),
+  groupId: z.string().nullable().default(null),
 };
+const groupSchema = z.object({
+  id: z.string(),
+  title: z.string().max(100),
+  voteCount: z.number().int().min(0).max(30).nullable(),
+  votedBySelf: z.boolean(),
+});
 const roomBaseSchema = z.object({
   code: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   title: z.string().max(100),
-  phase: z.enum(["write", "vote", "discuss", "closed"]),
+  phase: z.enum(["write", "group", "vote", "discuss", "closed"]),
   expiresAt: z.number().int().nonnegative().max(8.64e15),
   members: z
     .array(
@@ -31,6 +38,7 @@ const roomBaseSchema = z.object({
       })
     )
     .max(30),
+  groups: z.array(groupSchema).max(300).default([]),
   actions: z
     .array(
       z.object({
@@ -116,6 +124,14 @@ export function publicRetro(
   const snapshot = roomSchema.parse(room);
   return {
     ...snapshot,
+    groups: snapshot.groups.map((group) => ({
+      ...group,
+      voteCount:
+        snapshot.phase === "discuss" || snapshot.phase === "closed"
+          ? (group.voteCount ?? 0)
+          : null,
+      votedBySelf: snapshot.phase === "vote" && group.votedBySelf,
+    })),
     notes: snapshot.notes
       // Fail closed when sanitizing a write-phase snapshot without its audience.
       .filter(
@@ -131,7 +147,8 @@ export function publicRetro(
                 ?.name ?? note.authorName)
             : note.authorName,
         voteCount:
-          snapshot.phase === "discuss" || snapshot.phase === "closed"
+          !note.groupId &&
+          (snapshot.phase === "discuss" || snapshot.phase === "closed")
             ? (note.voteCount ?? 0)
             : null,
         votedBySelf: snapshot.phase === "vote" && note.votedBySelf,

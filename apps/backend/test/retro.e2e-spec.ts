@@ -127,26 +127,45 @@ describe('retrospective WebSocket route', () => {
       'Fewer handoffs',
     ]);
     expect(state(await guestReveal).room.notes).toEqual(revealed.room.notes);
+    expect(revealed.room.phase).toBe('group');
+    const guestGroupedUpdate = next(guest);
+    const grouped = state(
+      await command(owner, {
+        type: 'group-notes',
+        title: 'Team flow',
+        noteIds: revealed.room.notes.map((note) => note.id),
+      }),
+    );
+    await guestGroupedUpdate;
+    const groupId = grouped.room.groups[0].id;
+    expect(grouped.room.notes.every((note) => note.groupId === groupId)).toBe(
+      true,
+    );
+    const guestVotingUpdate = next(guest);
+    expect(state(await command(owner, { type: 'advance' })).room.phase).toBe(
+      'vote',
+    );
+    await guestVotingUpdate;
     const voteReceived = next(owner);
     const guestVote = state(
       await command(guest, {
         type: 'toggle-vote',
-        id: withOwnerNote.room.notes[0].id,
+        id: groupId,
       }),
     );
     const ownerVote = state(await voteReceived);
-    expect(ownerVote.room.notes[0]).toMatchObject({
+    expect(ownerVote.room.groups[0]).toMatchObject({
       voteCount: null,
       votedBySelf: false,
     });
-    expect(guestVote.room.notes[0]).toMatchObject({
+    expect(guestVote.room.groups[0]).toMatchObject({
       voteCount: null,
       votedBySelf: true,
     });
     expect(JSON.stringify(ownerVote.room)).not.toContain('voterIds');
     expect(JSON.stringify(guestVote.room)).not.toContain('voterIds');
     const discussing = state(await command(owner, { type: 'advance' }));
-    expect(discussing.room.notes[0]).toMatchObject({
+    expect(discussing.room.groups[0]).toMatchObject({
       voteCount: 1,
       votedBySelf: false,
     });
