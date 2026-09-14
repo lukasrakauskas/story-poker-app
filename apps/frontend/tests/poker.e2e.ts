@@ -87,6 +87,7 @@ test("validates planning room links before showing the join form", async ({
     await expect(
       guest.getByRole("button", { name: "Join room", exact: true })
     ).toBeVisible();
+    await expect(guest.getByLabel(/Room password/)).toHaveCount(0);
   } finally {
     await guestContext.close();
   }
@@ -167,11 +168,18 @@ test("room controls persist and protect a planning session", async ({
   try {
     await guest.goto(page.url());
     await guest.getByLabel("Name", { exact: true }).fill("Bobby");
+    const passwordInput = guest.getByLabel("Room password (required)");
+    await expect(passwordInput).toHaveAttribute("required", "");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(
+      guest.getByText("Room password is required.", { exact: true })
+    ).toBeVisible();
+    await passwordInput.fill("wrong");
     await guest.getByRole("button", { name: "Join room", exact: true }).click();
     await expect(
       guest.getByText("Incorrect room password", { exact: true })
     ).toBeVisible();
-    await guest.getByLabel("Room password (optional)").fill("secret");
+    await passwordInput.fill("secret");
     await guest.getByRole("button", { name: "Join room", exact: true }).click();
     await expect(page.getByText("2 online", { exact: true })).toBeVisible();
     await expect(
