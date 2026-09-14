@@ -21,6 +21,26 @@ const groupSchema = z.object({
   voteCount: z.number().int().min(0).max(30).nullable(),
   votedBySelf: z.boolean(),
 });
+const actionOwnerSchema = z.union([
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("unassigned") }),
+    z.object({
+      kind: z.literal("participant"),
+      participantId: z.string(),
+      name: z.string().max(30),
+    }),
+    z.object({ kind: z.literal("external"), name: z.string().max(60) }),
+  ]),
+  // Legacy free-text owners must not be guessed into participant identities.
+  z
+    .string()
+    .max(60)
+    .transform((name) =>
+      name.trim()
+        ? { kind: "external" as const, name: name.trim() }
+        : { kind: "unassigned" as const }
+    ),
+]);
 const roomBaseSchema = z.object({
   code: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   title: z.string().max(100),
@@ -44,7 +64,7 @@ const roomBaseSchema = z.object({
       z.object({
         id: z.string(),
         text: z.string().max(1000),
-        owner: z.string().max(60),
+        owner: actionOwnerSchema,
         done: z.boolean(),
       })
     )
@@ -72,7 +92,7 @@ const legacyRoomSchema = roomBaseSchema.extend({
     .max(300),
 });
 const archiveSchema = z.object({
-  version: z.literal(2),
+  version: z.literal(3),
   savedAt: z.number().int().nonnegative().max(8.64e15),
   viewerId: z.string().optional(),
   room: roomSchema,
@@ -91,6 +111,11 @@ function parseArchive(value: unknown): {
 } {
   const current = archiveSchema.safeParse(value);
   if (current.success) return { entry: current.data, migrated: false };
+  const versionTwo = archiveSchema
+    .extend({ version: z.literal(2) })
+    .safeParse(value);
+  if (versionTwo.success)
+    return { entry: { ...versionTwo.data, version: 3 }, migrated: true };
   const legacy = legacyArchiveSchema.parse(value);
   const room = roomSchema.parse({
     ...legacy.room,
@@ -108,7 +133,7 @@ function parseArchive(value: unknown): {
   });
   return {
     entry: {
-      version: 2,
+      version: 3,
       savedAt: legacy.savedAt,
       ...(legacy.viewerId ? { viewerId: legacy.viewerId } : {}),
       room,
@@ -196,7 +221,7 @@ export function saveRetroHistory(
       }
     }
     const entry: SavedRetro = {
-      version: 2,
+      version: 3,
       savedAt: Date.now(),
       ...(viewerId ? { viewerId } : {}),
       room: snapshot,

@@ -5,6 +5,14 @@ import { participantNameSchema } from '../collaboration/participant.service.js';
 const id = z.string().min(1).max(64);
 const text = z.string().trim().min(1).max(1000);
 const name = participantNameSchema;
+const owner = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('unassigned') }),
+  z.object({ kind: z.literal('participant'), participantId: id }),
+  z.object({
+    kind: z.literal('external'),
+    name: z.string().trim().min(1).max(60),
+  }),
+]);
 export const retroCommandSchema: z.ZodType<RetroCommand> = z.discriminatedUnion(
   'type',
   [
@@ -38,8 +46,9 @@ export const retroCommandSchema: z.ZodType<RetroCommand> = z.discriminatedUnion(
     z.object({
       type: z.literal('add-action'),
       text,
-      owner: z.string().trim().max(60),
+      owner,
     }),
+    z.object({ type: z.literal('edit-action'), id, text, owner }),
     z.object({ type: z.literal('toggle-action'), id }),
     z.object({ type: z.literal('delete-action'), id }),
   ],

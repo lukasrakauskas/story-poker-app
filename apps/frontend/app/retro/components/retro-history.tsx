@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { actionOwnerLabel } from "shared/retrospective";
 import { Button } from "ui/components/button";
 import {
   AlertDialog,
@@ -168,7 +169,7 @@ export function RetroHistory() {
                       </p>
                       <p className="mt-1 break-words text-muted-foreground">
                         {action.done ? "Done" : "Open"} ·{" "}
-                        {action.owner || "Unassigned"}
+                        {actionOwnerLabel(action.owner)}
                       </p>
                     </li>
                   ))}

@@ -29,10 +29,24 @@ export interface RetroGroup {
   /** Recipient-specific selection state; never identifies another voter. */
   votedBySelf: boolean;
 }
+export type RetroActionOwner =
+  | { kind: "unassigned" }
+  | { kind: "participant"; participantId: string; name: string }
+  | { kind: "external"; name: string };
+export type RetroActionAssignment =
+  | { kind: "unassigned" }
+  | { kind: "participant"; participantId: string }
+  | { kind: "external"; name: string };
+
+export function actionOwnerLabel(owner: RetroActionOwner): string {
+  return owner.kind === "unassigned" ? "Unassigned" : owner.name;
+}
+
 export interface RetroAction {
   id: string;
   text: string;
-  owner: string;
+  /** Participant names are server-authored snapshots, retained after removal. */
+  owner: RetroActionOwner;
   done: boolean;
 }
 export interface RetroRoom {
@@ -61,7 +75,13 @@ export type RetroCommand =
   | { type: "transfer-moderator"; memberId: string }
   | { type: "claim-moderator" }
   | { type: "advance" }
-  | { type: "add-action"; text: string; owner: string }
+  | { type: "add-action"; text: string; owner: RetroActionAssignment }
+  | {
+      type: "edit-action";
+      id: string;
+      text: string;
+      owner: RetroActionAssignment;
+    }
   | { type: "toggle-action"; id: string }
   | { type: "delete-action"; id: string };
 export type RetroServerEvent =

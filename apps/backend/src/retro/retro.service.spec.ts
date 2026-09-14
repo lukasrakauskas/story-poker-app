@@ -124,13 +124,13 @@ describe('retrospective workflow', () => {
       service.mutate(owner, {
         type: 'add-action',
         text: `Action ${i}`,
-        owner: '',
+        owner: { kind: 'unassigned' },
       });
     expect(() =>
       service.mutate(owner, {
         type: 'add-action',
         text: 'Overflow',
-        owner: '',
+        owner: { kind: 'unassigned' },
       }),
     ).toThrow('100-action limit');
     const id = service.snapshot(owner).actions[0].id;
@@ -504,30 +504,120 @@ describe('retrospective workflow', () => {
     ).toThrow('vote phase');
   });
 
+  it('edits structured assignments in place and retains removed-owner snapshots', () => {
+    const assignment = {
+      kind: 'participant' as const,
+      participantId: guest.id,
+    };
+    expect(() =>
+      service.mutate(owner, {
+        type: 'edit-action',
+        id: 'missing',
+        text: 'New',
+        owner: assignment,
+      }),
+    ).toThrow('discuss phase');
+    for (let i = 0; i < 3; i++) service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, {
+      type: 'add-action',
+      text: 'Original',
+      owner: assignment,
+    });
+    const id = service.snapshot(owner).actions[0].id;
+    service.mutate(owner, { type: 'toggle-action', id });
+    const edit = {
+      type: 'edit-action' as const,
+      id,
+      text: 'Corrected',
+      owner: assignment,
+    };
+    expect(() => service.mutate(guest, edit)).toThrow('moderator');
+    expect(() => service.mutate(owner, { ...edit, id: 'missing' })).toThrow(
+      'no longer exists',
+    );
+    expect(() =>
+      service.mutate(owner, {
+        ...edit,
+        owner: { kind: 'participant', participantId: 'missing' },
+      }),
+    ).toThrow('owner');
+    expect(service.snapshot(owner).actions[0].text).toBe('Original');
+    service.mutate(owner, edit);
+    expect(service.snapshot(guest).actions[0]).toEqual({
+      id,
+      text: 'Corrected',
+      done: true,
+      owner: { ...assignment, name: 'Bobby' },
+    });
+    service.mutate(owner, { type: 'remove-member', memberId: guest.id });
+    service.mutate(owner, { ...edit, text: 'Still assigned' });
+    service.disconnect(owner);
+    service.resume(owner.code, owner.token);
+    expect(service.snapshot(owner).actions[0]).toEqual({
+      id,
+      text: 'Still assigned',
+      done: true,
+      owner: { ...assignment, name: 'Bobby' },
+    });
+    expect(() =>
+      service.mutate(owner, {
+        type: 'add-action',
+        text: 'Invalid',
+        owner: assignment,
+      }),
+    ).toThrow('owner');
+    service.mutate(owner, {
+      ...edit,
+      owner: { kind: 'participant', participantId: owner.id },
+    });
+    expect(service.snapshot(owner).actions[0].owner).toEqual({
+      kind: 'participant',
+      participantId: owner.id,
+      name: 'Alice',
+    });
+    service.mutate(owner, { ...edit, owner: { kind: 'unassigned' } });
+    expect(service.snapshot(owner).actions[0]).toMatchObject({
+      id,
+      done: true,
+      owner: { kind: 'unassigned' },
+    });
+    expect(() => service.mutate(owner, edit)).toThrow('owner');
+    service.mutate(owner, {
+      ...edit,
+      owner: { kind: 'external', name: 'Platform team' },
+    });
+    service.mutate(owner, { type: 'advance' });
+    expect(() => service.mutate(owner, edit)).toThrow('read-only');
+  });
+
   it('captures moderator-owned actions and closes read-only', () => {
     expect(() =>
       service.mutate(owner, {
         type: 'add-action',
         text: 'Do it',
-        owner: 'Alice',
+        owner: { kind: 'participant', participantId: owner.id },
       }),
     ).toThrow('discuss phase');
     service.mutate(owner, { type: 'advance' });
     service.mutate(owner, { type: 'advance' });
     service.mutate(owner, { type: 'advance' });
     expect(() =>
-      service.mutate(guest, { type: 'add-action', text: 'Do it', owner: '' }),
+      service.mutate(guest, {
+        type: 'add-action',
+        text: 'Do it',
+        owner: { kind: 'unassigned' },
+      }),
     ).toThrow('moderator');
     service.mutate(owner, {
       type: 'add-action',
       text: 'Follow up',
-      owner: 'Bobby',
+      owner: { kind: 'participant', participantId: guest.id },
     });
     const id = service.snapshot(owner).actions[0].id;
     service.mutate(owner, { type: 'toggle-action', id });
     expect(service.snapshot(owner).actions[0]).toMatchObject({
       text: 'Follow up',
-      owner: 'Bobby',
+      owner: { kind: 'participant', participantId: guest.id, name: 'Bobby' },
       done: true,
     });
     service.mutate(owner, { type: 'delete-action', id });
@@ -561,6 +651,31 @@ it.each([
   { type: 'group-notes', title: 'Theme', noteIds: ['only-one'] },
   { type: 'group-notes', title: ' ', noteIds: ['one', 'two'] },
   { type: 'add-action', text: 'Hello', owner: 'x'.repeat(61) },
+  {
+    type: 'edit-action',
+    id: 'action',
+    text: ' ',
+    owner: { kind: 'unassigned' },
+  },
+  { type: 'edit-action', id: '', text: 'Hello', owner: { kind: 'unassigned' } },
+  {
+    type: 'edit-action',
+    id: 'action',
+    text: 'Hello',
+    owner: { kind: 'participant', participantId: '' },
+  },
+  {
+    type: 'edit-action',
+    id: 'action',
+    text: 'Hello',
+    owner: { kind: 'external', name: ' ' },
+  },
+  {
+    type: 'edit-action',
+    id: 'action',
+    text: 'Hello',
+    owner: { kind: 'external', name: 'x'.repeat(61) },
+  },
   { type: 'resume', code: 'room', token: '' },
 ])('rejects malformed and oversized commands: %j', (command) => {
   expect(retroCommandSchema.safeParse(command).success).toBe(false);

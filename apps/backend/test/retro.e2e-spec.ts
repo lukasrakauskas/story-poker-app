@@ -173,7 +173,7 @@ describe('retrospective WebSocket route', () => {
       await command(owner, {
         type: 'add-action',
         text: 'Pair more',
-        owner: 'Bobby',
+        owner: { kind: 'participant', participantId: joined.self.id },
       }),
     );
     expect(actions.room.actions[0].text).toBe('Pair more');

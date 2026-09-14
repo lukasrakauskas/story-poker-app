@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import type {
   RetroCommand,
+  RetroActionAssignment,
+  RetroActionOwner,
   RetroGroup,
   RetroNote,
   RetroRoom,
@@ -378,10 +380,21 @@ export class RetroService {
         room.actions.push({
           id: nanoid(),
           text: command.text,
-          owner: command.owner,
+          owner: this.actionOwner(room, command.owner),
           done: false,
         });
         return;
+      case 'edit-action': {
+        this.requireModerator(member);
+        this.requirePhase(room, 'discuss');
+        const action = room.actions.find((item) => item.id === command.id);
+        if (!action)
+          throw new RetroError('not-found', 'That action no longer exists.');
+        const owner = this.actionOwner(room, command.owner, action.owner);
+        action.text = command.text;
+        action.owner = owner;
+        return;
+      }
       case 'toggle-action':
       case 'delete-action': {
         this.requireModerator(member);
@@ -463,6 +476,33 @@ export class RetroService {
     if (!member)
       throw new RetroError('not-found', 'That participant no longer exists.');
     return member;
+  }
+
+  private actionOwner(
+    room: StoredRoom,
+    assignment: RetroActionAssignment,
+    previous?: RetroActionOwner,
+  ): RetroActionOwner {
+    if (assignment.kind !== 'participant') return { ...assignment };
+    const member = room.members.find(
+      (item) => item.id === assignment.participantId,
+    );
+    if (member)
+      return {
+        kind: 'participant',
+        participantId: member.id,
+        name: member.name,
+      };
+    // Editing text may retain a removed owner; new assignments must be current members.
+    if (
+      previous?.kind === 'participant' &&
+      previous.participantId === assignment.participantId
+    )
+      return { ...previous };
+    throw new RetroError(
+      'not-found',
+      'That action owner is no longer in the room. Choose another owner.',
+    );
   }
 
   private requirePhase(room: StoredRoom, phase: RetroRoom['phase']) {

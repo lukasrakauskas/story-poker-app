@@ -1,4 +1,4 @@
-import type { RetroRoom } from "shared/retrospective";
+import { actionOwnerLabel, type RetroRoom } from "shared/retrospective";
 import { publicRetro } from "./retro-history";
 
 const columns = [
@@ -72,7 +72,7 @@ export function roomAsMarkdown(
     "## Action items",
     ...snapshot.actions.map(
       (action) =>
-        `- [${action.done ? "x" : " "}] ${escapeMarkdown(action.text)} — Owner: ${escapeMarkdown(action.owner || "Unassigned")}`
+        `- [${action.done ? "x" : " "}] ${escapeMarkdown(action.text)} — Owner: ${escapeMarkdown(actionOwnerLabel(action.owner))}`
     )
   );
   return `${lines.join("\n")}\n`;
@@ -119,7 +119,7 @@ export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
     "Action items",
     ...snapshot.actions.map(
       (action) =>
-        `- [${action.done ? "x" : " "}] ${action.text} — ${action.owner || "Unassigned"}`
+        `- [${action.done ? "x" : " "}] ${action.text} — ${actionOwnerLabel(action.owner)}`
     )
   );
   return lines.join("\n");

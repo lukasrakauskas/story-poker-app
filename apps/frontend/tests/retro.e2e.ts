@@ -512,7 +512,9 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await owner
     .getByLabel("Next step", { exact: true })
     .fill("Pair on flaky tests");
-  await owner.getByLabel("Owner (optional)", { exact: true }).fill("Bobby");
+  await owner
+    .getByLabel("Owner (optional)", { exact: true })
+    .selectOption({ label: "Bobby" });
   await owner.getByRole("button", { name: "Add action", exact: true }).click();
   await expect(
     guest.getByText("Pair on flaky tests", { exact: true })
@@ -557,7 +559,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await removedParticipant
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
-  await expect(owner.getByText("Charlie", { exact: true })).toBeVisible();
+  await expect(owner.getByRole("paragraph").filter({ hasText: /^Charlie$/ })).toBeVisible();
   await owner
     .getByRole("button", { name: "Remove participant Charlie", exact: true })
     .click();
@@ -621,7 +623,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   );
   expect(exported.actions[0]).toMatchObject({
     text: "Pair on flaky tests",
-    owner: "Bobby",
+    owner: {
+      kind: "participant",
+      participantId: expect.any(String),
+      name: "Bobby",
+    },
     done: true,
   });
   expect(exported.groups[0]).toMatchObject({

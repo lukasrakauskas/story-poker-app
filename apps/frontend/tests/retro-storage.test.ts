@@ -9,7 +9,7 @@ import {
   saveRetroHistory,
   RETRO_HISTORY_PREFIX,
 } from "../lib/retro-history";
-import { roomAsMarkdown } from "../lib/retro-export";
+import { roomAsMarkdown, roomAsText } from "../lib/retro-export";
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -82,7 +82,12 @@ const room: RetroRoom = {
   ],
   groups: [],
   actions: [
-    { id: "action", text: "Fix flaky tests", owner: "Alice", done: false },
+    {
+      id: "action",
+      text: "Fix flaky tests",
+      owner: { kind: "participant", participantId: "alice", name: "Alice" },
+      done: false,
+    },
   ],
 };
 
@@ -167,7 +172,38 @@ test("write-phase history and exports retain only the current participant's note
   const migrated = storage.getItem(retroHistoryKey(writing))!;
   assert.ok(!migrated.includes("Guest private thought"));
   assert.ok(!migrated.includes("voterIds"));
-  assert.equal(JSON.parse(migrated).version, 2);
+  assert.equal(JSON.parse(migrated).version, 3);
+});
+
+test("migrates free-text owners without guessing identities and exports removed assignments", () => {
+  storage.setItem(
+    retroHistoryKey(room),
+    JSON.stringify({
+      version: 2,
+      savedAt: 1,
+      room: {
+        ...room,
+        actions: [
+          { id: "old", text: "Legacy", owner: "Alice", done: true },
+          { id: "empty", text: "No owner", owner: "", done: false },
+        ],
+      },
+    })
+  );
+  const migrated = readRetroHistory().entries[0];
+  assert.equal(migrated.version, 3);
+  assert.deepEqual(
+    migrated.room.actions.map((action) => action.owner),
+    [{ kind: "external", name: "Alice" }, { kind: "unassigned" }]
+  );
+  assert.equal(JSON.parse(storage.getItem(retroHistoryKey(room))!).version, 3);
+  const removed = { ...room, members: [] };
+  assert.equal(saveRetroHistory(removed), true);
+  const saved = readRetroHistory().entries[0].room;
+  assert.deepEqual(saved.actions[0].owner, room.actions[0].owner);
+  assert.match(roomAsMarkdown(saved), /Owner: Alice/);
+  assert.match(roomAsText(saved), /Fix flaky tests — Alice/);
+  assert.deepEqual(publicRetro(saved).actions[0].owner, room.actions[0].owner);
 });
 
 test("preserves grouped themes in history and exports", () => {
@@ -236,7 +272,7 @@ test("migrates legacy voter identities to private selections or aggregate counts
     })
   );
   let migrated = readRetroHistory().entries[0];
-  assert.equal(migrated.version, 2);
+  assert.equal(migrated.version, 3);
   assert.equal(migrated.room.notes[0].voteCount, null);
   assert.equal(migrated.room.notes[0].votedBySelf, true);
   assert.equal(migrated.room.notes[0].authorName, "Alice");
@@ -316,7 +352,7 @@ test("Markdown escapes user formatting and HTML without allowing multiline list 
       {
         ...room.actions[0],
         text: "<img src=x>\nnext step",
-        owner: "[Alice](https://example.com)",
+        owner: { kind: "external", name: "[Alice](https://example.com)" },
       },
     ],
   });
@@ -333,7 +369,12 @@ test("Markdown contains notes, votes, owners, and completed/open action checkbox
     ...room,
     actions: [
       ...room.actions,
-      { id: "done", text: "Ship it", owner: "", done: true },
+      {
+        id: "done",
+        text: "Ship it",
+        owner: { kind: "unassigned" },
+        done: true,
+      },
     ],
   });
   assert.match(markdown, /^# Sprint retro/m);
