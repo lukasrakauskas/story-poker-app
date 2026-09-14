@@ -142,6 +142,6 @@ test("storage failures warn without blocking live collaboration", async ({
     page.getByText("Still works live", { exact: true })
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Export Markdown", exact: true })
-  ).toBeEnabled();
+    page.getByText("Keep the takeaways", { exact: true })
+  ).toHaveCount(0);
 });

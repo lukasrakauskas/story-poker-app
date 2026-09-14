@@ -7,8 +7,8 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 1. **Write:** everyone adds notes under Went well, To improve, or Ideas. Each participant receives only their own notes during this phase, including after reconnecting; moderators do not see anyone else's writing. Only the author can edit/delete a note.
 2. **Vote:** the moderator advances the room, revealing the complete attributed board to everyone in the same phase transition. Each person has three votes, at most one per note; clicking again removes a vote so it can be moved.
 3. **Discuss:** the moderator advances again, reviews the ranked notes, and creates action items with an owner. The moderator can mark actions done or delete them.
-4. **Closed:** the moderator closes the retrospective. The board stays read-only until it expires. Connected browsers save the completed snapshot, including final action owners and completion status.
-5. **Previous retrospectives:** open `/retro/history` to read saved notes, participants, and action items without an account or a live room. Copy Markdown or download Markdown, text, or JSON from either a live room or saved history.
+4. **Closed:** the moderator closes the retrospective. The board stays read-only until it expires, and the final-step takeaway card makes Copy Markdown and Markdown, text, and JSON downloads available immediately. Connected browsers save the completed snapshot, including final action owners and completion status.
+5. **Previous retrospectives:** open `/retro/history` to read saved notes, participants, and action items without an account or a live room. Every saved entry keeps its export controls, including incomplete snapshots. Live-room export controls are deliberately hidden during writing, voting, and discussion so partial work is not presented as the outcome.
 
 ## Lifetime and limitations
 
@@ -38,7 +38,7 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 - History remains after cookie/room expiry or server restart, until deleted or browser storage is cleared/evicted. `/retro/history` does not connect to the retrospective server. The frontend must still be reachable to load the page; this is not a service-worker/offline-app implementation.
 - Notes, participant names, votes, and action owners are stored in this browser profile and visible to anyone using it. There is no login, cross-device sync, or automatic server backup. Use **Delete saved retro** to remove a saved copy; this does not delete the live room. An open live tab receiving further updates can save it again.
 - Storage denial/quota failures show a warning without interrupting collaboration. Older entries are not evicted to make space. Corrupt or unsupported entries are skipped with a warning rather than crashing the history page.
-- Copy Markdown and `.md`, `.txt`, and `.json` downloads work from live or saved snapshots without the retro server. Exports allowlist public fields and never include resume credentials. Markdown preserves action checkboxes, owners, votes, authors, and multiline text while escaping user Markdown/HTML. Clipboard denial reveals a selectable Markdown field for manual copy.
+- Copy Markdown and `.md`, `.txt`, and `.json` downloads work from a closed live room or any saved history entry without the retro server. The final-step copy distinguishes the browser-local snapshot from a durable exported backup. Exports allowlist public fields and never include resume credentials. Markdown preserves action checkboxes, owners, votes, authors, and multiline text while escaping user Markdown/HTML. Clipboard denial reveals a selectable Markdown field for manual copy.
 
 ## Checks
 

@@ -12,7 +12,6 @@ import {
 } from "ui/components/card";
 import { Input } from "ui/components/input";
 import { Label } from "ui/components/label";
-import { RetroExport } from "./retro-export";
 
 export function RoomDetails({
   room,
@@ -119,7 +118,6 @@ export function RoomDetails({
           </div>
         </CardContent>
       </Card>
-      <RetroExport room={room} selfId={selfId} />
     </div>
   );
 }

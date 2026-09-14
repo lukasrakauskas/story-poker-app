@@ -9,6 +9,7 @@ import { NoteBoard } from "./note-board";
 import { ActionItems } from "./action-items";
 import { RoomDetails } from "./room-details";
 import { PhaseAdvanceDialog } from "./phase-advance-dialog";
+import { RetroExport } from "./retro-export";
 
 const phases: {
   id: RetroPhase;
@@ -185,7 +186,10 @@ function Workspace({ initialCode }: { initialCode?: string }) {
       {historySaved === false && (
         <p role="alert" className="text-sm text-destructive">
           Could not save this snapshot in browser history. Storage may be
-          blocked or full. Export a copy before leaving.
+          blocked or full.
+          {room?.phase === "closed"
+            ? " Export the final result before leaving."
+            : " Close the retrospective to make final export controls available."}
         </p>
       )}
       {historySaved === true && (
@@ -230,8 +234,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
             {(expired || (minutes !== null && minutes <= 15)) && (
               <p role="alert" className="text-sm font-medium">
                 {expired
-                  ? "This room has expired. The last snapshot is read-only and can still be exported. Check Previous retrospectives for your saved copy."
-                  : "This live room expires soon. Check that your latest snapshot is saved, or export a backup now."}
+                  ? "This room has expired. Check Previous retrospectives for the last snapshot saved by this browser."
+                  : "This live room expires soon. Finish and close the retrospective to make final export controls available."}
               </p>
             )}
             <ol
@@ -288,6 +292,9 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                 disabled={disabled}
                 send={send}
               />
+              {room.phase === "closed" && (
+                <RetroExport room={room} selfId={selfId} />
+              )}
             </div>
             <aside
               aria-label="Room information and actions"

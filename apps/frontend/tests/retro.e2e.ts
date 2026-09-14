@@ -245,15 +245,9 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     owner.getByText("Connected · changes sync live", { exact: true })
   ).toBeVisible();
 
-  const privateDownload = owner.waitForEvent("download");
-  await owner.getByRole("button", { name: "Export JSON", exact: true }).click();
-  const privateFile = await privateDownload;
-  const privateSnapshot = JSON.parse(
-    await readFile((await privateFile.path())!, "utf8")
-  );
-  expect(
-    privateSnapshot.notes.map((note: { text: string }) => note.text)
-  ).toEqual(["Teamwork was excellent"]);
+  await expect(
+    owner.getByText("Keep the takeaways", { exact: true })
+  ).toHaveCount(0);
   expect(
     await owner.evaluate(() =>
       Object.values(localStorage).some((value) =>
@@ -287,6 +281,9 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeVisible();
   await expect(
     owner.getByRole("button", { name: /^Actions for note:/ })
+  ).toHaveCount(0);
+  await expect(
+    owner.getByText("Keep the takeaways", { exact: true })
   ).toHaveCount(0);
   await guest
     .getByRole("button", {
@@ -342,19 +339,10 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     guest.getByText("Temporary action", { exact: true })
   ).toHaveCount(0);
+  await expect(
+    owner.getByText("Keep the takeaways", { exact: true })
+  ).toHaveCount(0);
 
-  const downloading = owner.waitForEvent("download");
-  await owner.getByRole("button", { name: "Export JSON", exact: true }).click();
-  const downloaded = await downloading;
-  const exported = JSON.parse(
-    await readFile((await downloaded.path())!, "utf8")
-  );
-  expect(exported.actions[0]).toMatchObject({
-    text: "Pair on flaky tests",
-    owner: "Bobby",
-    done: true,
-  });
-  expect(JSON.stringify(exported)).not.toContain("token");
   await owner
     .getByRole("button", { name: "Close retrospective", exact: true })
     .click();
@@ -372,7 +360,26 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
       exact: true,
     })
   ).toBeVisible();
+  await expect(
+    owner.getByText("Keep the takeaways", { exact: true })
+  ).toBeVisible();
+  await expect(
+    owner.getByText(/final snapshot is saved only in this browser/)
+  ).toBeVisible();
   await expect(owner.getByRole("checkbox")).toHaveCount(0);
+
+  const downloading = owner.waitForEvent("download");
+  await owner.getByRole("button", { name: "Export JSON", exact: true }).click();
+  const downloaded = await downloading;
+  const exported = JSON.parse(
+    await readFile((await downloaded.path())!, "utf8")
+  );
+  expect(exported.actions[0]).toMatchObject({
+    text: "Pair on flaky tests",
+    owner: "Bobby",
+    done: true,
+  });
+  expect(JSON.stringify(exported)).not.toContain("token");
   await owner.setViewportSize({ width: 390, height: 844 });
   expect(
     await owner.evaluate(
