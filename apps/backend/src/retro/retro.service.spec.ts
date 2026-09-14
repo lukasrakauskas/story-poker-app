@@ -328,6 +328,27 @@ describe('retrospective workflow', () => {
     );
   });
 
+  it('preserves server note creation order through grouping, deletion and resume', () => {
+    const ids = [add('First'), add('Second'), add('Third'), add('Fourth')];
+    service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, {
+      type: 'group-notes',
+      title: 'Theme',
+      noteIds: [ids[2], ids[0]],
+    });
+    expect(service.snapshot(guest).notes.map((note) => note.id)).toEqual(ids);
+    service.mutate(owner, { type: 'delete-note', id: ids[1] });
+    service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, { type: 'advance' });
+    service.disconnect(guest);
+    service.resume(guest.code, guest.token);
+    expect(service.snapshot(guest).notes.map((note) => note.id)).toEqual([
+      ids[0],
+      ids[2],
+      ids[3],
+    ]);
+  });
+
   it('groups revealed notes into stable theme voting targets', () => {
     const first = add('Slow reviews');
     const second = add('Long feedback loops');

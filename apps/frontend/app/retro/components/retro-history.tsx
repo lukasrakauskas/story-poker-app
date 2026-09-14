@@ -22,6 +22,7 @@ import {
   type SavedRetro,
 } from "../../../lib/retro-history";
 import { RetroExport } from "./retro-export";
+import { NoteBoard } from "./note-board";
 
 const columns = [
   { id: "went-well", title: "Went well" },
@@ -189,43 +190,54 @@ export function RetroHistory() {
                   )
                   .join(", ")}
               </p>
-              {columns.map((column) => (
-                <section key={column.id} className="space-y-2">
-                  <h3 className="font-semibold">{column.title}</h3>
-                  <ul className="space-y-2">
-                    {room.notes
-                      .filter((note) => note.column === column.id)
-                      .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))
-                      .map((note) => (
-                        <li
-                          key={note.id}
-                          className="rounded-md bg-muted/40 p-3 text-sm"
-                        >
-                          <p className="whitespace-pre-wrap break-words">
-                            {note.text}
-                          </p>
-                          {note.groupId && (
-                            <p className="mt-1 text-muted-foreground">
-                              Theme:{" "}
-                              {room.groups.find(
-                                (group) => group.id === note.groupId
-                              )?.title ?? "Former theme"}
+              {room.phase === "discuss" || room.phase === "closed" ? (
+                <NoteBoard
+                  room={room}
+                  selfId={null}
+                  disabled
+                  send={async () => false}
+                />
+              ) : (
+                columns.map((column) => (
+                  <section key={column.id} className="space-y-2">
+                    <h3 className="font-semibold">{column.title}</h3>
+                    <ul className="space-y-2">
+                      {room.notes
+                        .filter((note) => note.column === column.id)
+                        .sort(
+                          (a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1)
+                        )
+                        .map((note) => (
+                          <li
+                            key={note.id}
+                            className="rounded-md bg-muted/40 p-3 text-sm"
+                          >
+                            <p className="whitespace-pre-wrap break-words">
+                              {note.text}
                             </p>
-                          )}
-                          <p className="mt-1 text-muted-foreground">
-                            {note.groupId
-                              ? "Votes counted with theme"
-                              : note.voteCount === null
-                                ? "Votes hidden"
-                                : `${note.voteCount} votes`}{" "}
-                            {" · "}
-                            {note.authorName}
-                          </p>
-                        </li>
-                      ))}
-                  </ul>
-                </section>
-              ))}
+                            {note.groupId && (
+                              <p className="mt-1 text-muted-foreground">
+                                Theme:{" "}
+                                {room.groups.find(
+                                  (group) => group.id === note.groupId
+                                )?.title ?? "Former theme"}
+                              </p>
+                            )}
+                            <p className="mt-1 text-muted-foreground">
+                              {note.groupId
+                                ? "Votes counted with theme"
+                                : note.voteCount === null
+                                  ? "Votes hidden"
+                                  : `${note.voteCount} votes`}{" "}
+                              {" · "}
+                              {note.authorName}
+                            </p>
+                          </li>
+                        ))}
+                    </ul>
+                  </section>
+                ))
+              )}
             </details>
             <RetroExport room={room} selfId={viewerId} />
           </article>

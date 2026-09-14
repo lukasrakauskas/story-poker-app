@@ -55,6 +55,7 @@ export interface RetroRoom {
   phase: RetroPhase;
   expiresAt: number;
   members: RetroMember[];
+  /** Server creation order; retained through grouping, snapshots and archives. */
   notes: RetroNote[];
   groups: RetroGroup[];
   actions: RetroAction[];

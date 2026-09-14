@@ -80,7 +80,13 @@ test("mobile discussion actions preserve context, scroll and focus beside a long
       name: "Mark action complete: Keep discussion context",
       exact: true,
     })
-    .check();
+    .click();
+  await expect(
+    sheet.getByRole("checkbox", {
+      name: "Mark action incomplete: Keep discussion context",
+      exact: true,
+    })
+  ).toBeChecked();
   await page.keyboard.press("Escape");
   await expect(sheet).toHaveCount(0);
   await expect(trigger).toBeFocused();

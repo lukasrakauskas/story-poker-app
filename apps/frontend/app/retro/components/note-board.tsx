@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import { retroPriorities, priorityLabel } from "shared/retro-priorities";
 import type {
   RetroColumn,
   RetroGroup,
@@ -56,6 +57,7 @@ export function NoteBoard({
   send,
   onDraftChange,
 }: BoardProps) {
+  const rankedHeading = useId();
   const remaining = Math.max(
     0,
     3 -
@@ -104,41 +106,29 @@ export function NoteBoard({
     );
   }
   if (room.phase === "discuss" || room.phase === "closed") {
-    const ranked = [
-      ...room.groups.map((group) => ({
-        id: group.id,
-        voteCount: group.voteCount,
-        group,
-      })),
-      ...ungrouped.map((note) => ({
-        id: note.id,
-        voteCount: note.voteCount,
-        note,
-      })),
-    ].sort(
-      (a, b) =>
-        (b.voteCount ?? 0) - (a.voteCount ?? 0) || a.id.localeCompare(b.id)
-    );
+    const ranked = retroPriorities(room);
     return (
-      <section aria-labelledby="ranked-notes" className="space-y-4">
+      <section aria-labelledby={rankedHeading} className="space-y-4">
         <div>
-          <h2 id="ranked-notes" className="text-xl font-semibold">
+          <h2 id={rankedHeading} className="text-xl font-semibold">
             Discussion priorities
           </h2>
           <p className="text-sm text-muted-foreground">
             Most-voted themes and notes first. Start at the top and capture your
-            next steps.
+            next steps. Equal votes share a rank, with ties kept in note
+            creation order.
           </p>
         </div>
         {ranked.length ? (
           <ol className="space-y-3">
-            {ranked.map((target, index) => (
+            {ranked.map((target) => (
               <li key={target.id} className="flex items-start gap-3">
                 <span
                   className="pt-4 text-sm tabular-nums text-muted-foreground"
-                  aria-label={`Rank ${index + 1}`}
+                  aria-label={priorityLabel(target)}
                 >
-                  {index + 1}.
+                  {target.rank}.
+                  {target.tied && <span className="block text-xs">Tied</span>}
                 </span>
                 <div className="min-w-0 flex-1">
                   {"group" in target ? (
