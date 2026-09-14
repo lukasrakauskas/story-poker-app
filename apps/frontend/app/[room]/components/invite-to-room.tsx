@@ -153,25 +153,35 @@ export function InviteToRoom() {
               {connected.length} online
             </Badge>
           </h3>
-          {!revealed && (
-            <div className="space-y-2">
-              <output className="flex justify-between gap-2 text-xs text-muted-foreground">
-                <span>
-                  {voted} of {connected.length} voted
-                </span>
-                {connected.length > 0 && voted === connected.length && (
-                  <span className="font-medium text-foreground">
-                    Ready to reveal
+          <div className="space-y-2">
+            <output className="flex justify-between gap-2 text-xs text-muted-foreground">
+              {revealed ? (
+                <span>Results revealed</span>
+              ) : (
+                <>
+                  <span>
+                    {voted} of {connected.length} voted
                   </span>
-                )}
-              </output>
-              <Progress
-                value={connected.length ? (voted / connected.length) * 100 : 0}
-                aria-label="Team voting progress"
-                className="h-1.5"
-              />
-            </div>
-          )}
+                  {connected.length > 0 && voted === connected.length && (
+                    <span className="font-medium text-foreground">
+                      Ready to reveal
+                    </span>
+                  )}
+                </>
+              )}
+            </output>
+            <Progress
+              value={
+                revealed
+                  ? 100
+                  : connected.length
+                    ? (voted / connected.length) * 100
+                    : 0
+              }
+              aria-label={revealed ? "Voting complete" : "Team voting progress"}
+              className="h-1.5"
+            />
+          </div>
         </div>
         <ul
           aria-label="People in the room"

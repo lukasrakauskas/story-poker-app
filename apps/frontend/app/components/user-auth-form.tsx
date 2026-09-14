@@ -21,14 +21,32 @@ export function UserAuthForm({
 }: UserAuthFormProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const { state } = usePlanning();
+  const { state, createRoom, joinRoom, roomCode, requiresPassword } =
+    usePlanning();
   const [name, setName] = React.useState("");
+  const [nameError, setNameError] = React.useState("");
   const [password, setPassword] = React.useState("");
-
-  const { createRoom, joinRoom, roomCode } = usePlanning();
+  const [passwordError, setPasswordError] = React.useState("");
+  const creatingRoom = React.useRef(false);
+  const isCreate = pathname === "/";
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault();
+    const normalizedName = name.trim();
+    if (normalizedName.length < 3 || normalizedName.length > 30) {
+      setNameError(
+        "Name must be 3 to 30 characters after surrounding spaces are removed."
+      );
+      return;
+    }
+    setName(normalizedName);
+    setNameError("");
+    if (!isCreate && requiresPassword && !password) {
+      setPasswordError("Room password is required.");
+      return;
+    }
+    setPasswordError("");
+
     const url = new URL(window.location.href);
     const cardSet =
       url.searchParams
@@ -37,15 +55,18 @@ export function UserAuthForm({
         .map((card) => card.trim())
         .filter(Boolean) ?? [];
 
-    if (!roomCode) {
-      createRoom(name, cardSet, password);
+    const roomPassword =
+      isCreate || requiresPassword ? password || undefined : undefined;
+    if (isCreate) {
+      creatingRoom.current = true;
+      createRoom(normalizedName, cardSet, roomPassword);
     } else {
-      joinRoom(name, roomCode, password);
+      joinRoom(normalizedName, roomCode, roomPassword);
     }
   }
 
   React.useEffect(() => {
-    if (roomCode && pathname === "/") {
+    if (creatingRoom.current && roomCode && pathname === "/") {
       router.replace(`/${roomCode}`);
     }
   }, [roomCode, pathname, router]);
@@ -54,38 +75,74 @@ export function UserAuthForm({
 
   return (
     <div className={cn("grid gap-6", className)} {...props}>
-      <form onSubmit={onSubmit}>
+      <form onSubmit={onSubmit} noValidate>
         <div className="grid gap-2">
           <div className="grid gap-1.5">
             <Label htmlFor="name">Name</Label>
             <Input
               id="name"
+              name="name"
               type="text"
               autoCapitalize="none"
               autoCorrect="off"
               autoComplete="nickname"
-              minLength={3}
-              maxLength={30}
               required
+              aria-invalid={nameError ? true : undefined}
+              aria-describedby={nameError ? "name-error" : undefined}
               disabled={isLoading}
-              onChange={(event) => setName(event.target.value)}
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                setNameError("");
+              }}
             />
+            {nameError && (
+              <p
+                id="name-error"
+                role="alert"
+                className="text-sm text-destructive"
+              >
+                {nameError}
+              </p>
+            )}
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="room-password">
-              Room password{" "}
-              <span className="text-muted-foreground">(optional)</span>
-            </Label>
-            <Input
-              id="room-password"
-              type="password"
-              autoComplete={roomCode ? "current-password" : "new-password"}
-              maxLength={100}
-              disabled={isLoading}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </div>
+          {(isCreate || requiresPassword) && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="room-password">
+                Room password{" "}
+                <span className="text-muted-foreground">
+                  {isCreate ? "(optional)" : "(required)"}
+                </span>
+              </Label>
+              <Input
+                id="room-password"
+                name="roomPassword"
+                type="password"
+                autoComplete={isCreate ? "new-password" : "current-password"}
+                maxLength={100}
+                required={!isCreate}
+                aria-invalid={passwordError ? true : undefined}
+                aria-describedby={
+                  passwordError ? "room-password-error" : undefined
+                }
+                disabled={isLoading}
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setPasswordError("");
+                }}
+              />
+              {passwordError && (
+                <p
+                  id="room-password-error"
+                  role="alert"
+                  className="text-sm text-destructive"
+                >
+                  {passwordError}
+                </p>
+              )}
+            </div>
+          )}
           <Button disabled={isLoading}>
             {isLoading && (
               <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />

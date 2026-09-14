@@ -3,6 +3,7 @@
 import {
   ReactNode,
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useRef,
@@ -23,6 +24,11 @@ export type State =
   | "joining"
   | "joined"
   | "disconnected";
+export type RoomAvailability =
+  | "idle"
+  | "checking"
+  | "available"
+  | "unavailable";
 
 interface PlanningData {
   state: State;
@@ -33,6 +39,7 @@ interface PlanningData {
   results: Record<string, number>;
   cardSet: string[];
   roomCode: string;
+  roomAvailability: RoomAvailability;
   requiresPassword: boolean;
   avatars: readonly string[];
 
@@ -61,6 +68,7 @@ export const PlanningContext = createContext<PlanningData>({
   results: {},
   cardSet: [],
   roomCode: "",
+  roomAvailability: "idle",
   requiresPassword: false,
   avatars: [],
   setRoomCode: () => {},
@@ -90,6 +98,8 @@ export function PlanningProvider({
   const [planningState, setPlanningState] = useState<"voting" | "results">();
   const [results, setResults] = useState<Record<string, number>>({});
   const [roomCode, setRoomCode] = useState("");
+  const [roomAvailability, setRoomAvailability] =
+    useState<RoomAvailability>("idle");
   const [cardSet, setCardSet] = useState<string[]>([]);
   const [requiresPassword, setRequiresPassword] = useState(false);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -102,6 +112,10 @@ export function PlanningProvider({
 
   const app = useAppEvents();
   const { toast } = useToast();
+  const selectRoom = useCallback((room: string) => {
+    setRoomCode(room);
+    setRoomAvailability("checking");
+  }, []);
 
   const createRoom = (
     name: string,
@@ -177,6 +191,7 @@ export function PlanningProvider({
     const clearRoomState = (room = roomFromPath()) => {
       setRoomCode(room);
       setUsers([]);
+      currentUserId.current = undefined;
       setCurrentUser(null);
       setVote(null);
       setPlanningState(undefined);
@@ -199,13 +214,11 @@ export function PlanningProvider({
 
     const handleConnected = () => {
       clearTimeout(reconnectTimer.current);
+      setState("connected");
       const room = roomFromPath();
-      const token = room ? readSession(room) : null;
-      if (room && token) {
-        setState("joining");
-        app.send("reconnect", { token, room });
-      } else {
-        setState("connected");
+      if (room) {
+        setRoomCode(room);
+        setRoomAvailability("checking");
       }
     };
 
@@ -213,15 +226,36 @@ export function PlanningProvider({
       app.send("keep-alive");
     });
 
+    const unsubRoomInfo = app.on("room-info", (data) => {
+      if (data.code !== roomFromPath()) return;
+      setRequiresPassword(data.requiresPassword);
+      if (!data.available) {
+        clearSession(data.code);
+        clearRoomState(data.code);
+        setRoomAvailability("unavailable");
+        setState("connected");
+        return;
+      }
+
+      setRoomAvailability("available");
+      const token = readSession(data.code);
+      if (token && !currentUserId.current) {
+        setState("joining");
+        app.send("reconnect", { token, room: data.code });
+      }
+    });
+
     const unsubRoomJoined = app.on("room-joined", (data) => {
       setState("joined");
       setPlanningState(data.state);
       setUsers(data.users.map((user) => makeUserWithAvatar(user, avatars)));
       setRoomCode(data.code);
+      currentUserId.current = data.user.id;
       setCurrentUser(data.user);
       setVote(data.user.vote ?? null);
       setCardSet(data.cardSet);
       setResults(data.results);
+      setRoomAvailability("available");
       setRequiresPassword(data.requiresPassword);
       saveSession(data.code, data.user.token);
     });
@@ -316,6 +350,7 @@ export function PlanningProvider({
       const room = roomFromPath();
       clearSession(room);
       clearRoomState(room);
+      setRoomAvailability("checking");
       setState("connected");
       toast({
         title: "Room not found",
@@ -335,6 +370,15 @@ export function PlanningProvider({
       setState("connected");
       toast({
         title: "Invalid name",
+        description: data.error,
+        variant: "destructive",
+      });
+    });
+
+    const unsubInvalidCommand = app.on("invalid-command", (data) => {
+      if (!currentUserId.current) setState("connected");
+      toast({
+        title: "Invalid request",
         description: data.error,
         variant: "destructive",
       });
@@ -405,6 +449,7 @@ export function PlanningProvider({
     return () => {
       clearTimeout(reconnectTimer.current);
       unsubIsAlive();
+      unsubRoomInfo();
       unsubRoomJoined();
       unsubUserJoined();
       unsubUserLeft();
@@ -419,6 +464,7 @@ export function PlanningProvider({
       unsubRoomNotFound();
       unsubUserNotFound();
       unsubBadUsername();
+      unsubInvalidCommand();
       unsubInvalidCardSet();
       unsubWrongRoomPassword();
       unsubKicked();
@@ -429,6 +475,18 @@ export function PlanningProvider({
       window.removeEventListener("beforeunload", handleClose);
     };
   }, [app, avatars, toast]);
+
+  useEffect(() => {
+    if (
+      state !== "connected" ||
+      !roomCode ||
+      roomAvailability !== "checking" ||
+      currentUser
+    ) {
+      return;
+    }
+    app.send("inspect-room", { room: roomCode });
+  }, [app, currentUser, roomAvailability, roomCode, state]);
 
   return (
     <PlanningContext.Provider
@@ -441,9 +499,10 @@ export function PlanningProvider({
         results,
         cardSet,
         roomCode,
+        roomAvailability,
         requiresPassword,
         avatars,
-        setRoomCode,
+        setRoomCode: selectRoom,
         createRoom,
         joinRoom,
         castVote,

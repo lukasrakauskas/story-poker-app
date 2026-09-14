@@ -31,6 +31,141 @@ async function expectFitsViewport(page: Page) {
     });
 }
 
+async function planningLayoutAnchors(page: Page) {
+  return page.evaluate(() => {
+    const heading = document.querySelector(
+      'main[aria-label="Planning room"] h1'
+    )!;
+    const header = heading.closest('[data-slot="card-header"]')!;
+    const people = document.querySelector('[aria-label="People in the room"]')!;
+    const sidebar = people.closest('[data-slot="card"]')!;
+    const round = (value: number) => Math.round(value * 100) / 100;
+
+    return {
+      headerHeight: round(header.getBoundingClientRect().height),
+      peopleOffset: round(
+        people.getBoundingClientRect().top - sidebar.getBoundingClientRect().top
+      ),
+    };
+  });
+}
+
+test("rejects malformed commands without closing the planning socket", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your estimate", exact: true })
+  ).toBeVisible();
+
+  await page.evaluate(() => {
+    window.__webSocketClient?.send(
+      JSON.stringify({
+        event: "change-avatar",
+        data: { avatar: "not-a-number", unexpected: true },
+      })
+    );
+  });
+  await expect(
+    page.getByText("Invalid request", { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Invalid command payload.", { exact: true })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Estimate 3", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Estimate 3", exact: true })
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(await page.evaluate(() => window.__webSocketClient?.readyState)).toBe(
+    1
+  );
+});
+
+test("validates planning room links before showing the join form", async ({
+  page,
+  browser,
+}) => {
+  await page.goto("/missing-room");
+  await expect(
+    page.getByRole("heading", { name: "Planning room unavailable" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Join room", exact: true })
+  ).toHaveCount(0);
+  await page
+    .getByRole("link", { name: "Create a planning room", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Create a planning room", exact: true })
+  ).toBeVisible();
+
+  await page.getByLabel("Name", { exact: true }).fill("Alice");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your estimate", exact: true })
+  ).toBeVisible();
+
+  const guestContext = await browser.newContext();
+  const guest = await guestContext.newPage();
+  try {
+    await guest.goto(page.url());
+    await expect(
+      guest.getByRole("heading", {
+        name: "Join a planning room",
+        exact: true,
+      })
+    ).toBeVisible();
+    await expect(
+      guest.getByRole("button", { name: "Join room", exact: true })
+    ).toBeVisible();
+    await expect(guest.getByLabel(/Room password/)).toHaveCount(0);
+  } finally {
+    await guestContext.close();
+  }
+});
+
+test("participant names are normalized and validated on create and join", async ({
+  page,
+  browser,
+}) => {
+  const validationMessage =
+    "Name must be 3 to 30 characters after surrounding spaces are removed.";
+  await page.goto("/");
+  await page.getByLabel("Name", { exact: true }).fill("   ");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByText(validationMessage, { exact: true })
+  ).toBeVisible();
+
+  await page.getByLabel("Name", { exact: true }).fill("  Alice  ");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your estimate", exact: true })
+  ).toBeVisible();
+
+  const guestContext = await browser.newContext();
+  const guest = await guestContext.newPage();
+  try {
+    await guest.goto(page.url());
+    await guest.getByLabel("Name", { exact: true }).fill(" x ");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(
+      guest.getByText(validationMessage, { exact: true })
+    ).toBeVisible();
+
+    await guest.getByLabel("Name", { exact: true }).fill("  Bobby  ");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(
+      page.getByLabel("People in the room").getByText("Bobby", { exact: true })
+    ).toBeVisible();
+  } finally {
+    await guestContext.close();
+  }
+});
+
 test("room controls persist and protect a planning session", async ({
   page,
   browser,
@@ -67,11 +202,18 @@ test("room controls persist and protect a planning session", async ({
   try {
     await guest.goto(page.url());
     await guest.getByLabel("Name", { exact: true }).fill("Bobby");
+    const passwordInput = guest.getByLabel("Room password (required)");
+    await expect(passwordInput).toHaveAttribute("required", "");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(
+      guest.getByText("Room password is required.", { exact: true })
+    ).toBeVisible();
+    await passwordInput.fill("wrong");
     await guest.getByRole("button", { name: "Join room", exact: true }).click();
     await expect(
       guest.getByText("Incorrect room password", { exact: true })
     ).toBeVisible();
-    await guest.getByLabel("Room password (optional)").fill("secret");
+    await passwordInput.fill("secret");
     await guest.getByRole("button", { name: "Join room", exact: true }).click();
     await expect(page.getByText("2 online", { exact: true })).toBeVisible();
     await expect(
@@ -210,6 +352,7 @@ test("poker voting and results fill the viewport without incidental scrolling", 
     await expect(
       page.getByText("Ready to reveal", { exact: true })
     ).toBeVisible();
+    const desktopVotingAnchors = await planningLayoutAnchors(page);
     await page.screenshot({ path: testInfo.outputPath("poker-voting.png") });
     await page
       .getByRole("button", { name: "Reveal results", exact: true })
@@ -217,6 +360,10 @@ test("poker voting and results fill the viewport without incidental scrolling", 
     await expect(
       page.getByRole("heading", { name: "Round results" })
     ).toBeVisible();
+    await expect(
+      page.getByText("Results revealed", { exact: true })
+    ).toBeVisible();
+    expect(await planningLayoutAnchors(page)).toEqual(desktopVotingAnchors);
     await expect(
       guest.getByText("2 votes cast", { exact: true })
     ).toBeVisible();
@@ -289,13 +436,15 @@ test("poker voting and results fill the viewport without incidental scrolling", 
             window.innerWidth
       )
     ).toBe(true);
-    await page.setViewportSize({ width: 1280, height: 720 });
+    const mobileResultsAnchors = await planningLayoutAnchors(page);
     await page
       .getByRole("button", { name: "Start voting", exact: true })
       .click();
     await expect(
       page.getByRole("button", { name: "Estimate 3", exact: true })
     ).toHaveAttribute("aria-pressed", "false");
+    expect(await planningLayoutAnchors(page)).toEqual(mobileResultsAnchors);
+    await page.setViewportSize({ width: 1280, height: 720 });
     await expect(page.getByText("0 of 2 voted", { exact: true })).toBeVisible();
     await expectFitsViewport(page);
     await page

@@ -1,5 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { RoomService } from './room.service.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  EMPTY_ROOM_RETENTION_MS,
+  OFFLINE_USER_RETENTION_MS,
+  RoomService,
+} from './room.service.js';
 import { UserService } from './user.service.js';
 import type { RoomResult } from './events.types.js';
 
@@ -45,7 +49,21 @@ describe('RoomService', () => {
     expect(rooms.join(room.code, 'two', 'ab')).toMatchObject({
       error: { event: 'bad-username' },
     });
+    expect(rooms.join(room.code, 'two', '   ')).toMatchObject({
+      error: { event: 'bad-username' },
+    });
     expect(room.users).toHaveLength(1);
+  });
+
+  it('stores normalized names and reserves the normalized form', () => {
+    const { room, user } = success(rooms.create('one', '  Alice  '));
+    expect(user.name).toBe('Alice');
+    expect(rooms.join(room.code, 'two', ' Alice ')).toEqual({
+      error: { event: 'name-taken', data: null },
+    });
+    expect(success(rooms.join(room.code, 'two', '  Bobby  ')).user.name).toBe(
+      'Bobby',
+    );
   });
 
   it('aggregates votes safely and keeps a current results snapshot', () => {
@@ -81,6 +99,29 @@ describe('RoomService', () => {
     expect(room.users.every((participant) => participant.vote === null)).toBe(
       true,
     );
+  });
+
+  it('excludes offline votes unless the participant reconnects before reveal', () => {
+    const { room, user: owner } = success(rooms.create('one', 'Alice'));
+    const { user: guest } = success(rooms.join(room.code, 'two', 'Bobby'));
+    success(rooms.castVote(room.code, owner.id, '3'));
+    success(rooms.castVote(room.code, guest.id, '5'));
+    rooms.disconnect(room.code, guest.id);
+
+    expect(success(rooms.revealResults(room.code, owner.id)).results).toEqual({
+      '3': 1,
+    });
+
+    success(rooms.startVoting(room.code, owner.id));
+    success(rooms.reconnect(guest.token, room.code));
+    success(rooms.castVote(room.code, owner.id, '3'));
+    success(rooms.castVote(room.code, guest.id, '5'));
+    rooms.disconnect(room.code, guest.id);
+    success(rooms.reconnect(guest.token, room.code));
+    expect(success(rooms.revealResults(room.code, owner.id)).results).toEqual({
+      '3': 1,
+      '5': 1,
+    });
   });
 
   it('only accepts cards in the room set and lets a user remove a vote', () => {
@@ -166,5 +207,93 @@ describe('RoomService', () => {
     expect(success(rooms.revealResults(room.code, user.id)).results).toEqual(
       {},
     );
+  });
+
+  it('expires an empty room after the reconnect retention period', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, user } = success(rooms.create('one', 'Alice'));
+      rooms.disconnect(room.code, user.id);
+
+      vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS - 1);
+      expect(rooms.get(room.code)).toBe(room);
+      vi.advanceTimersByTime(1);
+      expect(rooms.get(room.code)).toBeUndefined();
+      expect(rooms.join(room.code, 'two', 'Bobby')).toEqual({
+        error: { event: 'room-not-found', data: null },
+      });
+      expect(rooms.reconnect(user.token, room.code)).toEqual({
+        error: { event: 'room-not-found', data: null },
+      });
+    } finally {
+      rooms.onModuleDestroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('postpones expiration after reconnecting and clears timers on shutdown', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, user } = success(rooms.create('one', 'Alice'));
+      rooms.disconnect(room.code, user.id);
+      vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS / 2);
+      success(rooms.reconnect(user.token, room.code));
+      vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS);
+      expect(rooms.get(room.code)).toBe(room);
+
+      rooms.disconnect(room.code, user.id);
+      expect(vi.getTimerCount()).toBe(2);
+      rooms.onModuleDestroy();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(EMPTY_ROOM_RETENTION_MS);
+      expect(rooms.get(room.code)).toBe(room);
+    } finally {
+      rooms.onModuleDestroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('removes an offline user from an active room and releases the name', () => {
+    vi.useFakeTimers();
+    try {
+      const expired = vi.fn();
+      rooms.onUserExpired(expired);
+      const { room, user: owner } = success(rooms.create('one', 'Alice'));
+      const { user: guest } = success(rooms.join(room.code, 'two', 'Bobby'));
+
+      rooms.disconnect(room.code, guest.id);
+      vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS - 1);
+      expect(room.users).toContain(guest);
+      vi.advanceTimersByTime(1);
+      expect(room.users).toEqual([owner]);
+      expect(expired).toHaveBeenCalledWith(room, guest);
+      expect(success(rooms.join(room.code, 'three', 'Bobby')).user.name).toBe(
+        'Bobby',
+      );
+    } finally {
+      rooms.onModuleDestroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps an offline user when they reconnect before user expiration', () => {
+    vi.useFakeTimers();
+    try {
+      const expired = vi.fn();
+      rooms.onUserExpired(expired);
+      const { room } = success(rooms.create('one', 'Alice'));
+      const { user: guest } = success(rooms.join(room.code, 'two', 'Bobby'));
+
+      rooms.disconnect(room.code, guest.id);
+      vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS - 1);
+      success(rooms.reconnect(guest.token, room.code));
+      vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS);
+      expect(room.users).toContain(guest);
+      expect(guest.status).toBe('connected');
+      expect(expired).not.toHaveBeenCalled();
+    } finally {
+      rooms.onModuleDestroy();
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { EventsModule } from './events.module.js';
-import { RoomService } from './room.service.js';
+import { OFFLINE_USER_RETENTION_MS, RoomService } from './room.service.js';
 import { UserService } from './user.service.js';
 import { ConfigService } from '@nestjs/config';
 import { EventsGateway } from './events.gateway.js';
+import { INVALID_COMMAND_ERROR } from './events.schema.js';
 import type { Client } from './client.entity.js';
 
 let gateway: EventsGateway;
+let rooms: RoomService;
 let clients: Set<Client>;
 let config: ConfigService;
 
@@ -47,12 +49,14 @@ beforeEach(() => {
   clients = new Set();
   config = new ConfigService();
   const users = new UserService();
-  gateway = new EventsGateway(config, new RoomService(users), users);
+  rooms = new RoomService(users);
+  gateway = new EventsGateway(config, rooms, users);
   gateway.server = { clients } as typeof gateway.server;
 });
 
 afterEach(() => {
   gateway.onModuleDestroy();
+  rooms.onModuleDestroy();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -65,6 +69,91 @@ it('wires gateway services through Nest dependency injection', async () => {
   expect(testingModule.get(RoomService)).toBeInstanceOf(RoomService);
   expect(testingModule.get(UserService)).toBeInstanceOf(UserService);
   await testingModule.close();
+});
+
+describe('runtime command validation', () => {
+  it('rejects malformed payloads before reading fields or calling services', () => {
+    const socket = client('malformed');
+    socket.isAlive = false;
+    const serviceSpies = [
+      vi.spyOn(rooms, 'get'),
+      vi.spyOn(rooms, 'create'),
+      vi.spyOn(rooms, 'join'),
+      vi.spyOn(rooms, 'reconnect'),
+      vi.spyOn(rooms, 'castVote'),
+      vi.spyOn(rooms, 'revealResults'),
+      vi.spyOn(rooms, 'startVoting'),
+      vi.spyOn(rooms, 'claimModerator'),
+      vi.spyOn(rooms, 'promoteUser'),
+      vi.spyOn(rooms, 'kickUser'),
+      vi.spyOn(rooms, 'changeAvatar'),
+      vi.spyOn(config, 'get'),
+    ];
+    const invalidCommands: [string, () => unknown][] = [
+      ['keep-alive data', () => gateway.onKeepAlive(socket, {})],
+      [
+        'inspect unknown field',
+        () => gateway.onInspectRoom({ room: 'room', extra: true }),
+      ],
+      ['create missing data', () => gateway.onCreateRoom(socket, undefined)],
+      [
+        'create unknown field',
+        () => gateway.onCreateRoom(socket, { name: 'Alice', extra: true }),
+      ],
+      [
+        'create oversized name',
+        () => gateway.onCreateRoom(socket, { name: 'a'.repeat(129) }),
+      ],
+      [
+        'join wrong room type',
+        () => gateway.onJoinRoom(socket, { name: 'Alice', room: 42 }),
+      ],
+      [
+        'reconnect missing room',
+        () => gateway.onReconnect(socket, { token: 'token' }),
+      ],
+      ['vote missing value', () => gateway.onCastVote(socket, {})],
+      [
+        'vote oversized value',
+        () => gateway.onCastVote(socket, { vote: '1'.repeat(21) }),
+      ],
+      [
+        'avatar wrong type',
+        () => gateway.onChangeAvatar(socket, { avatar: 'first' }),
+      ],
+      ['promote missing user', () => gateway.onPromoteUser(socket, {})],
+      [
+        'kick unknown field',
+        () => gateway.onKickUser(socket, { userId: 'user', extra: true }),
+      ],
+      [
+        'claim moderator data',
+        () => gateway.onClaimModerator(socket, { userId: 'user' }),
+      ],
+      ['reveal data', () => gateway.onRevealResults(socket, {})],
+      ['start data', () => gateway.onStartVoting(socket, {})],
+      [
+        'oversized broadcast',
+        () =>
+          gateway.onBroadcastMessage({
+            roomId: 'room',
+            message: 'a'.repeat(1001),
+            password: 'secret',
+          }),
+      ],
+    ];
+
+    for (const [label, invoke] of invalidCommands) {
+      expect(invoke(), label).toEqual(INVALID_COMMAND_ERROR);
+    }
+    for (const spy of serviceSpies) expect(spy).not.toHaveBeenCalled();
+    expect(socket.isAlive).toBe(false);
+
+    expect(
+      gateway.onCreateRoom(socket, { name: 'Healthy client' }),
+    ).toMatchObject({ event: 'room-joined' });
+    expect(socket.readyState).toBe(1);
+  });
 });
 
 describe('connection lifecycle', () => {
@@ -85,6 +174,7 @@ describe('connection lifecycle', () => {
     expect(owner.terminate).toHaveBeenCalledOnce();
     expect(messages(owner).at(-1)).toMatchObject({ event: 'user-left' });
     gateway.onModuleDestroy();
+    rooms.onModuleDestroy();
     expect(vi.getTimerCount()).toBe(0);
   });
   it('initializes a plain WebSocket without replacing its identity', () => {
@@ -116,6 +206,7 @@ describe('connection lifecycle', () => {
     const replacement = client('replacement');
     const response = gateway.onReconnect(replacement, {
       token: room.user.token,
+      room: room.code,
     });
     expect(response).toMatchObject({
       event: 'room-joined',
@@ -129,15 +220,80 @@ describe('connection lifecycle', () => {
     expect(owner.roomId).toBe('');
     expect(owner.close).toHaveBeenCalledWith(4000, 'Reconnected elsewhere');
     expect(messages(replacement).at(-1).data.user).not.toHaveProperty('token');
-    expect(gateway.onReconnect(replacement, { token: 'invalid' })).toEqual({
+    expect(
+      gateway.onReconnect(replacement, {
+        token: 'invalid',
+        room: room.code,
+      }),
+    ).toEqual({
       event: 'room-not-found',
       data: null,
     });
     expect(() => gateway.handleDisconnect(client('unknown'))).not.toThrow();
   });
+
+  it('broadcasts removal when an offline user expires', () => {
+    vi.useFakeTimers();
+    const owner = client('owner');
+    const room = create(owner);
+    const guest = client('guest');
+    gateway.onJoinRoom(guest, { name: 'Bobby', room: room.code });
+
+    gateway.handleDisconnect(guest);
+    expect(messages(owner).at(-1)).toMatchObject({
+      event: 'user-left',
+      data: { user: { id: 'guest', status: 'disconnected' } },
+    });
+    vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS);
+    expect(messages(owner).at(-1)).toEqual({
+      event: 'user-removed',
+      data: { userId: 'guest' },
+    });
+    expect(
+      gateway.onJoinRoom(client('replacement'), {
+        name: 'Bobby',
+        room: room.code,
+      }),
+    ).toMatchObject({ event: 'room-joined' });
+  });
 });
 
 describe('room membership', () => {
+  it('reports whether a room link is available and password protected', () => {
+    const open = create(client('open'));
+    const protectedRoom = create(
+      client('protected'),
+      'Protected owner',
+      undefined,
+      'secret',
+    );
+
+    expect(gateway.onInspectRoom({ room: open.code })).toEqual({
+      event: 'room-info',
+      data: {
+        code: open.code,
+        available: true,
+        requiresPassword: false,
+      },
+    });
+    expect(gateway.onInspectRoom({ room: protectedRoom.code })).toEqual({
+      event: 'room-info',
+      data: {
+        code: protectedRoom.code,
+        available: true,
+        requiresPassword: true,
+      },
+    });
+    expect(gateway.onInspectRoom({ room: 'missing' })).toEqual({
+      event: 'room-info',
+      data: {
+        code: 'missing',
+        available: false,
+        requiresPassword: false,
+      },
+    });
+  });
+
   it('creates independent rooms with default or custom cards and private tokens', () => {
     const first = create(client('first'));
     const second = create(client('second'), 'Another', ['yes', 'no']);
@@ -168,7 +324,7 @@ describe('room membership', () => {
     expect(first.users[0]).not.toHaveProperty('vote');
   });
 
-  it.each(['ab', 'a'.repeat(31)])(
+  it.each(['   ', ' ab ', 'a'.repeat(31)])(
     'rejects invalid username %s on create and join',
     (name) => {
       const owner = client('owner');
@@ -297,7 +453,12 @@ describe('room membership', () => {
       event: 'user-removed',
       data: { userId: 'guest' },
     });
-    expect(gateway.onReconnect(client('new'), { token: guestToken })).toEqual({
+    expect(
+      gateway.onReconnect(client('new'), {
+        token: guestToken,
+        room: room.code,
+      }),
+    ).toEqual({
       event: 'room-not-found',
       data: null,
     });
@@ -366,7 +527,10 @@ describe('voting', () => {
       data: null,
     });
     expect(
-      gateway.onReconnect(client('newer'), { token: room.user.token }),
+      gateway.onReconnect(client('newer'), {
+        token: room.user.token,
+        room: room.code,
+      }),
     ).toMatchObject({
       data: {
         state: 'voting',
@@ -377,21 +541,45 @@ describe('voting', () => {
     });
   });
 
-  it.each(['onCastVote', 'onRevealResults', 'onStartVoting'] as const)(
-    '%s rejects missing rooms and users',
-    (method) => {
-      const unknown = client('unknown');
-      expect(gateway[method](unknown, { vote: '1' })).toEqual({
-        event: 'room-not-found',
-        data: null,
-      });
-      unknown.roomId = create(client('owner')).code;
-      expect(gateway[method](unknown, { vote: '1' })).toEqual({
-        event: 'user-not-found',
-        data: null,
-      });
-    },
-  );
+  it('uses connected participants for both progress events and results', () => {
+    const owner = client('owner');
+    const room = create(owner);
+    const guest = client('guest');
+    gateway.onJoinRoom(guest, { name: 'Guest', room: room.code });
+    gateway.onCastVote(owner, { vote: '3' });
+    gateway.onCastVote(guest, { vote: '5' });
+
+    gateway.handleDisconnect(guest);
+    expect(messages(owner).at(-1)).toMatchObject({
+      event: 'user-left',
+      data: { user: { id: 'guest', status: 'disconnected', voted: true } },
+    });
+    gateway.onRevealResults(owner);
+    expect(messages(owner).at(-1)).toMatchObject({
+      event: 'results-revealed',
+      data: { results: { '3': 1 } },
+    });
+  });
+
+  it.each([
+    [
+      'onCastVote',
+      (socket: Client) => gateway.onCastVote(socket, { vote: '1' }),
+    ],
+    ['onRevealResults', (socket: Client) => gateway.onRevealResults(socket)],
+    ['onStartVoting', (socket: Client) => gateway.onStartVoting(socket)],
+  ])('%s rejects missing rooms and users', (_method, invoke) => {
+    const unknown = client('unknown');
+    expect(invoke(unknown)).toEqual({
+      event: 'room-not-found',
+      data: null,
+    });
+    unknown.roomId = create(client('owner')).code;
+    expect(invoke(unknown)).toEqual({
+      event: 'user-not-found',
+      data: null,
+    });
+  });
 });
 
 it('authorizes administrative broadcasts and handles missing rooms', () => {

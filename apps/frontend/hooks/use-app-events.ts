@@ -37,6 +37,14 @@ const emptyErrorEvents = [
 
 const serverEventsSchema = z.discriminatedUnion("event", [
   z.object({
+    event: z.literal("room-info"),
+    data: z.object({
+      code: z.string(),
+      available: z.boolean(),
+      requiresPassword: z.boolean(),
+    }),
+  }),
+  z.object({
     event: z.literal("room-joined"),
     data: z.object({
       code: z.string(),
@@ -72,6 +80,10 @@ const serverEventsSchema = z.discriminatedUnion("event", [
     data: z.object({ error: z.string() }),
   }),
   z.object({
+    event: z.literal("invalid-command"),
+    data: z.object({ error: z.string() }),
+  }),
+  z.object({
     event: z.literal("broadcasted-message"),
     data: z.object({ message: z.string() }),
   }),
@@ -89,6 +101,7 @@ type WebsocketEventsMap = {
 };
 
 type ClientEvents = {
+  "inspect-room": { room: string };
   "create-room": { name: string; cardSet?: string[]; password?: string };
   "join-room": { name: string; room: string; password?: string };
   "cast-vote": { vote: string | null };

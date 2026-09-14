@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import { UserService } from './user.service.js';
 import type { Room, RoomResult, User, ClientUser } from './events.types.js';
@@ -21,16 +21,47 @@ const MAX_CARD_COUNT = 30;
 const MAX_CARD_LENGTH = 20;
 const MAX_PASSWORD_LENGTH = 100;
 
+// Empty rooms remain available briefly so participants can recover from a
+// transient network outage.
+export const EMPTY_ROOM_RETENTION_MS = 15 * 60 * 1000;
+// Offline participants remain visible and can reconnect for five minutes.
+export const OFFLINE_USER_RETENTION_MS = 5 * 60 * 1000;
+
 type Membership = { room: Room; user: User };
+type Expiration = {
+  inactiveSince: number;
+  timer: ReturnType<typeof setTimeout>;
+};
+type UserExpiredListener = (room: Room, user: User) => void;
 
 @Injectable()
-export class RoomService {
+export class RoomService implements OnModuleDestroy {
   private readonly rooms = new Map<string, Room>();
+  private readonly expirations = new Map<string, Expiration>();
+  private readonly userExpirations = new Map<User, Expiration>();
+  private readonly userExpiredListeners = new Set<UserExpiredListener>();
 
   constructor(private readonly users: UserService) {}
 
   get(code: string) {
     return this.rooms.get(code);
+  }
+
+  onUserExpired(listener: UserExpiredListener) {
+    this.userExpiredListeners.add(listener);
+    return () => this.userExpiredListeners.delete(listener);
+  }
+
+  onModuleDestroy() {
+    for (const expiration of [
+      ...this.expirations.values(),
+      ...this.userExpirations.values(),
+    ]) {
+      clearTimeout(expiration.timer);
+    }
+    this.expirations.clear();
+    this.userExpirations.clear();
+    this.userExpiredListeners.clear();
   }
 
   create(
@@ -39,7 +70,8 @@ export class RoomService {
     cardSet?: string[],
     password?: string,
   ): RoomResult<Membership> {
-    const nameError = this.users.validateName(name);
+    const normalizedName = this.users.normalizeName(name);
+    const nameError = this.users.validateName(normalizedName);
     if (nameError) {
       return { error: { event: 'bad-username', data: { error: nameError } } };
     }
@@ -55,7 +87,7 @@ export class RoomService {
       return { error: { event: 'wrong-room-password', data: null } };
     }
 
-    const user = this.users.create(id, name, 'mod');
+    const user = this.users.create(id, normalizedName, 'mod');
     const room: Room = {
       code: nanoid(7),
       users: [user],
@@ -79,16 +111,18 @@ export class RoomService {
     if (room.password !== null && room.password !== password) {
       return { error: { event: 'wrong-room-password', data: null } };
     }
-    if (room.users.some((user) => user.name === name)) {
-      return { error: { event: 'name-taken', data: null } };
-    }
-    const nameError = this.users.validateName(name);
+    const normalizedName = this.users.normalizeName(name);
+    const nameError = this.users.validateName(normalizedName);
     if (nameError) {
       return { error: { event: 'bad-username', data: { error: nameError } } };
     }
+    if (room.users.some((user) => user.name === normalizedName)) {
+      return { error: { event: 'name-taken', data: null } };
+    }
 
-    const user = this.users.create(id, name);
+    const user = this.users.create(id, normalizedName);
     room.users.push(user);
+    this.cancelExpiration(room.code);
     return { room, user };
   }
 
@@ -103,6 +137,8 @@ export class RoomService {
       const user = room.users.find((candidate) => candidate.token === token);
       if (user) {
         user.status = 'connected';
+        this.cancelUserExpiration(user);
+        this.cancelExpiration(room.code);
         return { room, user };
       }
     }
@@ -115,6 +151,10 @@ export class RoomService {
       return;
     }
     membership.user.status = 'disconnected';
+    this.scheduleUserExpiration(membership.room, membership.user);
+    if (membership.room.users.every((user) => user.status === 'disconnected')) {
+      this.scheduleExpiration(membership.room);
+    }
     return membership;
   }
 
@@ -152,8 +192,11 @@ export class RoomService {
     }
 
     const counts = new Map<string, number>();
+    // Readiness and progress use connected participants, so result aggregation
+    // uses that same set. An offline vote remains on the user for reconnects,
+    // but is included only if that participant reconnects before reveal.
     for (const participant of room.users) {
-      if (participant.vote !== null) {
+      if (participant.status === 'connected' && participant.vote !== null) {
         counts.set(participant.vote, (counts.get(participant.vote) ?? 0) + 1);
       }
     }
@@ -236,6 +279,7 @@ export class RoomService {
     membership.room.users = membership.room.users.filter(
       (candidate) => candidate.id !== userId,
     );
+    this.cancelUserExpiration(user);
     return { room: membership.room, user };
   }
 
@@ -305,5 +349,64 @@ export class RoomService {
 
   private resetVotes(room: Room) {
     for (const user of room.users) user.vote = null;
+  }
+
+  private scheduleUserExpiration(room: Room, user: User) {
+    this.cancelUserExpiration(user);
+    const inactiveSince = Date.now();
+    const timer = setTimeout(() => {
+      const expiration = this.userExpirations.get(user);
+      if (expiration?.inactiveSince !== inactiveSince) return;
+      this.userExpirations.delete(user);
+
+      const current = this.rooms.get(room.code);
+      if (
+        current !== room ||
+        user.status !== 'disconnected' ||
+        !current.users.includes(user)
+      ) {
+        return;
+      }
+      current.users = current.users.filter(
+        (participant) => participant !== user,
+      );
+      for (const listener of this.userExpiredListeners) listener(current, user);
+    }, OFFLINE_USER_RETENTION_MS);
+    timer.unref?.();
+    this.userExpirations.set(user, { inactiveSince, timer });
+  }
+
+  private cancelUserExpiration(user: User) {
+    const expiration = this.userExpirations.get(user);
+    if (!expiration) return;
+    clearTimeout(expiration.timer);
+    this.userExpirations.delete(user);
+  }
+
+  private scheduleExpiration(room: Room) {
+    this.cancelExpiration(room.code);
+    const inactiveSince = Date.now();
+    const timer = setTimeout(() => {
+      const expiration = this.expirations.get(room.code);
+      if (expiration?.inactiveSince !== inactiveSince) return;
+
+      const current = this.rooms.get(room.code);
+      if (
+        current === room &&
+        current.users.every((user) => user.status === 'disconnected')
+      ) {
+        this.rooms.delete(room.code);
+      }
+      this.expirations.delete(room.code);
+    }, EMPTY_ROOM_RETENTION_MS);
+    timer.unref?.();
+    this.expirations.set(room.code, { inactiveSince, timer });
+  }
+
+  private cancelExpiration(code: string) {
+    const expiration = this.expirations.get(code);
+    if (!expiration) return;
+    clearTimeout(expiration.timer);
+    this.expirations.delete(code);
   }
 }
