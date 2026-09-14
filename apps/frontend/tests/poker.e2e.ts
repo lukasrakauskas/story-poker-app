@@ -31,6 +31,25 @@ async function expectFitsViewport(page: Page) {
     });
 }
 
+async function planningLayoutAnchors(page: Page) {
+  return page.evaluate(() => {
+    const heading = document.querySelector(
+      'main[aria-label="Planning room"] h1'
+    )!;
+    const header = heading.closest('[data-slot="card-header"]')!;
+    const people = document.querySelector('[aria-label="People in the room"]')!;
+    const sidebar = people.closest('[data-slot="card"]')!;
+    const round = (value: number) => Math.round(value * 100) / 100;
+
+    return {
+      headerHeight: round(header.getBoundingClientRect().height),
+      peopleOffset: round(
+        people.getBoundingClientRect().top - sidebar.getBoundingClientRect().top
+      ),
+    };
+  });
+}
+
 test("room controls persist and protect a planning session", async ({
   page,
   browser,
@@ -210,6 +229,7 @@ test("poker voting and results fill the viewport without incidental scrolling", 
     await expect(
       page.getByText("Ready to reveal", { exact: true })
     ).toBeVisible();
+    const desktopVotingAnchors = await planningLayoutAnchors(page);
     await page.screenshot({ path: testInfo.outputPath("poker-voting.png") });
     await page
       .getByRole("button", { name: "Reveal results", exact: true })
@@ -217,6 +237,10 @@ test("poker voting and results fill the viewport without incidental scrolling", 
     await expect(
       page.getByRole("heading", { name: "Round results" })
     ).toBeVisible();
+    await expect(
+      page.getByText("Results revealed", { exact: true })
+    ).toBeVisible();
+    expect(await planningLayoutAnchors(page)).toEqual(desktopVotingAnchors);
     await expect(
       guest.getByText("2 votes cast", { exact: true })
     ).toBeVisible();
@@ -289,13 +313,15 @@ test("poker voting and results fill the viewport without incidental scrolling", 
             window.innerWidth
       )
     ).toBe(true);
-    await page.setViewportSize({ width: 1280, height: 720 });
+    const mobileResultsAnchors = await planningLayoutAnchors(page);
     await page
       .getByRole("button", { name: "Start voting", exact: true })
       .click();
     await expect(
       page.getByRole("button", { name: "Estimate 3", exact: true })
     ).toHaveAttribute("aria-pressed", "false");
+    expect(await planningLayoutAnchors(page)).toEqual(mobileResultsAnchors);
+    await page.setViewportSize({ width: 1280, height: 720 });
     await expect(page.getByText("0 of 2 voted", { exact: true })).toBeVisible();
     await expectFitsViewport(page);
     await page
