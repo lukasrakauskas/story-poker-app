@@ -120,6 +120,56 @@ describe('RetroApplicationService', () => {
     expect(joined.self.token).not.toBe(created.self.token);
   });
 
+  it('revokes and closes a participant removed by a moderator', () => {
+    const created = state(
+      application.execute('owner', {
+        type: 'create',
+        name: 'Alice',
+        title: 'Retro',
+      }),
+      'owner',
+    );
+    const joined = state(
+      application.execute('guest', {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+      }),
+      'guest',
+    );
+    application.execute('guest', {
+      type: 'add-note',
+      column: 'ideas',
+      text: 'Keep this attribution',
+    });
+
+    const removed = application.execute('owner', {
+      type: 'remove-member',
+      memberId: joined.self.id,
+    });
+    expect(event(removed, 'guest')).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'removed' },
+    });
+    expect(removed.closes).toEqual([
+      { connectionId: 'guest', code: 4003, reason: 'Removed by moderator' },
+    ]);
+    expect(state(removed, 'owner').room.members).toHaveLength(1);
+    expect(
+      event(
+        application.execute('replacement', {
+          type: 'resume',
+          code: created.room.code,
+          token: joined.self.token,
+        }),
+        'replacement',
+      ),
+    ).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+  });
+
   it('returns explicit replacement messages and close effects', () => {
     const created = state(
       application.execute('original', {

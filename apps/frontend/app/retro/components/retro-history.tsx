@@ -208,9 +208,7 @@ export function RetroHistory() {
                               ? "Votes hidden"
                               : `${note.voteCount} votes`}{" "}
                             {" · "}
-                            {room.members.find(
-                              (member) => member.id === note.authorId
-                            )?.name ?? "Former member"}
+                            {note.authorName}
                           </p>
                         </li>
                       ))}

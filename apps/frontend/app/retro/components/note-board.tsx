@@ -226,11 +226,15 @@ function NoteCard({
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(note.text);
   const own = note.authorId === selfId;
+  const moderator = room.members.some(
+    (member) => member.id === selfId && member.moderator
+  );
   const canEdit = room.phase === "write" && own;
+  const canDelete =
+    (room.phase === "write" && own) ||
+    (moderator && (room.phase === "vote" || room.phase === "discuss"));
   const voted = note.votedBySelf;
-  const author =
-    room.members.find((member) => member.id === note.authorId)?.name ??
-    "Former member";
+  const author = note.authorName;
   return (
     <article className="space-y-3 rounded-lg border bg-card p-4 text-card-foreground shadow-sm">
       <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
@@ -243,15 +247,19 @@ function NoteCard({
             {columns.find((column) => column.id === note.column)?.title}
           </Badge>
         )}
-        {canEdit && (
+        {(canEdit || canDelete) && (
           <ItemActions
             kind="note"
             text={note.text}
             disabled={disabled || editing}
-            onEdit={() => {
-              setText(note.text);
-              setEditing(true);
-            }}
+            onEdit={
+              canEdit
+                ? () => {
+                    setText(note.text);
+                    setEditing(true);
+                  }
+                : undefined
+            }
             onDelete={() => send({ type: "delete-note", id: note.id })}
           />
         )}

@@ -218,6 +218,34 @@ describe('retrospective WebSocket route', () => {
         title: 'Another',
       }),
     ).toMatchObject({ event: 'retro-error', data: { code: 'already-joined' } });
+
+    const target = await connect();
+    const ownerJoinedUpdate = next(replacement);
+    const targetSession = state(
+      await command(target, {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+      }),
+    );
+    await ownerJoinedUpdate;
+    const removalNotice = next(target);
+    const targetClosed = new Promise<number>((resolve) =>
+      target.once('close', resolve),
+    );
+    const afterRemoval = state(
+      await command(replacement, {
+        type: 'remove-member',
+        memberId: targetSession.self.id,
+      }),
+    );
+    expect(await removalNotice).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'removed' },
+    });
+    expect(await targetClosed).toBe(4003);
+    expect(afterRemoval.room.members).toHaveLength(1);
+
     expect(
       state(await command(replacement, { type: 'advance' })).room.members[0]
         .connected,

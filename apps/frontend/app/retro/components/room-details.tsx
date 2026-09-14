@@ -11,6 +11,17 @@ import {
   CardHeader,
   CardTitle,
 } from "ui/components/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "ui/components/alert-dialog";
 import { Input } from "ui/components/input";
 import { Label } from "ui/components/label";
 
@@ -155,23 +166,66 @@ export function RoomDetails({
                           : "Online"}
                     </span>
                     {self?.moderator &&
-                      member.connected &&
                       member.id !== self.id &&
                       room.phase !== "closed" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={disabled}
-                          aria-label={`Transfer moderator to ${member.name}`}
-                          onClick={() =>
-                            void send({
-                              type: "transfer-moderator",
-                              memberId: member.id,
-                            })
-                          }
-                        >
-                          Make moderator
-                        </Button>
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {member.connected && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={disabled}
+                              aria-label={`Transfer moderator to ${member.name}`}
+                              onClick={() =>
+                                void send({
+                                  type: "transfer-moderator",
+                                  memberId: member.id,
+                                })
+                              }
+                            >
+                              Make moderator
+                            </Button>
+                          )}
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={disabled}
+                                className="text-destructive"
+                                aria-label={`Remove participant ${member.name}`}
+                              >
+                                Remove
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  Remove {member.name}?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Their session will be revoked and their active
+                                  connection will close. Existing notes keep the
+                                  author name, but their votes will be removed.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  variant="destructive"
+                                  disabled={disabled}
+                                  onClick={() =>
+                                    void send({
+                                      type: "remove-member",
+                                      memberId: member.id,
+                                    })
+                                  }
+                                >
+                                  Remove participant
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       )}
                   </div>
                 </li>

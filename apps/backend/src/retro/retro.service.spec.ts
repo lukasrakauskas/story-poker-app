@@ -149,7 +149,7 @@ describe('retrospective workflow', () => {
       service.mutate(guest, { type: 'edit-note', id, text: 'Stolen' }),
     ).toThrow('own notes');
     expect(() => service.mutate(guest, { type: 'delete-note', id })).toThrow(
-      'own notes',
+      'its author',
     );
     service.mutate(owner, { type: 'edit-note', id, text: 'Updated' });
     expect(service.snapshot(owner).notes[0].text).toBe('Updated');
@@ -166,6 +166,68 @@ describe('retrospective workflow', () => {
     expect(() =>
       service.mutate(owner, { type: 'edit-note', id, text: 'Late' }),
     ).toThrow('write phase');
+  });
+
+  it('authorizes moderation, revokes removed sessions, and preserves attribution', () => {
+    const ownerNote = add('Owner note');
+    service.mutate(guest, {
+      type: 'add-note',
+      column: 'ideas',
+      text: 'Delete after reveal',
+    });
+    service.mutate(guest, {
+      type: 'add-note',
+      column: 'improve',
+      text: 'Retain after removal',
+    });
+    const guestNoteIds = service.snapshot(guest).notes.map((note) => note.id);
+    expect(() =>
+      service.mutate(guest, { type: 'delete-note', id: ownerNote }),
+    ).toThrow('its author');
+    expect(() =>
+      service.mutate(guest, {
+        type: 'remove-member',
+        memberId: owner.id,
+      }),
+    ).toThrow('moderator');
+    expect(() =>
+      service.mutate(owner, {
+        type: 'remove-member',
+        memberId: owner.id,
+      }),
+    ).toThrow('Transfer moderation');
+
+    service.mutate(owner, { type: 'advance' });
+    expect(() =>
+      service.mutate(guest, { type: 'delete-note', id: ownerNote }),
+    ).toThrow('moderator');
+    service.mutate(guest, { type: 'toggle-vote', id: ownerNote });
+    service.mutate(guest, { type: 'toggle-vote', id: guestNoteIds[0] });
+    service.mutate(owner, { type: 'delete-note', id: guestNoteIds[0] });
+    expect(service.snapshot(owner).notes.map((note) => note.id)).not.toContain(
+      guestNoteIds[0],
+    );
+    expect(
+      service.snapshot(guest).notes.filter((note) => note.votedBySelf),
+    ).toHaveLength(1);
+
+    expect(
+      service.mutate(owner, {
+        type: 'remove-member',
+        memberId: guest.id,
+      }),
+    ).toEqual({ removedMemberId: guest.id });
+    const afterRemoval = service.snapshot(owner);
+    expect(afterRemoval.members.map((member) => member.id)).toEqual([owner.id]);
+    expect(
+      afterRemoval.notes.find((note) => note.id === guestNoteIds[1]),
+    ).toMatchObject({ authorId: guest.id, authorName: 'Bobby' });
+    expect(() => service.resume(guest.code, guest.token)).toThrow('session');
+    service.mutate(owner, { type: 'advance' });
+    expect(
+      service.snapshot(owner).notes.find((note) => note.id === ownerNote)
+        ?.voteCount,
+    ).toBe(0);
   });
 
   it('transfers moderation and recovers it only while no moderator is connected', () => {

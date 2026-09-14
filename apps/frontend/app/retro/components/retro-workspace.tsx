@@ -80,7 +80,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
   const expired =
     error?.code === "room-expired" ||
     !!(room && now !== null && now >= room.expiresAt);
-  const invalid = error?.code === "invalid-session";
+  const removed = error?.code === "removed";
+  const invalid = error?.code === "invalid-session" || removed;
   const disabled =
     connection !== "connected" ||
     pending ||
@@ -137,19 +138,20 @@ function Workspace({ initialCode }: { initialCode?: string }) {
           </p>
           {invalid && (
             <p>
-              This connection no longer owns the session. The last snapshot is
-              read-only. If you reopened the room in another tab, use that tab
-              or reopen it here. If the saved credential was rejected, join with
-              a new name; the old notes and moderator role cannot be reclaimed.
+              {removed
+                ? "Your former session and reconnect credential are no longer valid. Its existing notes keep their author attribution, but this browser cannot mutate them."
+                : "This connection no longer owns the session. The last snapshot is read-only. If you reopened the room in another tab, use that tab or reopen it here. If the saved credential was rejected, join with a new name; the old notes and moderator role cannot be reclaimed."}
             </p>
           )}
           <a
             className="inline-block underline underline-offset-4"
             href={
-              invalid ? `/retro/${encodeURIComponent(room.code)}` : "/retro"
+              invalid && !removed
+                ? `/retro/${encodeURIComponent(room.code)}`
+                : "/retro"
             }
           >
-            {invalid ? "Reopen room" : "Start or join another room"}
+            {invalid && !removed ? "Reopen room" : "Start or join another room"}
           </a>
         </div>
       )}

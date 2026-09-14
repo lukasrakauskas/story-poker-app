@@ -69,9 +69,13 @@ export class RetroApplicationService {
           'Join a room before making changes.',
         );
       session = current;
-      this.retros.mutate(session, command);
+      const mutation = this.retros.mutate(session, command);
+      const removed = mutation?.removedMemberId
+        ? this.removeMember(session.code, mutation.removedMemberId)
+        : result();
       return this.merge(
         expired,
+        removed,
         this.broadcast(session.code, connectionId, requestId),
       );
     } catch (error) {
@@ -127,6 +131,31 @@ export class RetroApplicationService {
     return result(undefined, [
       { connectionId, event: this.errorEvent(error, requestId) },
     ]);
+  }
+
+  private removeMember(code: string, memberId: string): ApplicationResult {
+    const connectionId = this.connections.revoke<string>(
+      RETRO_APPLICATION_NAMESPACE,
+      code,
+      memberId,
+    );
+    if (!connectionId) return result();
+    this.sessions.delete(connectionId);
+    return result(
+      undefined,
+      [
+        {
+          connectionId,
+          event: this.errorEvent(
+            new RetroError(
+              'removed',
+              'A moderator removed you from this retrospective.',
+            ),
+          ),
+        },
+      ],
+      [{ connectionId, code: 4003, reason: 'Removed by moderator' }],
+    );
   }
 
   private replace(previousConnectionId: string): ApplicationResult {

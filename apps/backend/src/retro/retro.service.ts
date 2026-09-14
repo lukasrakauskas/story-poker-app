@@ -28,6 +28,9 @@ export interface RetroSession {
   id: string;
   token: string;
 }
+export interface RetroMutationResult {
+  removedMemberId?: string;
+}
 type StoredNote = Omit<RetroNote, 'voteCount' | 'votedBySelf'> & {
   /** Server-only voter identities used for authorization and vote budgets. */
   voterIds: string[];
@@ -147,7 +150,10 @@ export class RetroService {
     });
   }
 
-  mutate(session: RetroSession, command: Mutation) {
+  mutate(
+    session: RetroSession,
+    command: Mutation,
+  ): RetroMutationResult | undefined {
     const { room, member } = this.authorize(session);
     if (room.phase === 'closed')
       throw new RetroError(
@@ -155,6 +161,22 @@ export class RetroService {
         'This retrospective is closed and read-only.',
       );
     switch (command.type) {
+      case 'remove-member': {
+        this.requireModerator(member);
+        if (command.memberId === member.id)
+          throw new RetroError(
+            'forbidden',
+            'Transfer moderation before removing yourself.',
+          );
+        const removed = this.member(room, command.memberId);
+        room.members = room.members.filter(
+          (candidate) => candidate.id !== removed.id,
+        );
+        room.readyMemberIds.delete(removed.id);
+        for (const note of room.notes)
+          note.voterIds = note.voterIds.filter((id) => id !== removed.id);
+        return { removedMemberId: removed.id };
+      }
       case 'transfer-moderator': {
         this.requireModerator(member);
         if (command.memberId === member.id)
@@ -216,13 +238,13 @@ export class RetroService {
         room.notes.push({
           id: nanoid(),
           authorId: member.id,
+          authorName: member.name,
           column: command.column,
           text: command.text,
           voterIds: [],
         });
         return;
-      case 'edit-note':
-      case 'delete-note': {
+      case 'edit-note': {
         this.requirePhase(room, 'write');
         const note = this.note(room, command.id);
         if (note.authorId !== member.id)
@@ -230,8 +252,26 @@ export class RetroService {
             'forbidden',
             'You can only change your own notes.',
           );
-        if (command.type === 'edit-note') note.text = command.text;
-        else room.notes = room.notes.filter((note) => note.id !== command.id);
+        note.text = command.text;
+        return;
+      }
+      case 'delete-note': {
+        const note = this.note(room, command.id);
+        if (room.phase === 'write') {
+          if (note.authorId !== member.id)
+            throw new RetroError(
+              'forbidden',
+              'Private writing can only be deleted by its author.',
+            );
+        } else {
+          this.requireModerator(member);
+          if (room.phase !== 'vote' && room.phase !== 'discuss')
+            throw new RetroError(
+              'wrong-phase',
+              'Notes cannot be moderated in this phase.',
+            );
+        }
+        room.notes = room.notes.filter((candidate) => candidate.id !== note.id);
         return;
       }
       case 'toggle-vote': {

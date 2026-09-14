@@ -72,6 +72,7 @@ const room: RetroRoom = {
     {
       id: "note",
       authorId: "alice",
+      authorName: "Alice",
       text: "Good teamwork",
       column: "went-well",
       voteCount: 1,
@@ -121,6 +122,7 @@ test("write-phase history and exports retain only the current participant's note
       {
         id: "guest-note",
         authorId: "bob",
+        authorName: "Bob",
         text: "Guest private thought",
         column: "ideas",
         voteCount: null,
@@ -143,7 +145,12 @@ test("write-phase history and exports retain only the current participant's note
   const legacyWriting = {
     ...writing,
     notes: writing.notes.map(
-      ({ voteCount: _voteCount, votedBySelf: _votedBySelf, ...note }) => ({
+      ({
+        voteCount: _voteCount,
+        votedBySelf: _votedBySelf,
+        authorName: _authorName,
+        ...note
+      }) => ({
         ...note,
         voterIds: [note.authorId],
       })
@@ -158,6 +165,13 @@ test("write-phase history and exports retain only the current participant's note
   assert.ok(!migrated.includes("Guest private thought"));
   assert.ok(!migrated.includes("voterIds"));
   assert.equal(JSON.parse(migrated).version, 2);
+});
+
+test("retains note author snapshots after a participant is removed", () => {
+  const removed = { ...room, members: [] };
+  assert.equal(saveRetroHistory(removed), true);
+  assert.equal(readRetroHistory().entries[0].room.notes[0].authorName, "Alice");
+  assert.match(roomAsMarkdown(removed), /Good teamwork — Alice/);
 });
 
 test("allowlists history and exports without retaining reconnect secrets", () => {
@@ -176,7 +190,12 @@ test("allowlists history and exports without retaining reconnect secrets", () =>
 
 test("migrates legacy voter identities to private selections or aggregate counts", () => {
   const legacyNotes = room.notes.map(
-    ({ voteCount: _voteCount, votedBySelf: _votedBySelf, ...note }) => ({
+    ({
+      voteCount: _voteCount,
+      votedBySelf: _votedBySelf,
+      authorName: _authorName,
+      ...note
+    }) => ({
       ...note,
       voterIds: ["alice", "former-voter"],
     })
@@ -194,6 +213,7 @@ test("migrates legacy voter identities to private selections or aggregate counts
   assert.equal(migrated.version, 2);
   assert.equal(migrated.room.notes[0].voteCount, null);
   assert.equal(migrated.room.notes[0].votedBySelf, true);
+  assert.equal(migrated.room.notes[0].authorName, "Alice");
   assert.ok(!storage.getItem(retroHistoryKey(room))!.includes("voterIds"));
   assert.ok(!storage.getItem(retroHistoryKey(room))!.includes("former-voter"));
 

@@ -43,9 +43,7 @@ export function roomAsMarkdown(
     for (const note of snapshot.notes
       .filter((item) => item.column === column.id)
       .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))) {
-      const author =
-        snapshot.members.find((member) => member.id === note.authorId)?.name ??
-        "Former member";
+      const author = note.authorName;
       const votes =
         note.voteCount === null ? "" : `**${note.voteCount} votes** · `;
       lines.push(
@@ -81,9 +79,7 @@ export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
     for (const note of snapshot.notes
       .filter((item) => item.column === column.id)
       .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))) {
-      const author =
-        snapshot.members.find((member) => member.id === note.authorId)?.name ??
-        "Former member";
+      const author = note.authorName;
       const votes = note.voteCount === null ? "" : `[${note.voteCount} votes] `;
       lines.push(`- ${votes}${note.text} — ${author}`);
     }

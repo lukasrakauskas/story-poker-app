@@ -173,13 +173,16 @@ export function useRetroSocket() {
           settle(false);
           if (
             event.data.code === "room-expired" ||
-            event.data.code === "invalid-session"
+            event.data.code === "invalid-session" ||
+            event.data.code === "removed"
           ) {
             // A live tab replaced by another tab must not delete their shared
             // valid cookie. Clear only rejected resume credentials or expired rooms.
             if (
               credentials.current &&
-              (event.data.code === "room-expired" || !ready.current)
+              (event.data.code === "room-expired" ||
+                event.data.code === "removed" ||
+                !ready.current)
             )
               clearRetroToken(credentials.current.code);
             terminal.current = true;

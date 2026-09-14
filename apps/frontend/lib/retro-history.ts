@@ -9,6 +9,8 @@ export const RETRO_HISTORY_CHANGED = "retro-history-changed";
 const noteFields = {
   id: z.string(),
   authorId: z.string(),
+  // Older archives derive this stable display snapshot from their member list.
+  authorName: z.string().max(30).default("Former member"),
   column: z.enum(["went-well", "improve", "ideas"]),
   text: z.string().max(1000),
 };
@@ -123,6 +125,11 @@ export function publicRetro(
       )
       .map((note) => ({
         ...note,
+        authorName:
+          note.authorName === "Former member"
+            ? (snapshot.members.find((member) => member.id === note.authorId)
+                ?.name ?? note.authorName)
+            : note.authorName,
         voteCount:
           snapshot.phase === "discuss" || snapshot.phase === "closed"
             ? (note.voteCount ?? 0)

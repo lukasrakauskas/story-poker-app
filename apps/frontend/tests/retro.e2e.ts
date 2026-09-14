@@ -355,7 +355,26 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     guest.getByText("Teamwork was excellent", { exact: true })
   ).toBeVisible();
   await expect(
-    owner.getByRole("button", { name: /^Actions for note:/ })
+    guest.getByRole("button", { name: /^Actions for note:/ })
+  ).toHaveCount(0);
+  await owner
+    .getByRole("button", {
+      name: "Actions for note: Reduce flaky tests",
+      exact: true,
+    })
+    .click();
+  await owner.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  await expect(
+    confirmation.getByRole("heading", { name: "Delete this note?" })
+  ).toBeVisible();
+  await confirmation
+    .getByRole("button", { name: "Delete note", exact: true })
+    .click();
+  await expect(
+    owner.getByText("Reduce flaky tests", { exact: true })
+  ).toHaveCount(0);
+  await expect(
+    guest.getByText("Reduce flaky tests", { exact: true })
   ).toHaveCount(0);
   await expect(
     owner.getByText("Keep the takeaways", { exact: true })
@@ -477,6 +496,45 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     owner.getByText("Keep the takeaways", { exact: true })
   ).toHaveCount(0);
+
+  const removedContext = await browser.newContext();
+  const removedParticipant = await removedContext.newPage();
+  removedParticipant.on("pageerror", (error) => errors.push(error.message));
+  await removedParticipant.goto(roomUrl);
+  await removedParticipant.getByLabel("Your name").fill("Charlie");
+  await removedParticipant
+    .getByRole("button", { name: "Join retrospective", exact: true })
+    .click();
+  await expect(owner.getByText("Charlie", { exact: true })).toBeVisible();
+  await owner
+    .getByRole("button", { name: "Remove participant Charlie", exact: true })
+    .click();
+  const removalConfirmation = owner.getByRole("alertdialog");
+  await expect(
+    removalConfirmation.getByRole("heading", { name: "Remove Charlie?" })
+  ).toBeVisible();
+  await removalConfirmation
+    .getByRole("button", { name: "Remove participant", exact: true })
+    .click();
+  await expect(
+    removedParticipant.getByText(
+      "A moderator removed you from this retrospective.",
+      { exact: true }
+    )
+  ).toBeVisible();
+  expect(
+    (await removedContext.cookies(roomUrl)).some((cookie) =>
+      cookie.name.startsWith("retro-session-")
+    )
+  ).toBe(false);
+  await removedParticipant.reload();
+  await expect(
+    removedParticipant.getByRole("button", {
+      name: "Join retrospective",
+      exact: true,
+    })
+  ).toBeVisible();
+  await removedContext.close();
 
   await owner
     .getByRole("button", { name: "Close retrospective", exact: true })

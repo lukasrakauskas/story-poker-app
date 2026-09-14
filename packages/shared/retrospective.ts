@@ -11,6 +11,8 @@ export interface RetroMember {
 export interface RetroNote {
   id: string;
   authorId: string;
+  /** Stable display snapshot retained if the participant is removed. */
+  authorName: string;
   column: RetroColumn;
   text: string;
   /** Hidden until discussion starts so open voting stays blind. */
@@ -40,6 +42,7 @@ export type RetroCommand =
   | { type: "add-note"; column: RetroColumn; text: string }
   | { type: "edit-note"; id: string; text: string }
   | { type: "delete-note"; id: string }
+  | { type: "remove-member"; memberId: string }
   | { type: "toggle-vote"; id: string }
   | { type: "toggle-ready" }
   | { type: "transfer-moderator"; memberId: string }
