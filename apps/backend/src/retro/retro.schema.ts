@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import type { RetroCommand } from 'shared/retrospective';
+import { participantNameSchema } from '../collaboration/participant.service.js';
 
 const id = z.string().min(1).max(64);
 const text = z.string().trim().min(1).max(1000);
-const name = z.string().trim().min(3).max(30);
+const name = participantNameSchema;
 export const retroCommandSchema: z.ZodType<RetroCommand> = z.discriminatedUnion(
   'type',
   [

@@ -12,6 +12,7 @@ import { type OnModuleDestroy } from '@nestjs/common';
 import { type Server, WebSocket } from 'ws';
 import { type ZodType } from 'zod';
 import { nanoid } from 'nanoid';
+import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { Client } from './client.entity.js';
 import { ConfigService } from '@nestjs/config';
 import { RoomService } from './room.service.js';
@@ -21,6 +22,8 @@ import {
   INVALID_COMMAND_ERROR,
   planningCommandSchemas,
 } from './events.schema.js';
+
+const CONNECTION_NAMESPACE = 'poker';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -43,8 +46,10 @@ export class EventsGateway
     private readonly configService: ConfigService,
     private readonly rooms: RoomService,
     private readonly users: UserService,
+    private readonly connections: ConnectionRegistryService,
   ) {
     this.unsubscribeUserExpired = this.rooms.onUserExpired((room, user) => {
+      this.connections.revoke(CONNECTION_NAMESPACE, room.code, user.id);
       this.notifyRoom(room, {
         event: 'user-removed',
         data: { userId: user.id },
@@ -70,6 +75,7 @@ export class EventsGateway
   onModuleDestroy() {
     this.stopHeartbeat();
     this.unsubscribeUserExpired();
+    this.connections.clear(CONNECTION_NAMESPACE);
   }
 
   handleConnection(client: Client) {
@@ -125,6 +131,12 @@ export class EventsGateway
         );
         if ('error' in result) return result.error;
         client.roomId = result.room.code;
+        this.connections.replace(
+          CONNECTION_NAMESPACE,
+          result.room.code,
+          result.user.id,
+          client,
+        );
         return this.roomJoined(result.room, result.user);
       },
     );
@@ -147,6 +159,12 @@ export class EventsGateway
         );
         if ('error' in result) return result.error;
         client.roomId = result.room.code;
+        this.connections.replace(
+          CONNECTION_NAMESPACE,
+          result.room.code,
+          result.user.id,
+          client,
+        );
         this.notifyUsers(recipients, {
           event: 'user-joined',
           data: {
@@ -170,7 +188,17 @@ export class EventsGateway
         const result = this.rooms.reconnect(command.token, command.room);
         if ('error' in result) return result.error;
         const { room, user } = result;
-        this.replaceConnection(client, user.id);
+        const previous = this.connections.replace(
+          CONNECTION_NAMESPACE,
+          room.code,
+          user.id,
+          client,
+        );
+        if (previous) {
+          previous.roomId = '';
+          previous.id = nanoid();
+          previous.close(4000, 'Reconnected elsewhere');
+        }
         client.roomId = room.code;
         client.id = user.id;
         this.notifyRoom(room, {
@@ -320,12 +348,15 @@ export class EventsGateway
         if ('error' in result) return result.error;
 
         this.notifyUsers([result.user.id], { event: 'kicked', data: null });
-        for (const target of this.server.clients) {
-          if (target.id === result.user.id) {
-            target.roomId = '';
-            target.id = nanoid();
-            target.close(4001, 'Removed from room');
-          }
+        const target = this.connections.revoke<Client>(
+          CONNECTION_NAMESPACE,
+          result.room.code,
+          result.user.id,
+        );
+        if (target) {
+          target.roomId = '';
+          target.id = nanoid();
+          target.close(4001, 'Removed from room');
         }
         this.notifyRoom(result.room, {
           event: 'user-removed',
@@ -396,16 +427,6 @@ export class EventsGateway
   private stopHeartbeat() {
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = undefined;
-  }
-
-  private replaceConnection(client: Client, userId: string) {
-    for (const existing of this.server.clients) {
-      if (existing !== client && existing.id === userId) {
-        existing.roomId = '';
-        existing.id = nanoid();
-        existing.close(4000, 'Reconnected elsewhere');
-      }
-    }
   }
 
   private roomJoined(room: Room, user: User) {

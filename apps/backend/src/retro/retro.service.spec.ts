@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ParticipantService } from '../collaboration/participant.service.js';
+import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import {
   RETRO_LIFETIME_MS,
   RetroService,
@@ -6,12 +8,16 @@ import {
 } from './retro.service.js';
 import { retroCommandSchema } from './retro.schema.js';
 
+function createService() {
+  return new RetroService(new ParticipantService(), new RoomRegistryService());
+}
+
 let service: RetroService;
 let owner: RetroSession;
 let guest: RetroSession;
 beforeEach(() => {
   vi.useFakeTimers();
-  service = new RetroService();
+  service = createService();
   owner = service.create('Alice', 'Sprint retrospective');
   guest = service.join(owner.code, 'Bobby');
 });
@@ -39,6 +45,37 @@ describe('room lifecycle and privacy', () => {
     expect(() => service.resume(other.code, owner.token)).toThrow('session');
   });
 
+  it('keeps writing private per participant and reveals every note on advance', () => {
+    add('Owner thought');
+    service.mutate(guest, {
+      type: 'add-note',
+      column: 'improve',
+      text: 'Guest thought',
+    });
+
+    expect(service.snapshot(owner).notes.map((note) => note.text)).toEqual([
+      'Owner thought',
+    ]);
+    expect(service.snapshot(guest).notes.map((note) => note.text)).toEqual([
+      'Guest thought',
+    ]);
+
+    service.disconnect(guest);
+    service.resume(guest.code, guest.token);
+    expect(service.snapshot(guest).notes.map((note) => note.text)).toEqual([
+      'Guest thought',
+    ]);
+
+    service.mutate(owner, { type: 'advance' });
+    const revealed = ['Owner thought', 'Guest thought'];
+    expect(service.snapshot(owner).notes.map((note) => note.text)).toEqual(
+      revealed,
+    );
+    expect(service.snapshot(guest).notes.map((note) => note.text)).toEqual(
+      revealed,
+    );
+  });
+
   it('reserves names and resumes disconnected members without extending expiry', () => {
     const expiresAt = service.snapshot(owner).expiresAt;
     service.disconnect(owner);
@@ -58,7 +95,7 @@ describe('room lifecycle and privacy', () => {
     expect(service.sweep()).toEqual([owner.code]);
     expect(service.sweep()).toEqual([]);
     expect(service.isExpired(owner.code)).toBe(true);
-    expect(new RetroService().isExpired(owner.code)).toBe(true);
+    expect(createService().isExpired(owner.code)).toBe(true);
   });
 
   it('bounds room and participant counts', () => {

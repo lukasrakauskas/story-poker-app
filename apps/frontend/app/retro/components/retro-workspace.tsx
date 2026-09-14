@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import type { RetroPhase } from "shared/retrospective";
-import { Button } from "ui/components/button";
 import { RetroProvider, useRetro } from "./retro-provider";
 import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
 import { ActionItems } from "./action-items";
 import { RoomDetails } from "./room-details";
+import { PhaseAdvanceDialog } from "./phase-advance-dialog";
+import { RetroExport } from "./retro-export";
+import { RetroStatus } from "./retro-status";
 
 const phases: {
   id: RetroPhase;
@@ -19,7 +21,7 @@ const phases: {
     id: "write",
     label: "Write",
     description:
-      "Add your thoughts to the board. All notes are visible to everyone; only you can edit yours.",
+      "Write independently. Only you can see your notes during this phase. Starting voting reveals every note to the team at the same time.",
     next: "Start voting",
   },
   {
@@ -99,6 +101,12 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     room && now !== null
       ? Math.max(0, Math.ceil((room.expiresAt - now) / 60000))
       : null;
+  const supportingError =
+    error && ["configuration", "connection", "timeout"].includes(error.code)
+      ? error
+      : null;
+  const actionError =
+    error && !supportingError && !invalid && !expired ? error : null;
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-5 px-4 py-6 sm:px-8">
@@ -113,34 +121,15 @@ function Workspace({ initialCode }: { initialCode?: string }) {
           Previous retrospectives
         </a>
       </nav>
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-        <output className="text-sm">
-          <span
-            aria-hidden="true"
-            className={`mr-2 inline-block h-2 w-2 rounded-full ${connection === "connected" ? "bg-emerald-500" : "bg-amber-500"}`}
-          />
-          {pending
-            ? connection === "connecting"
-              ? "Restoring your session…"
-              : "Waiting for server confirmation…"
-            : connection === "connecting"
-              ? "Connecting to retrospective…"
-              : connection === "connected"
-                ? "Connected · changes sync live"
-                : "Disconnected · changes are disabled"}
-        </output>
-        {connection === "disconnected" && !expired && !invalid && (
-          <Button size="sm" variant="outline" onClick={retry}>
-            Retry connection
-          </Button>
-        )}
-      </div>
-      {error && (
+      {room && (invalid || expired) && (
         <div
           role="alert"
           className="space-y-2 rounded-lg border border-destructive/50 bg-destructive/5 p-4 text-sm"
         >
-          <p className="font-medium">{error.message}</p>
+          <p className="font-medium">
+            {error?.message ??
+              "This room has expired. The last snapshot is read-only."}
+          </p>
           {invalid && (
             <p>
               This connection no longer owns the session. The last snapshot is
@@ -149,48 +138,22 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               a new name; the old notes and moderator role cannot be reclaimed.
             </p>
           )}
-          {(invalid || error.code === "room-expired") && (
-            <a
-              className="inline-block underline underline-offset-4"
-              href={
-                invalid && (room?.code || initialCode)
-                  ? `/retro/${encodeURIComponent(room?.code || initialCode!)}`
-                  : "/retro"
-              }
-            >
-              {invalid
-                ? room
-                  ? "Reopen room"
-                  : "Rejoin as a new participant"
-                : "Start or join another room"}
-            </a>
-          )}
+          <a
+            className="inline-block underline underline-offset-4"
+            href={
+              invalid ? `/retro/${encodeURIComponent(room.code)}` : "/retro"
+            }
+          >
+            {invalid ? "Reopen room" : "Start or join another room"}
+          </a>
         </div>
       )}
-      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
-        <strong>No account needed.</strong> A cookie remembers your identity on
-        this browser until the room expires, two hours after creation. Return to
-        the room link to rejoin. Notes, names, and action items are saved
-        locally in Previous retrospectives. Browser data is not a backup or
-        shared across devices. Opening the same room in another tab moves your
-        live connection there.
-      </div>
-      {cookieSaved === false && (
-        <p role="alert" className="text-sm text-destructive">
-          Could not save your rejoin cookie. Keep this tab open to retain your
-          identity and moderator access.
-        </p>
-      )}
-      {historySaved === false && (
-        <p role="alert" className="text-sm text-destructive">
-          Could not save this snapshot in browser history. Storage may be
-          blocked or full. Export a copy before leaving.
-        </p>
-      )}
-      {historySaved === true && (
-        <p className="text-xs text-muted-foreground">
-          Latest snapshot saved on this browser
-          {room?.phase === "closed" ? " with final action items" : ""}.
+      {room && actionError && (
+        <p
+          role="alert"
+          className="rounded-lg border border-destructive/50 bg-destructive/5 p-4 text-sm font-medium"
+        >
+          {actionError.message}
         </p>
       )}
       {!room ? (
@@ -198,41 +161,14 @@ function Workspace({ initialCode }: { initialCode?: string }) {
       ) : (
         <>
           <header className="space-y-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 space-y-1">
-                <p className="text-sm text-muted-foreground">
-                  Retrospective · Room {room.code}
-                </p>
-                <h1 className="break-words text-3xl font-semibold tracking-tight">
-                  {room.title}
-                </h1>
-              </div>
-              <div
-                className={`rounded-md border px-3 py-2 text-sm ${expired || (minutes !== null && minutes <= 15) ? "border-amber-500/50 bg-amber-500/10" : "text-muted-foreground"}`}
-              >
-                {expired
-                  ? "Room expired · read-only snapshot"
-                  : minutes === null
-                    ? "Expires two hours after creation"
-                    : `Expires in ${minutes} min`}
-                {now !== null && (
-                  <p className="mt-1 text-xs">
-                    {new Date(room.expiresAt).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}{" "}
-                    · not extended by activity
-                  </p>
-                )}
-              </div>
-            </div>
-            {(expired || (minutes !== null && minutes <= 15)) && (
-              <p role="alert" className="text-sm font-medium">
-                {expired
-                  ? "This room has expired. The last snapshot is read-only and can still be exported. Check Previous retrospectives for your saved copy."
-                  : "This live room expires soon. Check that your latest snapshot is saved, or export a backup now."}
+            <div className="min-w-0 space-y-1">
+              <p className="text-sm text-muted-foreground">
+                Retrospective · Room {room.code}
               </p>
-            )}
+              <h1 className="break-words text-3xl font-semibold tracking-tight">
+                {room.title}
+              </h1>
+            </div>
             <ol
               aria-label="Retrospective phases"
               className="grid grid-cols-2 gap-2 sm:grid-cols-4"
@@ -269,36 +205,45 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                   </p>
                 )}
               </div>
-              {moderator && current?.next && (
-                <Button
+              {moderator && current?.next && room.phase !== "closed" && (
+                <PhaseAdvanceDialog
+                  phase={room.phase}
+                  label={current.next}
                   disabled={disabled}
-                  onClick={() => {
-                    const message =
-                      room.phase === "write"
-                        ? "Start voting? Notes will be locked for everyone. You cannot return to writing."
-                        : room.phase === "vote"
-                          ? "Start discussion? Voting will end for everyone. You cannot return to voting."
-                          : "Close this retrospective? All notes and actions will become read-only. This cannot be undone.";
-                    if (window.confirm(message)) void send({ type: "advance" });
-                  }}
-                >
-                  {current.next}
-                </Button>
+                  onConfirm={() => send({ type: "advance" })}
+                />
               )}
             </div>
           </header>
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="min-w-0 space-y-6">
+            <RetroStatus
+              className="order-1 xl:col-start-2 xl:row-start-1"
+              connection={connection}
+              pending={pending}
+              error={supportingError}
+              retry={retry}
+              cookieSaved={cookieSaved}
+              historySaved={historySaved}
+              expired={expired}
+              terminal={expired || invalid}
+              minutes={minutes}
+              expiresAt={room.expiresAt}
+              phase={room.phase}
+            />
+            <div className="order-2 min-w-0 space-y-6 xl:col-start-1 xl:row-span-2 xl:row-start-1">
               <NoteBoard
                 room={room}
                 selfId={selfId}
                 disabled={disabled}
                 send={send}
               />
+              {room.phase === "closed" && (
+                <RetroExport room={room} selfId={selfId} />
+              )}
             </div>
             <aside
               aria-label="Room information and actions"
-              className="space-y-4"
+              className="order-3 space-y-4 xl:col-start-2 xl:row-start-2"
             >
               {(room.phase === "discuss" || room.phase === "closed") && (
                 <ActionItems

@@ -46,12 +46,24 @@ const roomSchema = z.object({
 const archiveSchema = z.object({
   version: z.literal(1),
   savedAt: z.number().int().nonnegative().max(8.64e15),
+  viewerId: z.string().optional(),
   room: roomSchema,
 });
 export type SavedRetro = z.infer<typeof archiveSchema>;
 
-export function publicRetro(room: RetroRoom): RetroRoom {
-  return roomSchema.parse(room);
+export function publicRetro(
+  room: RetroRoom,
+  viewerId?: string | null
+): RetroRoom {
+  const snapshot = roomSchema.parse(room);
+  if (snapshot.phase !== "write") return snapshot;
+  return {
+    ...snapshot,
+    // Fail closed when sanitizing a write-phase snapshot without its audience.
+    notes: viewerId
+      ? snapshot.notes.filter((note) => note.authorId === viewerId)
+      : [],
+  };
 }
 
 export function retroHistoryKey(room: RetroRoom): string {
@@ -59,9 +71,12 @@ export function retroHistoryKey(room: RetroRoom): string {
   return `${RETRO_HISTORY_PREFIX}${room.code}:${room.expiresAt}`;
 }
 
-export function saveRetroHistory(room: RetroRoom): boolean {
+export function saveRetroHistory(
+  room: RetroRoom,
+  viewerId?: string | null
+): boolean {
   try {
-    const snapshot = publicRetro(room);
+    const snapshot = publicRetro(room, viewerId);
     const key = retroHistoryKey(snapshot);
     const previous = localStorage.getItem(key);
     if (previous) {
@@ -80,6 +95,7 @@ export function saveRetroHistory(room: RetroRoom): boolean {
     const entry: SavedRetro = {
       version: 1,
       savedAt: Date.now(),
+      ...(viewerId ? { viewerId } : {}),
       room: snapshot,
     };
     localStorage.setItem(key, JSON.stringify(entry));
@@ -101,10 +117,23 @@ export function readRetroHistory(): {
       const key = localStorage.key(index);
       if (!key?.startsWith(RETRO_HISTORY_PREFIX)) continue;
       try {
-        const entry = archiveSchema.parse(
+        const parsed = archiveSchema.parse(
           JSON.parse(localStorage.getItem(key) ?? "null")
         );
+        const entry = {
+          ...parsed,
+          room: publicRetro(parsed.room, parsed.viewerId),
+        };
         if (key !== retroHistoryKey(entry.room)) throw new Error("Invalid key");
+        if (
+          parsed.room.phase === "write" &&
+          !parsed.viewerId &&
+          parsed.room.notes.length
+        ) {
+          // Pre-private-writing archives have no audience marker. Remove their
+          // notes in storage as well as in the rendered/exported snapshot.
+          localStorage.setItem(key, JSON.stringify(entry));
+        }
         entries.push(entry);
       } catch {
         error =

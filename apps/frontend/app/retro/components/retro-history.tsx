@@ -3,6 +3,17 @@
 import { useEffect, useState } from "react";
 import { Button } from "ui/components/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "ui/components/alert-dialog";
+import {
   deleteRetroHistory,
   readRetroHistory,
   retroHistoryKey,
@@ -55,9 +66,10 @@ export function RetroHistory() {
           using this browser profile can see it.
         </p>
         <p className="text-sm text-muted-foreground">
-          Completed retros include the final actions received while connected.
-          Other entries are the last snapshot this browser saw, not necessarily
-          the final outcome.
+          Completed retros include the final actions received while connected. A
+          snapshot saved during writing contains only your private notes. Other
+          entries are the last snapshot this browser saw, not necessarily the
+          final outcome.
         </p>
       </header>
       {error && (
@@ -73,7 +85,7 @@ export function RetroHistory() {
           automatically.
         </p>
       ) : (
-        entries.map(({ room, savedAt }) => (
+        entries.map(({ room, savedAt, viewerId }) => (
           <article
             key={retroHistoryKey(room)}
             className="space-y-4 rounded-lg border p-4 sm:p-6"
@@ -93,24 +105,39 @@ export function RetroHistory() {
                   Saved {new Date(savedAt).toLocaleString()}
                 </p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      `Delete the saved copy of “${room.title}” from this browser? This does not delete the live room.`
-                    )
-                  ) {
-                    if (!deleteRetroHistory(room))
-                      setError(
-                        "Could not delete this saved retrospective. Check browser storage permissions."
-                      );
-                  }
-                }}
-              >
-                Delete saved retro
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    Delete saved retro
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Delete this saved retrospective?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Delete “{room.title}” from this browser? This does not
+                      delete the live room and cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      onClick={(event) => {
+                        if (deleteRetroHistory(room)) return;
+                        event.preventDefault();
+                        setError(
+                          "Could not delete this saved retrospective. Check browser storage permissions."
+                        );
+                      }}
+                    >
+                      Delete saved retro
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
             {room.expiresAt > now && (
               <a
@@ -188,7 +215,7 @@ export function RetroHistory() {
                 </section>
               ))}
             </details>
-            <RetroExport room={room} />
+            <RetroExport room={room} selfId={viewerId} />
           </article>
         ))
       )}

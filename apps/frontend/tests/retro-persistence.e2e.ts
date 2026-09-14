@@ -114,10 +114,11 @@ test("rejects and clears stale credentials, then allows joining again", async ({
   ).toHaveCount(0);
 });
 
-test("storage failures warn without blocking live collaboration", async ({
+test("storage failures stay in the mobile room status without blocking collaboration", async ({
   page,
   context,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await context.addInitScript(() => {
     Storage.prototype.setItem = () => {
       throw new Error("QuotaExceededError");
@@ -125,12 +126,23 @@ test("storage failures warn without blocking live collaboration", async ({
     Object.defineProperty(document, "cookie", { get: () => "", set: () => {} });
   });
   await createRoom(page, "Storage blocked retro");
+  const status = page
+    .locator('[data-slot="card"]')
+    .filter({ hasText: "Room status" });
   await expect(
-    page.getByText(/Could not save your rejoin cookie/)
+    status.getByText(/Could not save your rejoin cookie/)
   ).toBeVisible();
   await expect(
-    page.getByText(/Could not save this snapshot in browser history/)
+    status.getByText(/Could not save this snapshot in browser history/)
   ).toBeVisible();
+  await expect(
+    status.getByText("Privacy and browser storage", { exact: true })
+  ).toBeVisible();
+  const statusBox = (await status.boundingBox())!;
+  const boardBox = (await page
+    .getByLabel("Retrospective notes")
+    .boundingBox())!;
+  expect(statusBox.y).toBeLessThan(boardBox.y);
   await page
     .getByLabel("Add a note", { exact: true })
     .nth(0)
@@ -142,6 +154,49 @@ test("storage failures warn without blocking live collaboration", async ({
     page.getByText("Still works live", { exact: true })
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Export Markdown", exact: true })
-  ).toBeEnabled();
+    page.getByText("Keep the takeaways", { exact: true })
+  ).toHaveCount(0);
+});
+
+test("shows an expiring warning in the desktop room status", async ({
+  page,
+}) => {
+  await createRoom(page, "Expiring retro");
+  await page.evaluate(() => {
+    const currentTime = Date.now.bind(Date);
+    Date.now = () => currentTime() + 105 * 60 * 1000;
+  });
+  await page.waitForTimeout(1100);
+
+  const status = page
+    .locator('[data-slot="card"]')
+    .filter({ hasText: "Room status" });
+  await expect(status.getByText(/Expires in 15 min/)).toBeVisible();
+  await expect(
+    status.getByText(/Finish and close soon to make final exports available/)
+  ).toBeVisible();
+  const statusBox = (await status.boundingBox())!;
+  const boardBox = (await page
+    .getByLabel("Retrospective notes")
+    .boundingBox())!;
+  expect(statusBox.x).toBeGreaterThan(boardBox.x);
+});
+
+test("keeps lobby connection failures and retry next to the entry form", async ({
+  page,
+  context,
+}) => {
+  await context.routeWebSocket("**/retro", (socket) => socket.close());
+  await page.goto("/retro");
+
+  const lobby = page
+    .locator('[data-slot="card"]')
+    .filter({ hasText: "Start a fresh conversation" });
+  await expect(
+    lobby.getByText("Disconnected · room entry is unavailable", { exact: true })
+  ).toBeVisible();
+  await expect(
+    lobby.getByRole("button", { name: "Retry connection", exact: true })
+  ).toBeVisible();
+  await expect(page.getByText("Room status", { exact: true })).toHaveCount(0);
 });

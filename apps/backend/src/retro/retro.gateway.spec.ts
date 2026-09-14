@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Test } from '@nestjs/testing';
 import { type Server, WebSocket } from 'ws';
+import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
+import { ParticipantService } from '../collaboration/participant.service.js';
+import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { RetroGateway } from './retro.gateway.js';
+import { RetroModule } from './retro.module.js';
 import { RETRO_LIFETIME_MS, RetroService } from './retro.service.js';
 
 let gateway: RetroGateway;
@@ -22,8 +27,11 @@ function latest(client: WebSocket) {
 }
 beforeEach(() => {
   vi.useFakeTimers();
-  service = new RetroService();
-  gateway = new RetroGateway(service);
+  service = new RetroService(
+    new ParticipantService(),
+    new RoomRegistryService(),
+  );
+  gateway = new RetroGateway(service, new ConnectionRegistryService());
 });
 afterEach(() => {
   gateway.onModuleDestroy();
@@ -31,6 +39,21 @@ afterEach(() => {
 });
 
 describe('RetroGateway', () => {
+  it('uses collaboration services through RetroModule dependency injection', async () => {
+    const testingModule = await Test.createTestingModule({
+      imports: [RetroModule],
+    }).compile();
+    expect(testingModule.get(RetroGateway)).toBeInstanceOf(RetroGateway);
+    expect(testingModule.get(RetroService)).toBeInstanceOf(RetroService);
+    expect(testingModule.get(ParticipantService)).toBeInstanceOf(
+      ParticipantService,
+    );
+    expect(testingModule.get(RoomRegistryService)).toBeInstanceOf(
+      RoomRegistryService,
+    );
+    await testingModule.close();
+  });
+
   it('acknowledges only the requesting socket, including rejected commands', () => {
     const owner = socket();
     const guest = socket();
@@ -55,6 +78,46 @@ describe('RetroGateway', () => {
       data: { code: 'forbidden', requestId: 'advance-1' },
     });
   });
+  it('broadcasts participant-specific private writing then reveals one board', () => {
+    const owner = socket();
+    const guest = socket();
+    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
+    const code = latest(owner).data.room.code;
+    gateway.onCommand(guest, { type: 'join', name: 'Bobby', code });
+
+    gateway.onCommand(owner, {
+      type: 'add-note',
+      column: 'went-well',
+      text: 'Owner thought',
+    });
+    expect(
+      latest(owner).data.room.notes.map(({ text }: { text: string }) => text),
+    ).toEqual(['Owner thought']);
+    expect(latest(guest).data.room.notes).toEqual([]);
+
+    gateway.onCommand(guest, {
+      type: 'add-note',
+      column: 'ideas',
+      text: 'Guest thought',
+    });
+    expect(
+      latest(owner).data.room.notes.map(({ text }: { text: string }) => text),
+    ).toEqual(['Owner thought']);
+    expect(
+      latest(guest).data.room.notes.map(({ text }: { text: string }) => text),
+    ).toEqual(['Guest thought']);
+
+    gateway.onCommand(owner, { type: 'advance' });
+    for (const client of [owner, guest]) {
+      expect(latest(client).data.room.phase).toBe('vote');
+      expect(
+        latest(client).data.room.notes.map(
+          ({ text }: { text: string }) => text,
+        ),
+      ).toEqual(['Owner thought', 'Guest thought']);
+    }
+  });
+
   it('expires attached rooms and cleans timers even without incoming messages', () => {
     const owner = socket();
     gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });

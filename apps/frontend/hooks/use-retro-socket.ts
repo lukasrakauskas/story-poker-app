@@ -142,7 +142,7 @@ export function useRetroSocket() {
           setCookieSaved(
             saveRetroToken(snapshot.code, self.token, snapshot.expiresAt)
           );
-          setHistorySaved(saveRetroHistory(snapshot));
+          setHistorySaved(saveRetroHistory(snapshot, self.id));
           latestRoom.current = snapshot;
           terminal.current = false;
           ready.current = true;

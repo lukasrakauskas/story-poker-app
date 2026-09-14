@@ -26,9 +26,13 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   const guestContext = await browser.newContext();
   const guest = await guestContext.newPage();
   const errors: string[] = [];
+  const nativeDialogs: string[] = [];
   for (const page of [owner, guest]) {
     page.on("pageerror", (error) => errors.push(error.message));
-    page.on("dialog", (dialog) => dialog.accept());
+    page.on("dialog", async (dialog) => {
+      nativeDialogs.push(dialog.message());
+      await dialog.dismiss();
+    });
   }
   await owner.goto("/retro");
   await owner.getByLabel("Your name").fill("Alice");
@@ -39,7 +43,24 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     owner.getByRole("heading", { name: "Browser retrospective" })
   ).toBeVisible();
+  await expect(
+    owner.getByText(/Only you can see your notes during this phase/)
+  ).toBeVisible();
+  await expect(
+    owner.getByText(
+      /Notes stay visible only to their author while the team writes/
+    )
+  ).toBeVisible();
   await expect(owner.getByLabel("Room link")).toHaveValue(owner.url());
+  const desktopStatus = owner
+    .locator('[data-slot="card"]')
+    .filter({ hasText: "Room status" });
+  await expect(desktopStatus).toBeVisible();
+  const desktopStatusBox = (await desktopStatus.boundingBox())!;
+  const desktopBoardBox = (await owner
+    .getByLabel("Retrospective notes")
+    .boundingBox())!;
+  expect(desktopStatusBox.x).toBeGreaterThan(desktopBoardBox.x);
   const roomUrl = owner.url();
   const cookies = await context.cookies(roomUrl);
   const credential = cookies.find((cookie) =>
@@ -91,8 +112,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .getByRole("button", { name: "Add to to improve", exact: true })
     .click();
   await expect(
-    owner.getByText("Reduce flaky tests", { exact: true })
+    guest.getByText("Reduce flaky tests", { exact: true })
   ).toBeVisible();
+  await expect(
+    owner.getByText("Reduce flaky tests", { exact: true })
+  ).toHaveCount(0);
   await expect(
     owner.getByLabel("Add a note", { exact: true }).nth(0)
   ).toHaveValue("Teamwork was excellent");
@@ -101,8 +125,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeDisabled();
   await owner.evaluate(() => window.releaseRetroCommand());
   await expect(
-    guest.getByText("Teamwork was excellent", { exact: true })
+    owner.getByText("Teamwork was excellent", { exact: true })
   ).toBeVisible();
+  await expect(
+    guest.getByText("Teamwork was excellent", { exact: true })
+  ).toHaveCount(0);
   await expect(
     owner.getByLabel("Add a note", { exact: true }).nth(0)
   ).toHaveValue("");
@@ -130,8 +157,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .fill("Teamwork was excellent (edited)");
   await owner.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
-    guest.getByText("Teamwork was excellent (edited)", { exact: true })
+    owner.getByText("Teamwork was excellent (edited)", { exact: true })
   ).toBeVisible();
+  await expect(
+    guest.getByText("Teamwork was excellent (edited)", { exact: true })
+  ).toHaveCount(0);
   await owner
     .getByRole("button", {
       name: "Actions for note: Teamwork was excellent (edited)",
@@ -153,8 +183,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .click();
   await expect(noteActions).toBeFocused();
   await expect(
-    guest.getByText("Teamwork was excellent", { exact: true })
+    owner.getByText("Teamwork was excellent", { exact: true })
   ).toBeVisible();
+  await expect(
+    guest.getByText("Teamwork was excellent", { exact: true })
+  ).toHaveCount(0);
 
   await owner
     .getByLabel("Add a note", { exact: true })
@@ -185,6 +218,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     fullPage: true,
   });
   await owner.setViewportSize({ width: 390, height: 844 });
+  const mobileStatusBox = (await desktopStatus.boundingBox())!;
+  const mobileBoardBox = (await owner
+    .getByLabel("Retrospective notes")
+    .boundingBox())!;
+  expect(mobileStatusBox.y).toBeLessThan(mobileBoardBox.y);
   await noteActions.click();
   await expect(
     owner.getByRole("menuitem", { name: "Edit", exact: true })
@@ -216,15 +254,53 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     )?.value
   ).toBe(credential.value);
   await owner.evaluate(() => window.retroTestSocket.close());
+  await expect(
+    owner.getByText("Disconnected · changes are disabled", { exact: true })
+  ).toBeVisible();
   await owner.getByRole("button", { name: "Retry connection" }).click();
   await expect(
     owner.getByText("Connected · changes sync live", { exact: true })
   ).toBeVisible();
+
+  await expect(
+    owner.getByText("Keep the takeaways", { exact: true })
+  ).toHaveCount(0);
+  expect(
+    await owner.evaluate(() =>
+      Object.values(localStorage).some((value) =>
+        value.includes("Reduce flaky tests")
+      )
+    )
+  ).toBe(false);
+  expect(
+    await guest.evaluate(() =>
+      Object.values(localStorage).some((value) =>
+        value.includes("Teamwork was excellent")
+      )
+    )
+  ).toBe(false);
+
   await owner
     .getByRole("button", { name: "Start voting", exact: true })
     .click();
+  const phaseConfirmation = owner.getByRole("alertdialog");
+  await expect(
+    phaseConfirmation.getByRole("heading", { name: "Start voting?" })
+  ).toBeVisible();
+  await phaseConfirmation
+    .getByRole("button", { name: "Confirm start voting", exact: true })
+    .click();
+  await expect(
+    owner.getByText("Reduce flaky tests", { exact: true })
+  ).toBeVisible();
+  await expect(
+    guest.getByText("Teamwork was excellent", { exact: true })
+  ).toBeVisible();
   await expect(
     owner.getByRole("button", { name: /^Actions for note:/ })
+  ).toHaveCount(0);
+  await expect(
+    owner.getByText("Keep the takeaways", { exact: true })
   ).toHaveCount(0);
   await guest
     .getByRole("button", {
@@ -237,6 +313,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeVisible();
   await owner
     .getByRole("button", { name: "Start discussion", exact: true })
+    .click();
+  await expect(
+    phaseConfirmation.getByRole("heading", { name: "Start discussion?" })
+  ).toBeVisible();
+  await phaseConfirmation
+    .getByRole("button", { name: "Confirm start discussion", exact: true })
     .click();
   await owner
     .getByLabel("Next step", { exact: true })
@@ -274,6 +356,34 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     guest.getByText("Temporary action", { exact: true })
   ).toHaveCount(0);
+  await expect(
+    owner.getByText("Keep the takeaways", { exact: true })
+  ).toHaveCount(0);
+
+  await owner
+    .getByRole("button", { name: "Close retrospective", exact: true })
+    .click();
+  await expect(
+    phaseConfirmation.getByRole("heading", {
+      name: "Close this retrospective?",
+    })
+  ).toBeVisible();
+  await phaseConfirmation
+    .getByRole("button", { name: "Confirm close retrospective", exact: true })
+    .click();
+  await expect(
+    guest.getByRole("heading", {
+      name: "Retrospective complete · read-only",
+      exact: true,
+    })
+  ).toBeVisible();
+  await expect(
+    owner.getByText("Keep the takeaways", { exact: true })
+  ).toBeVisible();
+  await expect(
+    owner.getByText(/final snapshot is saved only in this browser/)
+  ).toBeVisible();
+  await expect(owner.getByRole("checkbox")).toHaveCount(0);
 
   const downloading = owner.waitForEvent("download");
   await owner.getByRole("button", { name: "Export JSON", exact: true }).click();
@@ -287,16 +397,6 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     done: true,
   });
   expect(JSON.stringify(exported)).not.toContain("token");
-  await owner
-    .getByRole("button", { name: "Close retrospective", exact: true })
-    .click();
-  await expect(
-    guest.getByRole("heading", {
-      name: "Retrospective complete · read-only",
-      exact: true,
-    })
-  ).toBeVisible();
-  await expect(owner.getByRole("checkbox")).toHaveCount(0);
   await owner.setViewportSize({ width: 390, height: 844 });
   expect(
     await owner.evaluate(
@@ -392,9 +492,19 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await owner
     .getByRole("button", { name: "Delete saved retro", exact: true })
     .click();
+  const historyConfirmation = owner.getByRole("alertdialog");
+  await expect(
+    historyConfirmation.getByRole("heading", {
+      name: "Delete this saved retrospective?",
+    })
+  ).toBeVisible();
+  await historyConfirmation
+    .getByRole("button", { name: "Delete saved retro", exact: true })
+    .click();
   await expect(owner.getByText(/No saved retrospectives yet/)).toBeVisible();
   await owner.reload();
   await expect(owner.getByText(/No saved retrospectives yet/)).toBeVisible();
   expect(errors).toEqual([]);
+  expect(nativeDialogs).toEqual([]);
   await guestContext.close();
 });
