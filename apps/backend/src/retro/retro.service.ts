@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type { RetroCommand, RetroRoom } from 'shared/retrospective';
+import type { RetroCommand, RetroNote, RetroRoom } from 'shared/retrospective';
 import {
   ParticipantService,
   type CollaborationParticipant,
@@ -28,8 +28,13 @@ export interface RetroSession {
   id: string;
   token: string;
 }
-type StoredRoom = Omit<RetroRoom, 'members'> & {
+type StoredNote = Omit<RetroNote, 'voteCount' | 'votedBySelf'> & {
+  /** Server-only voter identities used for authorization and vote budgets. */
+  voterIds: string[];
+};
+type StoredRoom = Omit<RetroRoom, 'members' | 'notes'> & {
   members: CollaborationParticipant[];
+  notes: StoredNote[];
 };
 type Mutation = Exclude<RetroCommand, { type: 'create' | 'join' | 'resume' }>;
 
@@ -115,7 +120,9 @@ export class RetroService {
       room.phase === 'write'
         ? room.notes.filter((note) => note.authorId === member.id)
         : room.notes;
-    // Explicitly exclude credentials, and never expose mutable internal state.
+    // Explicitly exclude credentials and voter identities, and never expose
+    // mutable internal state. Open voting contains only the recipient's own
+    // selections; aggregate totals become public in discuss/closed.
     return structuredClone({
       ...room,
       members: room.members.map(({ id, name, role, connected }) => ({
@@ -124,7 +131,14 @@ export class RetroService {
         moderator: role === 'moderator',
         connected,
       })),
-      notes,
+      notes: notes.map(({ voterIds, ...note }) => ({
+        ...note,
+        voteCount:
+          room.phase === 'discuss' || room.phase === 'closed'
+            ? voterIds.length
+            : null,
+        votedBySelf: room.phase === 'vote' && voterIds.includes(member.id),
+      })),
     });
   }
 

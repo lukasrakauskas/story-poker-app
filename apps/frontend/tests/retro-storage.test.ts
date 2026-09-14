@@ -66,7 +66,8 @@ const room: RetroRoom = {
       authorId: "alice",
       text: "Good teamwork",
       column: "went-well",
-      voterIds: ["alice"],
+      voteCount: 1,
+      votedBySelf: false,
     },
   ],
   actions: [
@@ -108,7 +109,8 @@ test("write-phase history and exports retain only the current participant's note
         authorId: "bob",
         text: "Guest private thought",
         column: "ideas",
-        voterIds: [],
+        voteCount: null,
+        votedBySelf: false,
       },
     ],
   };
@@ -124,16 +126,24 @@ test("write-phase history and exports retain only the current participant's note
 
   // Old write-phase entries did not record their audience, so fail closed
   // rather than re-exposing notes that may have belonged to someone else.
+  const legacyWriting = {
+    ...writing,
+    notes: writing.notes.map(
+      ({ voteCount: _voteCount, votedBySelf: _votedBySelf, ...note }) => ({
+        ...note,
+        voterIds: [note.authorId],
+      })
+    ),
+  };
   storage.setItem(
     retroHistoryKey(writing),
-    JSON.stringify({ version: 1, savedAt: 1, room: writing })
+    JSON.stringify({ version: 1, savedAt: 1, room: legacyWriting })
   );
   assert.deepEqual(readRetroHistory().entries[0].room.notes, []);
-  assert.ok(
-    !storage
-      .getItem(retroHistoryKey(writing))!
-      .includes("Guest private thought")
-  );
+  const migrated = storage.getItem(retroHistoryKey(writing))!;
+  assert.ok(!migrated.includes("Guest private thought"));
+  assert.ok(!migrated.includes("voterIds"));
+  assert.equal(JSON.parse(migrated).version, 2);
 });
 
 test("allowlists history and exports without retaining reconnect secrets", () => {
@@ -150,12 +160,66 @@ test("allowlists history and exports without retaining reconnect secrets", () =>
   assert.ok(!roomAsMarkdown(withSecrets).includes("top-secret"));
 });
 
+test("migrates legacy voter identities to private selections or aggregate counts", () => {
+  const legacyNotes = room.notes.map(
+    ({ voteCount: _voteCount, votedBySelf: _votedBySelf, ...note }) => ({
+      ...note,
+      voterIds: ["alice", "former-voter"],
+    })
+  );
+  storage.setItem(
+    retroHistoryKey(room),
+    JSON.stringify({
+      version: 1,
+      savedAt: 1,
+      viewerId: "alice",
+      room: { ...room, phase: "vote", notes: legacyNotes },
+    })
+  );
+  let migrated = readRetroHistory().entries[0];
+  assert.equal(migrated.version, 2);
+  assert.equal(migrated.room.notes[0].voteCount, null);
+  assert.equal(migrated.room.notes[0].votedBySelf, true);
+  assert.ok(!storage.getItem(retroHistoryKey(room))!.includes("voterIds"));
+  assert.ok(!storage.getItem(retroHistoryKey(room))!.includes("former-voter"));
+
+  storage.setItem(
+    retroHistoryKey(room),
+    JSON.stringify({
+      version: 1,
+      savedAt: 2,
+      viewerId: "alice",
+      room: { ...room, phase: "closed", notes: legacyNotes },
+    })
+  );
+  migrated = readRetroHistory().entries[0];
+  assert.equal(migrated.room.notes[0].voteCount, 2);
+  assert.equal(migrated.room.notes[0].votedBySelf, false);
+  assert.ok(!roomAsMarkdown(migrated.room).includes("former-voter"));
+
+  // A stale live snapshot must preserve the final archive while still
+  // scrubbing identities from its legacy representation.
+  storage.setItem(
+    retroHistoryKey(room),
+    JSON.stringify({
+      version: 1,
+      savedAt: 2,
+      viewerId: "alice",
+      room: { ...room, phase: "closed", notes: legacyNotes },
+    })
+  );
+  assert.equal(saveRetroHistory(room, "alice"), true);
+  const preserved = storage.getItem(retroHistoryKey(room))!;
+  assert.equal(JSON.parse(preserved).room.phase, "closed");
+  assert.ok(!preserved.includes("voterIds"));
+});
+
 test("ignores corrupt or unsupported entries without hiding valid history", () => {
   saveRetroHistory(room);
   storage.setItem(`${RETRO_HISTORY_PREFIX}broken`, "{invalid");
   storage.setItem(
     `${RETRO_HISTORY_PREFIX}future`,
-    JSON.stringify({ version: 2, room })
+    JSON.stringify({ version: 3, room })
   );
   storage.setItem("unrelated", "leave me alone");
   const result = readRetroHistory();

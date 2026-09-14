@@ -45,14 +45,12 @@ type BoardProps = {
 export function NoteBoard({ room, selfId, disabled, send }: BoardProps) {
   const remaining = Math.max(
     0,
-    3 -
-      room.notes.filter((note) => selfId && note.voterIds.includes(selfId))
-        .length
+    3 - room.notes.filter((note) => note.votedBySelf).length
   );
   if (room.phase === "discuss" || room.phase === "closed") {
     const ranked = [...room.notes].sort(
       (a, b) =>
-        b.voterIds.length - a.voterIds.length || a.id.localeCompare(b.id)
+        (b.voteCount ?? 0) - (a.voteCount ?? 0) || a.id.localeCompare(b.id)
     );
     return (
       <section aria-labelledby="ranked-notes" className="space-y-4">
@@ -210,7 +208,7 @@ function NoteCard({
   const [text, setText] = useState(note.text);
   const own = note.authorId === selfId;
   const canEdit = room.phase === "write" && own;
-  const voted = selfId !== null && note.voterIds.includes(selfId);
+  const voted = note.votedBySelf;
   const author =
     room.members.find((member) => member.id === note.authorId)?.name ??
     "Former member";
@@ -290,14 +288,12 @@ function NoteCard({
           disabled={disabled || (!voted && remaining === 0)}
           onClick={() => void send({ type: "toggle-vote", id: note.id })}
         >
-          {voted ? "Voted · " : "Vote · "}
-          {note.voterIds.length}
+          {voted ? "Voted" : "Vote"}
         </Button>
       ) : (
         room.phase !== "write" && (
           <p className="text-xs font-medium text-muted-foreground">
-            {note.voterIds.length}{" "}
-            {note.voterIds.length === 1 ? "vote" : "votes"}
+            {note.voteCount ?? 0} {note.voteCount === 1 ? "vote" : "votes"}
           </p>
         )
       )}

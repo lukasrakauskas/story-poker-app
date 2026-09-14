@@ -11,7 +11,10 @@ export interface RetroNote {
   authorId: string;
   column: RetroColumn;
   text: string;
-  voterIds: string[];
+  /** Hidden until discussion starts so open voting stays blind. */
+  voteCount: number | null;
+  /** Recipient-specific selection state; never identifies another voter. */
+  votedBySelf: boolean;
 }
 export interface RetroAction {
   id: string;

@@ -73,8 +73,35 @@ describe('RetroApplicationService', () => {
     );
 
     const reveal = application.execute('owner-connection', { type: 'advance' });
-    expect(state(reveal, 'owner-connection').room.notes).toHaveLength(2);
+    const ownerVoting = state(reveal, 'owner-connection').room;
+    expect(ownerVoting.notes).toHaveLength(2);
     expect(state(reveal, 'guest-connection').room.notes).toHaveLength(2);
+
+    const voted = application.execute('guest-connection', {
+      type: 'toggle-vote',
+      id: ownerVoting.notes[0].id,
+    });
+    expect(state(voted, 'owner-connection').room.notes[0]).toMatchObject({
+      voteCount: null,
+      votedBySelf: false,
+    });
+    expect(state(voted, 'guest-connection').room.notes[0]).toMatchObject({
+      voteCount: null,
+      votedBySelf: true,
+    });
+    expect(JSON.stringify(voted.messages)).not.toContain('voterIds');
+
+    const discuss = application.execute('owner-connection', {
+      type: 'advance',
+    });
+    expect(state(discuss, 'owner-connection').room.notes[0]).toMatchObject({
+      voteCount: 1,
+      votedBySelf: false,
+    });
+    expect(state(discuss, 'guest-connection').room.notes[0]).toMatchObject({
+      voteCount: 1,
+      votedBySelf: false,
+    });
     expect(joined.self.token).not.toBe(created.self.token);
   });
 

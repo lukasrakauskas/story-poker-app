@@ -128,14 +128,28 @@ describe('retrospective WebSocket route', () => {
     ]);
     expect(state(await guestReveal).room.notes).toEqual(revealed.room.notes);
     const voteReceived = next(owner);
-    await command(guest, {
-      type: 'toggle-vote',
-      id: withOwnerNote.room.notes[0].id,
+    const guestVote = state(
+      await command(guest, {
+        type: 'toggle-vote',
+        id: withOwnerNote.room.notes[0].id,
+      }),
+    );
+    const ownerVote = state(await voteReceived);
+    expect(ownerVote.room.notes[0]).toMatchObject({
+      voteCount: null,
+      votedBySelf: false,
     });
-    expect(state(await voteReceived).room.notes[0].voterIds).toEqual([
-      joined.self.id,
-    ]);
-    await command(owner, { type: 'advance' });
+    expect(guestVote.room.notes[0]).toMatchObject({
+      voteCount: null,
+      votedBySelf: true,
+    });
+    expect(JSON.stringify(ownerVote.room)).not.toContain('voterIds');
+    expect(JSON.stringify(guestVote.room)).not.toContain('voterIds');
+    const discussing = state(await command(owner, { type: 'advance' }));
+    expect(discussing.room.notes[0]).toMatchObject({
+      voteCount: 1,
+      votedBySelf: false,
+    });
     const actions = state(
       await command(owner, {
         type: 'add-action',

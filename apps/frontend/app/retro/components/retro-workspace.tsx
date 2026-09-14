@@ -28,7 +28,7 @@ const phases: {
     id: "vote",
     label: "Vote",
     description:
-      "Choose your priorities. Three votes per person, one per note. Click a voted note again to remove your vote.",
+      "Choose your priorities. Three votes per person, one per note. Totals stay hidden until discussion; click a voted note again to remove your vote.",
     next: "Start discussion",
   },
   {
@@ -90,12 +90,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     ?.moderator;
   const current = phases.find((phase) => phase.id === room?.phase);
   const remaining = room
-    ? Math.max(
-        0,
-        3 -
-          room.notes.filter((note) => selfId && note.voterIds.includes(selfId))
-            .length
-      )
+    ? Math.max(0, 3 - room.notes.filter((note) => note.votedBySelf).length)
     : 3;
   const minutes =
     room && now !== null

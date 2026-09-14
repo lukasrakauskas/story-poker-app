@@ -194,7 +194,7 @@ export function RetroHistory() {
                   <ul className="space-y-2">
                     {room.notes
                       .filter((note) => note.column === column.id)
-                      .sort((a, b) => b.voterIds.length - a.voterIds.length)
+                      .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))
                       .map((note) => (
                         <li
                           key={note.id}
@@ -204,7 +204,10 @@ export function RetroHistory() {
                             {note.text}
                           </p>
                           <p className="mt-1 text-muted-foreground">
-                            {note.voterIds.length} votes ·{" "}
+                            {note.voteCount === null
+                              ? "Votes hidden"
+                              : `${note.voteCount} votes`}{" "}
+                            {" · "}
                             {room.members.find(
                               (member) => member.id === note.authorId
                             )?.name ?? "Former member"}

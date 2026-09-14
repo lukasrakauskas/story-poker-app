@@ -168,7 +168,7 @@ describe('retrospective workflow', () => {
     ).toThrow('write phase');
   });
 
-  it('limits each member to three votes and supports moving votes', () => {
+  it('keeps open voting blind and anonymous while preserving own selections', () => {
     const ids = [add('One'), add('Two'), add('Three'), add('Four')];
     service.mutate(owner, { type: 'advance' });
     ids
@@ -180,14 +180,44 @@ describe('retrospective workflow', () => {
     service.mutate(guest, { type: 'toggle-vote', id: ids[0] });
     service.mutate(guest, { type: 'toggle-vote', id: ids[3] });
     service.mutate(owner, { type: 'toggle-vote', id: ids[3] });
-    expect(service.snapshot(owner).notes[0].voterIds).toEqual([]);
-    expect(service.snapshot(owner).notes[3].voterIds).toEqual([
-      guest.id,
-      owner.id,
+
+    const ownerVoting = service.snapshot(owner);
+    const guestVoting = service.snapshot(guest);
+    expect(ownerVoting.notes.every((note) => note.voteCount === null)).toBe(
+      true,
+    );
+    expect(guestVoting.notes.every((note) => note.voteCount === null)).toBe(
+      true,
+    );
+    expect(ownerVoting.notes.map((note) => note.votedBySelf)).toEqual([
+      false,
+      false,
+      false,
+      true,
     ]);
+    expect(guestVoting.notes.map((note) => note.votedBySelf)).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ]);
+    expect(JSON.stringify(ownerVoting)).not.toContain('voterIds');
+    expect(JSON.stringify(guestVoting)).not.toContain('voterIds');
+
+    service.disconnect(guest);
+    service.resume(guest.code, guest.token);
+    expect(
+      service.snapshot(guest).notes.map((note) => note.votedBySelf),
+    ).toEqual([false, true, true, true]);
+
+    service.mutate(owner, { type: 'advance' });
+    const discussed = service.snapshot(owner);
+    expect(discussed.notes.map((note) => note.voteCount)).toEqual([0, 1, 1, 2]);
+    expect(discussed.notes.every((note) => !note.votedBySelf)).toBe(true);
+    expect(JSON.stringify(discussed)).not.toContain('voterIds');
     expect(() =>
       service.mutate(guest, { type: 'toggle-vote', id: 'missing' }),
-    ).toThrow('no longer exists');
+    ).toThrow('vote phase');
   });
 
   it('captures moderator-owned actions and closes read-only', () => {

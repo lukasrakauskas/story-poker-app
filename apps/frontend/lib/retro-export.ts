@@ -42,12 +42,14 @@ export function roomAsMarkdown(
     lines.push("", `## ${column.title}`);
     for (const note of snapshot.notes
       .filter((item) => item.column === column.id)
-      .sort((a, b) => b.voterIds.length - a.voterIds.length)) {
+      .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))) {
       const author =
         snapshot.members.find((member) => member.id === note.authorId)?.name ??
         "Former member";
+      const votes =
+        note.voteCount === null ? "" : `**${note.voteCount} votes** · `;
       lines.push(
-        `- **${note.voterIds.length} votes** · ${escapeMarkdown(note.text)} — ${escapeMarkdown(author)}`
+        `- ${votes}${escapeMarkdown(note.text)} — ${escapeMarkdown(author)}`
       );
     }
   }
@@ -78,11 +80,12 @@ export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
     lines.push("", column.title);
     for (const note of snapshot.notes
       .filter((item) => item.column === column.id)
-      .sort((a, b) => b.voterIds.length - a.voterIds.length)) {
+      .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))) {
       const author =
         snapshot.members.find((member) => member.id === note.authorId)?.name ??
         "Former member";
-      lines.push(`- [${note.voterIds.length} votes] ${note.text} — ${author}`);
+      const votes = note.voteCount === null ? "" : `[${note.voteCount} votes] `;
+      lines.push(`- ${votes}${note.text} — ${author}`);
     }
   }
   lines.push(

@@ -311,6 +311,49 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     guest.getByText("2 of 3 votes remaining", { exact: true })
   ).toBeVisible();
+  await expect(
+    guest.getByRole("button", {
+      name: "Remove vote from note: Teamwork was excellent",
+      exact: true,
+    })
+  ).toHaveText("Voted");
+  await expect(
+    owner.getByRole("button", {
+      name: "Vote for note: Teamwork was excellent",
+      exact: true,
+    })
+  ).toHaveText("Vote");
+  await expect(owner.getByText("1 vote", { exact: true })).toHaveCount(0);
+  const [ownerVoteSnapshot, guestVoteSnapshot] = await Promise.all(
+    [owner, guest].map((page) =>
+      page.evaluate(() => {
+        const value = Object.entries(localStorage).find(([key]) =>
+          key.startsWith("retro-history-v1:")
+        )?.[1];
+        return value ? JSON.parse(value) : null;
+      })
+    )
+  );
+  expect(
+    ownerVoteSnapshot.room.notes.find(
+      (note: { text: string }) => note.text === "Teamwork was excellent"
+    )
+  ).toMatchObject({ voteCount: null, votedBySelf: false });
+  expect(
+    guestVoteSnapshot.room.notes.find(
+      (note: { text: string }) => note.text === "Teamwork was excellent"
+    )
+  ).toMatchObject({ voteCount: null, votedBySelf: true });
+  expect(JSON.stringify(ownerVoteSnapshot)).not.toContain("voterIds");
+  expect(JSON.stringify(guestVoteSnapshot)).not.toContain("voterIds");
+
+  await guest.reload();
+  await expect(
+    guest.getByRole("button", {
+      name: "Remove vote from note: Teamwork was excellent",
+      exact: true,
+    })
+  ).toHaveText("Voted");
   await owner
     .getByRole("button", { name: "Start discussion", exact: true })
     .click();
@@ -320,6 +363,8 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await phaseConfirmation
     .getByRole("button", { name: "Confirm start discussion", exact: true })
     .click();
+  await expect(owner.getByText("1 vote", { exact: true })).toBeVisible();
+  await expect(guest.getByText("1 vote", { exact: true })).toBeVisible();
   await owner
     .getByLabel("Next step", { exact: true })
     .fill("Pair on flaky tests");
@@ -396,7 +441,13 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     owner: "Bobby",
     done: true,
   });
+  expect(
+    exported.notes.find(
+      (note: { text: string }) => note.text === "Teamwork was excellent"
+    )
+  ).toMatchObject({ voteCount: 1, votedBySelf: false });
   expect(JSON.stringify(exported)).not.toContain("token");
+  expect(JSON.stringify(exported)).not.toContain("voterIds");
   await owner.setViewportSize({ width: 390, height: 844 });
   expect(
     await owner.evaluate(
@@ -415,6 +466,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   expect(saved).toHaveLength(1);
   expect(saved[0][1]).not.toContain(credential.value);
   expect(saved[0][1]).not.toContain('"token"');
+  expect(saved[0][1]).not.toContain("voterIds");
   expect(JSON.parse(saved[0][1]).room.phase).toBe("closed");
   await guest.reload();
   await expect(
