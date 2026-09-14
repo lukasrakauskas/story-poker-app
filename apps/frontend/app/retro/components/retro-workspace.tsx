@@ -8,6 +8,7 @@ import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
 import { NoteGrouping } from "./note-grouping";
 import { ActionItems } from "./action-items";
+import { MobileActions, useCompactDiscussion } from "./mobile-actions";
 import { RoomDetails } from "./room-details";
 import { PhaseAdvanceDialog } from "./phase-advance-dialog";
 import { RetroExport } from "./retro-export";
@@ -75,6 +76,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     cookieSaved,
     historySaved,
   } = useRetro();
+  const compactDiscussion = useCompactDiscussion();
   const [now, setNow] = useState<number | null>(null);
   const [draftColumns, setDraftColumns] = useState<RetroColumn[]>([]);
   useEffect(() => {
@@ -292,6 +294,14 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               phase={room.phase}
             />
             <div className="order-2 min-w-0 space-y-6 xl:col-start-1 xl:row-span-2 xl:row-start-1">
+              {room.phase === "discuss" && compactDiscussion && (
+                <MobileActions
+                  room={room}
+                  moderator={moderator}
+                  disabled={disabled}
+                  send={send}
+                />
+              )}
               {room.phase === "group" ? (
                 <NoteGrouping
                   room={room}
@@ -324,7 +334,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               aria-label="Room information and actions"
               className="order-3 space-y-4 xl:col-start-2 xl:row-start-2"
             >
-              {(room.phase === "discuss" || room.phase === "closed") && (
+              {((room.phase === "discuss" && !compactDiscussion) ||
+                room.phase === "closed") && (
                 <ActionItems
                   room={room}
                   moderator={moderator}
