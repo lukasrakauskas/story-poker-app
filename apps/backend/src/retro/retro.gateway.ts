@@ -9,16 +9,15 @@ import {
   type OnGatewayInit,
 } from '@nestjs/websockets';
 import { WebSocket, type Server } from 'ws';
-import type { RetroServerEvent } from 'shared/retrospective';
-import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
+import { RateLimitService } from '../transport/rate-limit.service.js';
+import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
+import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
 import {
-  RetroError,
-  RetroService,
-  type RetroSession,
-} from './retro.service.js';
+  RETRO_APPLICATION_NAMESPACE,
+  RetroApplicationService,
+} from './retro-application.service.js';
 import { retroCommandSchema } from './retro.schema.js';
-
-const CONNECTION_NAMESPACE = 'retro';
+import { RetroError } from './retro.service.js';
 
 @WebSocketGateway({ path: '/retro', maxPayload: 16 * 1024 })
 export class RetroGateway
@@ -28,56 +27,40 @@ export class RetroGateway
     OnGatewayInit<Server>,
     OnModuleDestroy
 {
-  private readonly sessions = new Map<WebSocket, RetroSession>();
-  private readonly limits = new WeakMap<
-    WebSocket,
-    { start: number; count: number }
-  >();
-  private readonly alive = new WeakSet<WebSocket>();
-  private cleanup?: ReturnType<typeof setInterval>;
-
   constructor(
-    private readonly retros: RetroService,
-    private readonly connections: ConnectionRegistryService,
+    private readonly application: RetroApplicationService,
+    private readonly transport: WebSocketTransportService,
+    private readonly heartbeat: WebSocketHeartbeatService,
+    private readonly rateLimits: RateLimitService,
   ) {}
 
-  afterInit(server: Server) {
-    this.stopCleanup();
-    this.cleanup = setInterval(() => {
-      this.expireRooms();
-      for (const socket of server.clients) {
-        if (!this.alive.has(socket)) {
-          socket.terminate();
-          continue;
-        }
-        this.alive.delete(socket);
-        if (socket.readyState === WebSocket.OPEN) socket.ping();
-      }
-    }, 30_000);
+  afterInit(_server: Server) {
+    this.heartbeat.start(RETRO_APPLICATION_NAMESPACE, {
+      interval: 30_000,
+      probe: { type: 'ping' },
+      onTimeout: (socket) => this.handleDisconnect(socket),
+      onTick: () => this.transport.dispatch(this.application.expireRooms()),
+    });
   }
 
   onModuleDestroy() {
-    this.stopCleanup();
-    this.connections.clear(CONNECTION_NAMESPACE);
+    this.heartbeat.stop(RETRO_APPLICATION_NAMESPACE);
+    this.rateLimits.clear(RETRO_APPLICATION_NAMESPACE);
   }
 
   handleConnection(socket: WebSocket) {
-    this.alive.add(socket);
-    socket.on('pong', () => this.alive.add(socket));
+    this.transport.register(socket);
+    this.heartbeat.register(RETRO_APPLICATION_NAMESPACE, socket, true);
   }
 
   handleDisconnect(socket: WebSocket) {
-    const session = this.sessions.get(socket);
-    this.sessions.delete(socket);
-    if (!session) return;
-    this.connections.release(
-      CONNECTION_NAMESPACE,
-      session.code,
-      session.id,
-      socket,
-    );
-    this.retros.disconnect(session);
-    this.broadcast(session.code);
+    const connectionId = this.transport.id(socket);
+    this.heartbeat.unregister(RETRO_APPLICATION_NAMESPACE, socket);
+    if (connectionId) {
+      this.rateLimits.release(RETRO_APPLICATION_NAMESPACE, connectionId);
+      this.transport.dispatch(this.application.disconnect(connectionId));
+    }
+    this.transport.unregister(socket);
   }
 
   @SubscribeMessage('retro-command')
@@ -85,6 +68,8 @@ export class RetroGateway
     @ConnectedSocket() socket: WebSocket,
     @MessageBody() data: unknown,
   ) {
+    const connectionId =
+      this.transport.id(socket) ?? this.transport.register(socket);
     const requestId =
       typeof data === 'object' &&
       data !== null &&
@@ -93,148 +78,38 @@ export class RetroGateway
       data.requestId.length <= 64
         ? data.requestId
         : undefined;
-    try {
-      this.rateLimit(socket);
-      this.expireRooms();
-      const parsed = retroCommandSchema.safeParse(data);
-      if (!parsed.success)
-        throw new RetroError(
-          'invalid-command',
-          'Check your input: name 3–30 characters, title 1–100, note/action 1–1000, owner up to 60.',
-        );
-      const command = parsed.data;
-      const current = this.sessions.get(socket);
-      let session: RetroSession;
-      if (
-        command.type === 'create' ||
-        command.type === 'join' ||
-        command.type === 'resume'
-      ) {
-        if (current)
-          throw new RetroError(
-            'already-joined',
-            'You are already in a retrospective. Open a new tab to join another.',
-          );
-        if (command.type === 'create')
-          session = this.retros.create(command.name, command.title);
-        else if (command.type === 'join')
-          session = this.retros.join(command.code, command.name);
-        else session = this.retros.resume(command.code, command.token);
-        // A resumed identity belongs to one live socket. The old socket cannot
-        // mutate state or mark the replacement disconnected when it closes.
-        const previous = this.connections.replace(
-          CONNECTION_NAMESPACE,
-          session.code,
-          session.id,
-          socket,
-        );
-        if (previous) {
-          this.sessions.delete(previous);
-          this.sendError(
-            previous,
-            new RetroError(
-              'invalid-session',
-              'Your session was resumed in another connection.',
-            ),
-          );
-          previous.close(4001, 'Session replaced');
-        }
-        this.sessions.set(socket, session);
-      } else {
-        if (!current)
-          throw new RetroError(
-            'invalid-session',
-            'Join a room before making changes.',
-          );
-        session = current;
-        this.retros.mutate(session, command);
-      }
-      this.broadcast(session.code, socket, requestId);
-    } catch (error) {
-      if (!(error instanceof RetroError)) throw error;
-      this.sendError(socket, error, requestId);
-    }
-  }
-
-  private expireRooms() {
-    this.retros.sweep();
-    for (const [socket, session] of this.sessions) {
-      if (this.retros.isExpired(session.code)) {
-        this.sessions.delete(socket);
-        this.connections.release(
-          CONNECTION_NAMESPACE,
-          session.code,
-          session.id,
-          socket,
-        );
-        this.sendError(
-          socket,
+    if (
+      !this.rateLimits.consume(RETRO_APPLICATION_NAMESPACE, connectionId, {
+        limit: 30,
+        windowMs: 1000,
+      })
+    ) {
+      return this.transport.dispatch(
+        this.application.reject(
+          connectionId,
           new RetroError(
-            'room-expired',
-            'This room has expired. Create a new retrospective.',
+            'rate-limit',
+            'Too many changes. Wait a moment and try again.',
           ),
-        );
-      }
-    }
-  }
-
-  private broadcast(code: string, requester?: WebSocket, requestId?: string) {
-    for (const [socket, session] of this.sessions) {
-      if (session.code !== code) continue;
-      try {
-        this.send(socket, {
-          event: 'retro-state',
-          data: {
-            room: this.retros.snapshot(session),
-            self: { id: session.id, token: session.token },
-            ...(socket === requester && requestId ? { requestId } : {}),
-          },
-        });
-      } catch (error) {
-        if (!(error instanceof RetroError)) throw error;
-        this.sessions.delete(socket);
-        this.connections.release(
-          CONNECTION_NAMESPACE,
-          session.code,
-          session.id,
-          socket,
-        );
-        this.sendError(socket, error);
-      }
-    }
-  }
-
-  private stopCleanup() {
-    if (this.cleanup) clearInterval(this.cleanup);
-    this.cleanup = undefined;
-  }
-
-  private sendError(socket: WebSocket, error: RetroError, requestId?: string) {
-    this.send(socket, {
-      event: 'retro-error',
-      data: {
-        code: error.code,
-        message: error.message,
-        ...(requestId ? { requestId } : {}),
-      },
-    });
-  }
-
-  private send(socket: WebSocket, event: RetroServerEvent) {
-    if (socket.readyState === WebSocket.OPEN)
-      socket.send(JSON.stringify(event));
-  }
-
-  private rateLimit(socket: WebSocket) {
-    let limit = this.limits.get(socket);
-    if (!limit || Date.now() - limit.start >= 1000) {
-      limit = { start: Date.now(), count: 0 };
-      this.limits.set(socket, limit);
-    }
-    if (++limit.count > 30)
-      throw new RetroError(
-        'rate-limit',
-        'Too many changes. Wait a moment and try again.',
+          requestId,
+        ),
       );
+    }
+    const command = retroCommandSchema.safeParse(data);
+    if (!command.success) {
+      return this.transport.dispatch(
+        this.application.reject(
+          connectionId,
+          new RetroError(
+            'invalid-command',
+            'Check your input: name 3–30 characters, title 1–100, note/action 1–1000, owner up to 60.',
+          ),
+          requestId,
+        ),
+      );
+    }
+    return this.transport.dispatch(
+      this.application.execute(connectionId, command.data, requestId),
+    );
   }
 }

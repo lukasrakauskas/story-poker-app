@@ -16,6 +16,27 @@ export class ConnectionRegistryService implements OnModuleDestroy {
     return previous === connection ? undefined : previous;
   }
 
+  get<T>(
+    namespace: string,
+    roomCode: string,
+    participantId: string,
+  ): T | undefined {
+    return this.connections.get(
+      this.key(namespace, roomCode, participantId),
+    ) as T | undefined;
+  }
+
+  audience<T>(
+    namespace: string,
+    roomCode: string,
+    participantIds: string[],
+  ): T[] {
+    return participantIds.flatMap((participantId) => {
+      const connection = this.get<T>(namespace, roomCode, participantId);
+      return connection === undefined ? [] : [connection];
+    });
+  }
+
   release(
     namespace: string,
     roomCode: string,
