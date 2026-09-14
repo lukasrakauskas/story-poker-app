@@ -23,7 +23,13 @@ function releaseDownload(download: Download | null) {
   URL.revokeObjectURL(download.url);
 }
 
-export function RetroExport({ room }: { room: RetroRoom }) {
+export function RetroExport({
+  room,
+  selfId,
+}: {
+  room: RetroRoom;
+  selfId?: string | null;
+}) {
   const [status, setStatus] = useState("");
   const [manualMarkdown, setManualMarkdown] = useState<string | null>(null);
   const mounted = useRef(false);
@@ -47,7 +53,7 @@ export function RetroExport({ room }: { room: RetroRoom }) {
     setManualMarkdown(null);
     let markdown: string;
     try {
-      markdown = roomAsMarkdown(room);
+      markdown = roomAsMarkdown(room, selfId);
     } catch {
       setStatus(
         "This snapshot could not be exported. Try another saved snapshot."
@@ -74,13 +80,13 @@ export function RetroExport({ room }: { room: RetroRoom }) {
     setStatus("");
     let anchor: HTMLAnchorElement | null = null;
     try {
-      const snapshot = publicRetro(room);
+      const snapshot = publicRetro(room, selfId);
       const content =
         format === "json"
           ? JSON.stringify(snapshot, null, 2)
           : format === "md"
-            ? roomAsMarkdown(snapshot)
-            : roomAsText(snapshot);
+            ? roomAsMarkdown(snapshot, selfId)
+            : roomAsText(snapshot, selfId);
       const blob = new Blob([content], {
         type:
           format === "json"
@@ -105,7 +111,9 @@ export function RetroExport({ room }: { room: RetroRoom }) {
       document.body.appendChild(anchor);
       anchor.click();
       setStatus(
-        "Download requested. Keep the file somewhere safe; it includes the team’s public notes and names."
+        room.phase === "write"
+          ? "Download requested. It contains only the private notes currently visible to you."
+          : "Download requested. Keep the file somewhere safe; it includes the team’s revealed notes and names."
       );
     } catch {
       releaseDownload(download.current);
@@ -123,9 +131,11 @@ export function RetroExport({ room }: { room: RetroRoom }) {
       <CardHeader>
         <CardTitle>Keep the takeaways</CardTitle>
         <CardDescription>
-          Snapshots are saved locally in this browser when storage is available.
-          Export this snapshot at any time, including while offline. Keep a
-          download as a backup; browser storage can be cleared or unavailable.
+          {room.phase === "write"
+            ? "This browser saves and exports only your private writing. The complete board becomes available when voting starts."
+            : "Snapshots are saved locally in this browser when storage is available. Export this revealed snapshot at any time, including while offline."}{" "}
+          Keep a download as a backup; browser storage can be cleared or
+          unavailable.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

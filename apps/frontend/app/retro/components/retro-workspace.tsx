@@ -20,7 +20,7 @@ const phases: {
     id: "write",
     label: "Write",
     description:
-      "Add your thoughts to the board. All notes are visible to everyone; only you can edit yours.",
+      "Write independently. Only you can see your notes during this phase. Starting voting reveals every note to the team at the same time.",
     next: "Start voting",
   },
   {

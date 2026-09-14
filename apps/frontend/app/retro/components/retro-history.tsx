@@ -66,9 +66,10 @@ export function RetroHistory() {
           using this browser profile can see it.
         </p>
         <p className="text-sm text-muted-foreground">
-          Completed retros include the final actions received while connected.
-          Other entries are the last snapshot this browser saw, not necessarily
-          the final outcome.
+          Completed retros include the final actions received while connected. A
+          snapshot saved during writing contains only your private notes. Other
+          entries are the last snapshot this browser saw, not necessarily the
+          final outcome.
         </p>
       </header>
       {error && (
@@ -84,7 +85,7 @@ export function RetroHistory() {
           automatically.
         </p>
       ) : (
-        entries.map(({ room, savedAt }) => (
+        entries.map(({ room, savedAt, viewerId }) => (
           <article
             key={retroHistoryKey(room)}
             className="space-y-4 rounded-lg border p-4 sm:p-6"
@@ -214,7 +215,7 @@ export function RetroHistory() {
                 </section>
               ))}
             </details>
-            <RetroExport room={room} />
+            <RetroExport room={room} selfId={viewerId} />
           </article>
         ))
       )}

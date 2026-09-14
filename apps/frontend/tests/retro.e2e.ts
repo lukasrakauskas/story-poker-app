@@ -43,6 +43,14 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     owner.getByRole("heading", { name: "Browser retrospective" })
   ).toBeVisible();
+  await expect(
+    owner.getByText(/Only you can see your notes during this phase/)
+  ).toBeVisible();
+  await expect(
+    owner.getByText(
+      /Notes stay visible only to their author while the team writes/
+    )
+  ).toBeVisible();
   await expect(owner.getByLabel("Room link")).toHaveValue(owner.url());
   const roomUrl = owner.url();
   const cookies = await context.cookies(roomUrl);
@@ -95,8 +103,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .getByRole("button", { name: "Add to to improve", exact: true })
     .click();
   await expect(
-    owner.getByText("Reduce flaky tests", { exact: true })
+    guest.getByText("Reduce flaky tests", { exact: true })
   ).toBeVisible();
+  await expect(
+    owner.getByText("Reduce flaky tests", { exact: true })
+  ).toHaveCount(0);
   await expect(
     owner.getByLabel("Add a note", { exact: true }).nth(0)
   ).toHaveValue("Teamwork was excellent");
@@ -105,8 +116,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toBeDisabled();
   await owner.evaluate(() => window.releaseRetroCommand());
   await expect(
-    guest.getByText("Teamwork was excellent", { exact: true })
+    owner.getByText("Teamwork was excellent", { exact: true })
   ).toBeVisible();
+  await expect(
+    guest.getByText("Teamwork was excellent", { exact: true })
+  ).toHaveCount(0);
   await expect(
     owner.getByLabel("Add a note", { exact: true }).nth(0)
   ).toHaveValue("");
@@ -134,8 +148,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .fill("Teamwork was excellent (edited)");
   await owner.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
-    guest.getByText("Teamwork was excellent (edited)", { exact: true })
+    owner.getByText("Teamwork was excellent (edited)", { exact: true })
   ).toBeVisible();
+  await expect(
+    guest.getByText("Teamwork was excellent (edited)", { exact: true })
+  ).toHaveCount(0);
   await owner
     .getByRole("button", {
       name: "Actions for note: Teamwork was excellent (edited)",
@@ -157,8 +174,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .click();
   await expect(noteActions).toBeFocused();
   await expect(
-    guest.getByText("Teamwork was excellent", { exact: true })
+    owner.getByText("Teamwork was excellent", { exact: true })
   ).toBeVisible();
+  await expect(
+    guest.getByText("Teamwork was excellent", { exact: true })
+  ).toHaveCount(0);
 
   await owner
     .getByLabel("Add a note", { exact: true })
@@ -224,6 +244,31 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     owner.getByText("Connected · changes sync live", { exact: true })
   ).toBeVisible();
+
+  const privateDownload = owner.waitForEvent("download");
+  await owner.getByRole("button", { name: "Export JSON", exact: true }).click();
+  const privateFile = await privateDownload;
+  const privateSnapshot = JSON.parse(
+    await readFile((await privateFile.path())!, "utf8")
+  );
+  expect(
+    privateSnapshot.notes.map((note: { text: string }) => note.text)
+  ).toEqual(["Teamwork was excellent"]);
+  expect(
+    await owner.evaluate(() =>
+      Object.values(localStorage).some((value) =>
+        value.includes("Reduce flaky tests")
+      )
+    )
+  ).toBe(false);
+  expect(
+    await guest.evaluate(() =>
+      Object.values(localStorage).some((value) =>
+        value.includes("Teamwork was excellent")
+      )
+    )
+  ).toBe(false);
+
   await owner
     .getByRole("button", { name: "Start voting", exact: true })
     .click();
@@ -234,6 +279,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await phaseConfirmation
     .getByRole("button", { name: "Confirm start voting", exact: true })
     .click();
+  await expect(
+    owner.getByText("Reduce flaky tests", { exact: true })
+  ).toBeVisible();
+  await expect(
+    guest.getByText("Teamwork was excellent", { exact: true })
+  ).toBeVisible();
   await expect(
     owner.getByRole("button", { name: /^Actions for note:/ })
   ).toHaveCount(0);

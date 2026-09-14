@@ -39,6 +39,37 @@ describe('room lifecycle and privacy', () => {
     expect(() => service.resume(other.code, owner.token)).toThrow('session');
   });
 
+  it('keeps writing private per participant and reveals every note on advance', () => {
+    add('Owner thought');
+    service.mutate(guest, {
+      type: 'add-note',
+      column: 'improve',
+      text: 'Guest thought',
+    });
+
+    expect(service.snapshot(owner).notes.map((note) => note.text)).toEqual([
+      'Owner thought',
+    ]);
+    expect(service.snapshot(guest).notes.map((note) => note.text)).toEqual([
+      'Guest thought',
+    ]);
+
+    service.disconnect(guest);
+    service.resume(guest.code, guest.token);
+    expect(service.snapshot(guest).notes.map((note) => note.text)).toEqual([
+      'Guest thought',
+    ]);
+
+    service.mutate(owner, { type: 'advance' });
+    const revealed = ['Owner thought', 'Guest thought'];
+    expect(service.snapshot(owner).notes.map((note) => note.text)).toEqual(
+      revealed,
+    );
+    expect(service.snapshot(guest).notes.map((note) => note.text)).toEqual(
+      revealed,
+    );
+  });
+
   it('reserves names and resumes disconnected members without extending expiry', () => {
     const expiresAt = service.snapshot(owner).expiresAt;
     service.disconnect(owner);

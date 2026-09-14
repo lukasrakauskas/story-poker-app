@@ -20,8 +20,11 @@ function escapeMarkdown(value: string): string {
     .replace(/\r\n?|\n/g, "<br>");
 }
 
-export function roomAsMarkdown(room: RetroRoom): string {
-  const snapshot = publicRetro(room);
+export function roomAsMarkdown(
+  room: RetroRoom,
+  viewerId?: string | null
+): string {
+  const snapshot = publicRetro(room, viewerId);
   const lines = [
     `# ${escapeMarkdown(snapshot.title)}`,
     "",
@@ -59,8 +62,8 @@ export function roomAsMarkdown(room: RetroRoom): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function roomAsText(room: RetroRoom): string {
-  const snapshot = publicRetro(room);
+export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
+  const snapshot = publicRetro(room, viewerId);
   const lines = [
     snapshot.title,
     `Room: ${snapshot.code} | Phase: ${snapshot.phase}`,

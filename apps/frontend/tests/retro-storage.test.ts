@@ -93,6 +93,49 @@ test("updates a single snapshot, stores final actions, and preserves separate ro
   assert.equal(storage.getItem(retroHistoryKey(closed)), null);
 });
 
+test("write-phase history and exports retain only the current participant's notes", () => {
+  const writing: RetroRoom = {
+    ...room,
+    phase: "write",
+    members: [
+      ...room.members,
+      { id: "bob", name: "Bob", moderator: false, connected: true },
+    ],
+    notes: [
+      room.notes[0],
+      {
+        id: "guest-note",
+        authorId: "bob",
+        text: "Guest private thought",
+        column: "ideas",
+        voterIds: [],
+      },
+    ],
+  };
+
+  assert.equal(saveRetroHistory(writing, "alice"), true);
+  const stored = storage.getItem(retroHistoryKey(writing))!;
+  assert.ok(stored.includes("Good teamwork"));
+  assert.ok(!stored.includes("Guest private thought"));
+  assert.ok(
+    !roomAsMarkdown(writing, "alice").includes("Guest private thought")
+  );
+  assert.deepEqual(publicRetro(writing).notes, []);
+
+  // Old write-phase entries did not record their audience, so fail closed
+  // rather than re-exposing notes that may have belonged to someone else.
+  storage.setItem(
+    retroHistoryKey(writing),
+    JSON.stringify({ version: 1, savedAt: 1, room: writing })
+  );
+  assert.deepEqual(readRetroHistory().entries[0].room.notes, []);
+  assert.ok(
+    !storage
+      .getItem(retroHistoryKey(writing))!
+      .includes("Guest private thought")
+  );
+});
+
 test("allowlists history and exports without retaining reconnect secrets", () => {
   const withSecrets = {
     ...room,

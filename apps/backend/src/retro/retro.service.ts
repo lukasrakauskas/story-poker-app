@@ -99,7 +99,13 @@ export class RetroService {
   }
 
   snapshot(session: RetroSession): RetroRoom {
-    const { room } = this.authorize(session);
+    const { room, member } = this.authorize(session);
+    // Writing is private even for moderators. Advancing to vote changes the
+    // phase before one broadcast reveals the complete board to everyone.
+    const notes =
+      room.phase === 'write'
+        ? room.notes.filter((note) => note.authorId === member.id)
+        : room.notes;
     // Explicitly exclude credentials, and never expose mutable internal state.
     return structuredClone({
       ...room,
@@ -109,6 +115,7 @@ export class RetroService {
         moderator,
         connected,
       })),
+      notes,
     });
   }
 

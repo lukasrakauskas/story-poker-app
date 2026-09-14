@@ -89,26 +89,48 @@ describe('retrospective WebSocket route', () => {
       event: 'retro-error',
       data: { code: 'invalid-session' },
     });
-    const guestNote = next(guest);
-    const withNote = state(
+    const guestPrivateUpdate = next(guest);
+    const withOwnerNote = state(
       await command(owner, {
         type: 'add-note',
         column: 'went-well',
         text: 'Teamwork',
       }),
     );
-    expect(state(await guestNote).room.notes[0].text).toBe('Teamwork');
+    expect(state(await guestPrivateUpdate).room.notes).toEqual([]);
     expect(
       await command(guest, {
         type: 'delete-note',
-        id: withNote.room.notes[0].id,
+        id: withOwnerNote.room.notes[0].id,
       }),
     ).toMatchObject({ event: 'retro-error', data: { code: 'forbidden' } });
-    await command(owner, { type: 'advance' });
+
+    const ownerPrivateUpdate = next(owner);
+    const withGuestNote = state(
+      await command(guest, {
+        type: 'add-note',
+        column: 'improve',
+        text: 'Fewer handoffs',
+      }),
+    );
+    expect(withGuestNote.room.notes.map((note) => note.text)).toEqual([
+      'Fewer handoffs',
+    ]);
+    expect(
+      state(await ownerPrivateUpdate).room.notes.map((note) => note.text),
+    ).toEqual(['Teamwork']);
+
+    const guestReveal = next(guest);
+    const revealed = state(await command(owner, { type: 'advance' }));
+    expect(revealed.room.notes.map((note) => note.text)).toEqual([
+      'Teamwork',
+      'Fewer handoffs',
+    ]);
+    expect(state(await guestReveal).room.notes).toEqual(revealed.room.notes);
     const voteReceived = next(owner);
     await command(guest, {
       type: 'toggle-vote',
-      id: withNote.room.notes[0].id,
+      id: withOwnerNote.room.notes[0].id,
     });
     expect(state(await voteReceived).room.notes[0].voterIds).toEqual([
       joined.self.id,

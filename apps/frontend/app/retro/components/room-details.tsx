@@ -62,8 +62,9 @@ export function RoomDetails({
         <CardHeader>
           <CardTitle>Invite your team</CardTitle>
           <CardDescription>
-            Anyone with the link can join and read all notes. This is not an
-            anonymous board.
+            Anyone with the link can join. Notes stay visible only to their
+            author while the team writes, then everyone sees the complete,
+            attributed board when voting starts.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -118,7 +119,7 @@ export function RoomDetails({
           </div>
         </CardContent>
       </Card>
-      <RetroExport room={room} />
+      <RetroExport room={room} selfId={selfId} />
     </div>
   );
 }

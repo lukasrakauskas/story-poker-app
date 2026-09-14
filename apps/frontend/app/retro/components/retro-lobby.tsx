@@ -37,8 +37,8 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
           Team retrospective
         </h1>
         <p className="text-muted-foreground">
-          Write together, vote on what matters, and turn your discussion into
-          actions.
+          Write privately, reveal together, vote on what matters, and turn your
+          discussion into actions.
         </p>
       </div>
       <Card>
@@ -71,8 +71,8 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
           </CardTitle>
           <CardDescription>
             {mode === "create"
-              ? "You’ll be the moderator and guide the team through each phase."
-              : "Enter the room code from your invitation. Everyone can see all notes."}
+              ? "You’ll be the moderator and guide the team from private writing through a shared reveal."
+              : "Enter the room code from your invitation. Writing stays private until the moderator starts voting and reveals every note."}
           </CardDescription>
         </CardHeader>
         <CardContent>
