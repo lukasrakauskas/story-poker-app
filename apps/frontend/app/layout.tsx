@@ -4,36 +4,11 @@ import { Analytics } from "@vercel/analytics/react";
 import Providers from "./providers";
 import { SiteHeader } from "../components/site-header";
 import { AVATARS } from "../lib/avatars";
-import { Metadata } from "next";
+import { createRootMetadata, getSiteOrigin } from "../lib/site-metadata";
 
 const inter = Inter({ subsets: ["latin"] });
 
-export const metadata: Metadata = {
-  title: "Story Poker",
-  description: "Create a planning room",
-  openGraph: {
-    type: "website",
-    url: "https://story-poker.rake.lt",
-    title: "Story Poker",
-    description: "Create or join a planning room",
-    siteName: "Story Poker",
-    images: [
-      {
-        url: "/og",
-      },
-    ],
-  },
-  twitter: {
-    title: "Story Poker",
-    description: "Create or join a planning room",
-    card: "summary_large_image",
-    images: [
-      {
-        url: "/og",
-      },
-    ],
-  },
-};
+export const metadata = createRootMetadata(getSiteOrigin());
 
 export default async function RootLayout({
   children,
