@@ -1,11 +1,23 @@
-export type User = {
+import type { CollaborationParticipant } from '../collaboration/participant.service.js';
+
+export type User = CollaborationParticipant & {
+  vote: string | null;
+  avatar: number | null;
+};
+
+export type ClientUser = {
   id: string;
   name: string;
-  vote: string | null;
   role: 'user' | 'mod';
-  token: string;
   status: 'connected' | 'disconnected';
   avatar: number | null;
+  voted: boolean;
+  vote?: string | null;
+};
+
+export type SelfUser = ClientUser & {
+  token: string;
+  vote: string | null;
 };
 
 export interface Room {
@@ -16,11 +28,6 @@ export interface Room {
   results: Record<string, number>;
   password: string | null;
 }
-
-export type ClientUser = Omit<User, 'vote' | 'token'> & {
-  voted: boolean;
-  vote?: string | null;
-};
 
 export type RoomError = {
   event:

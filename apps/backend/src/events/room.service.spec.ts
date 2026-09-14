@@ -1,9 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   EMPTY_ROOM_RETENTION_MS,
   OFFLINE_USER_RETENTION_MS,
   RoomService,
 } from './room.service.js';
+import { ParticipantService } from '../collaboration/participant.service.js';
+import { RetentionService } from '../collaboration/retention.service.js';
+import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { UserService } from './user.service.js';
 import type { RoomResult } from './events.types.js';
 
@@ -15,8 +18,15 @@ function success<T>(result: RoomResult<T>): T {
 
 let rooms: RoomService;
 beforeEach(() => {
-  rooms = new RoomService(new UserService());
+  const participants = new ParticipantService();
+  rooms = new RoomService(
+    new UserService(participants),
+    participants,
+    new RoomRegistryService(),
+    new RetentionService(),
+  );
 });
+afterEach(() => rooms.onModuleDestroy());
 
 describe('RoomService', () => {
   it('does not share mutable card sets between rooms or with callers', () => {
@@ -32,13 +42,11 @@ describe('RoomService', () => {
 
   it('keeps disconnected names reserved and restores membership by token', () => {
     const { room, user } = success(rooms.create('one', 'Alice'));
-    expect(rooms.disconnect(room.code, user.id)?.user.status).toBe(
-      'disconnected',
-    );
+    expect(rooms.disconnect(room.code, user.id)?.user.connected).toBe(false);
     expect(rooms.join(room.code, 'two', 'Alice')).toEqual({
       error: { event: 'name-taken', data: null },
     });
-    expect(success(rooms.reconnect(user.token)).user.status).toBe('connected');
+    expect(success(rooms.reconnect(user.token)).user.connected).toBe(true);
     expect(room.users).toHaveLength(1);
     expect(rooms.disconnect(room.code, 'unknown')).toBeUndefined();
     expect(rooms.disconnect('missing', user.id)).toBeUndefined();
@@ -163,7 +171,7 @@ describe('RoomService', () => {
       error: { event: 'user-not-mod', data: null },
     });
     success(rooms.promoteUser(room.code, owner.id, guest.id));
-    expect(guest.role).toBe('mod');
+    expect(guest.role).toBe('moderator');
     expect(rooms.kickUser(room.code, guest.id, guest.id)).toEqual({
       error: { event: 'cannot-kick-self', data: null },
     });
@@ -196,7 +204,7 @@ describe('RoomService', () => {
     expect(success(rooms.claimModerator(room.code, claimant.id)).user).toBe(
       claimant,
     );
-    expect(claimant.role).toBe('mod');
+    expect(claimant.role).toBe('moderator');
     expect(success(rooms.claimModerator(room.code, claimant.id)).user).toBe(
       claimant,
     );
@@ -289,7 +297,7 @@ describe('RoomService', () => {
       success(rooms.reconnect(guest.token, room.code));
       vi.advanceTimersByTime(OFFLINE_USER_RETENTION_MS);
       expect(room.users).toContain(guest);
-      expect(guest.status).toBe('connected');
+      expect(guest.connected).toBe(true);
       expect(expired).not.toHaveBeenCalled();
     } finally {
       rooms.onModuleDestroy();

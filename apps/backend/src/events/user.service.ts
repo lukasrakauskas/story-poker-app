@@ -1,47 +1,48 @@
 import { Injectable } from '@nestjs/common';
-import { nanoid } from 'nanoid';
-import { omit } from 'radash';
-import { z } from 'zod';
-import type { ClientUser, User } from './events.types.js';
-
-const usernameSchema = z
-  .string()
-  .trim()
-  .min(3, 'Name must be at least 3 characters after trimming spaces')
-  .max(30, 'Name must be at most 30 characters after trimming spaces');
+import { ParticipantService } from '../collaboration/participant.service.js';
+import type { ClientUser, SelfUser, User } from './events.types.js';
 
 @Injectable()
 export class UserService {
+  constructor(private readonly participants: ParticipantService) {}
+
   normalizeName(name: string) {
-    return typeof name === 'string' ? name.trim() : '';
+    return this.participants.normalizeName(name);
   }
 
   validateName(name: string): string | null {
-    const parsed = usernameSchema.safeParse(name);
-    return parsed.success ? null : parsed.error.format()._errors.join(', ');
+    return this.participants.validateName(name);
   }
 
-  create(id: string, name: string, role: User['role'] = 'user'): User {
+  create(id: string, name: string, role: 'user' | 'mod' = 'user'): User {
     return {
-      id,
-      name: this.normalizeName(name),
-      role,
+      ...this.participants.create(
+        name,
+        role === 'mod' ? 'moderator' : 'participant',
+        id,
+      ),
       vote: null,
-      token: nanoid(32),
-      status: 'connected',
       avatar: null,
     };
   }
 
   toPublic(user: User, revealVote = false): ClientUser {
     return {
-      ...omit(user, ['token', 'vote']),
-      ...(revealVote ? { vote: user.vote } : {}),
+      id: user.id,
+      name: user.name,
+      role: user.role === 'moderator' ? 'mod' : 'user',
+      status: user.connected ? 'connected' : 'disconnected',
+      avatar: user.avatar,
       voted: user.vote !== null,
+      ...(revealVote ? { vote: user.vote } : {}),
     };
   }
 
-  toSelf(user: User) {
-    return { ...user, voted: user.vote !== null };
+  toSelf(user: User): SelfUser {
+    return {
+      ...this.toPublic(user, true),
+      token: user.token,
+      vote: user.vote,
+    };
   }
 }

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Test } from '@nestjs/testing';
 import { type Server, WebSocket } from 'ws';
+import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
+import { ParticipantService } from '../collaboration/participant.service.js';
+import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { RetroGateway } from './retro.gateway.js';
+import { RetroModule } from './retro.module.js';
 import { RETRO_LIFETIME_MS, RetroService } from './retro.service.js';
 
 let gateway: RetroGateway;
@@ -22,8 +27,11 @@ function latest(client: WebSocket) {
 }
 beforeEach(() => {
   vi.useFakeTimers();
-  service = new RetroService();
-  gateway = new RetroGateway(service);
+  service = new RetroService(
+    new ParticipantService(),
+    new RoomRegistryService(),
+  );
+  gateway = new RetroGateway(service, new ConnectionRegistryService());
 });
 afterEach(() => {
   gateway.onModuleDestroy();
@@ -31,6 +39,21 @@ afterEach(() => {
 });
 
 describe('RetroGateway', () => {
+  it('uses collaboration services through RetroModule dependency injection', async () => {
+    const testingModule = await Test.createTestingModule({
+      imports: [RetroModule],
+    }).compile();
+    expect(testingModule.get(RetroGateway)).toBeInstanceOf(RetroGateway);
+    expect(testingModule.get(RetroService)).toBeInstanceOf(RetroService);
+    expect(testingModule.get(ParticipantService)).toBeInstanceOf(
+      ParticipantService,
+    );
+    expect(testingModule.get(RoomRegistryService)).toBeInstanceOf(
+      RoomRegistryService,
+    );
+    await testingModule.close();
+  });
+
   it('acknowledges only the requesting socket, including rejected commands', () => {
     const owner = socket();
     const guest = socket();

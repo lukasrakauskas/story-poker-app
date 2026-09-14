@@ -1,5 +1,7 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
-import { nanoid } from 'nanoid';
+import { ParticipantService } from '../collaboration/participant.service.js';
+import { RetentionService } from '../collaboration/retention.service.js';
+import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { UserService } from './user.service.js';
 import type { Room, RoomResult, User, ClientUser } from './events.types.js';
 
@@ -28,23 +30,23 @@ export const EMPTY_ROOM_RETENTION_MS = 15 * 60 * 1000;
 export const OFFLINE_USER_RETENTION_MS = 5 * 60 * 1000;
 
 type Membership = { room: Room; user: User };
-type Expiration = {
-  inactiveSince: number;
-  timer: ReturnType<typeof setTimeout>;
-};
 type UserExpiredListener = (room: Room, user: User) => void;
+
+const ROOM_NAMESPACE = 'poker';
 
 @Injectable()
 export class RoomService implements OnModuleDestroy {
-  private readonly rooms = new Map<string, Room>();
-  private readonly expirations = new Map<string, Expiration>();
-  private readonly userExpirations = new Map<User, Expiration>();
   private readonly userExpiredListeners = new Set<UserExpiredListener>();
 
-  constructor(private readonly users: UserService) {}
+  constructor(
+    private readonly users: UserService,
+    private readonly participants: ParticipantService,
+    private readonly registry: RoomRegistryService,
+    private readonly retention: RetentionService,
+  ) {}
 
   get(code: string) {
-    return this.rooms.get(code);
+    return this.registry.get<Room>(ROOM_NAMESPACE, code);
   }
 
   onUserExpired(listener: UserExpiredListener) {
@@ -53,14 +55,7 @@ export class RoomService implements OnModuleDestroy {
   }
 
   onModuleDestroy() {
-    for (const expiration of [
-      ...this.expirations.values(),
-      ...this.userExpirations.values(),
-    ]) {
-      clearTimeout(expiration.timer);
-    }
-    this.expirations.clear();
-    this.userExpirations.clear();
+    this.retention.clear(ROOM_NAMESPACE);
     this.userExpiredListeners.clear();
   }
 
@@ -88,15 +83,19 @@ export class RoomService implements OnModuleDestroy {
     }
 
     const user = this.users.create(id, normalizedName, 'mod');
-    const room: Room = {
-      code: nanoid(7),
-      users: [user],
-      state: 'voting',
-      cardSet: normalizedCards,
-      results: {},
-      password: password || null,
-    };
-    this.rooms.set(room.code, room);
+    const room = this.registry.register<Room>(
+      ROOM_NAMESPACE,
+      { codeLength: 7 },
+      (code) => ({
+        code,
+        users: [user],
+        state: 'voting',
+        cardSet: normalizedCards,
+        results: {},
+        password: password || null,
+      }),
+    );
+    if (!room) throw new Error('Poker room registry rejected creation');
     return { room, user };
   }
 
@@ -116,7 +115,7 @@ export class RoomService implements OnModuleDestroy {
     if (nameError) {
       return { error: { event: 'bad-username', data: { error: nameError } } };
     }
-    if (room.users.some((user) => user.name === normalizedName)) {
+    if (this.participants.isNameTaken(room.users, normalizedName)) {
       return { error: { event: 'name-taken', data: null } };
     }
 
@@ -132,11 +131,14 @@ export class RoomService implements OnModuleDestroy {
       ? requestedRoom
         ? [requestedRoom]
         : []
-      : this.rooms.values();
+      : Array.from(
+          this.registry.entries<Room>(ROOM_NAMESPACE),
+          ([, room]) => room,
+        );
     for (const room of candidateRooms) {
-      const user = room.users.find((candidate) => candidate.token === token);
+      const user = this.participants.findByToken(room.users, token);
       if (user) {
-        user.status = 'connected';
+        this.participants.reconnect(user);
         this.cancelUserExpiration(user);
         this.cancelExpiration(room.code);
         return { room, user };
@@ -147,12 +149,14 @@ export class RoomService implements OnModuleDestroy {
 
   disconnect(code: string, id: string): Membership | undefined {
     const membership = this.findMember(code, id);
-    if ('error' in membership || membership.user.status === 'disconnected') {
+    if (
+      'error' in membership ||
+      !this.participants.disconnect(membership.user)
+    ) {
       return;
     }
-    membership.user.status = 'disconnected';
     this.scheduleUserExpiration(membership.room, membership.user);
-    if (membership.room.users.every((user) => user.status === 'disconnected')) {
+    if (membership.room.users.every((user) => !user.connected)) {
       this.scheduleExpiration(membership.room);
     }
     return membership;
@@ -187,7 +191,7 @@ export class RoomService implements OnModuleDestroy {
     const membership = this.findMember(code, id);
     if ('error' in membership) return membership;
     const { room, user } = membership;
-    if (user.role !== 'mod') {
+    if (user.role !== 'moderator') {
       return { error: { event: 'user-not-mod', data: null } };
     }
 
@@ -196,7 +200,7 @@ export class RoomService implements OnModuleDestroy {
     // uses that same set. An offline vote remains on the user for reconnects,
     // but is included only if that participant reconnects before reveal.
     for (const participant of room.users) {
-      if (participant.status === 'connected' && participant.vote !== null) {
+      if (participant.connected && participant.vote !== null) {
         counts.set(participant.vote, (counts.get(participant.vote) ?? 0) + 1);
       }
     }
@@ -215,7 +219,7 @@ export class RoomService implements OnModuleDestroy {
   startVoting(code: string, id: string): RoomResult<Membership> {
     const membership = this.findMember(code, id);
     if ('error' in membership) return membership;
-    if (membership.user.role !== 'mod') {
+    if (membership.user.role !== 'moderator') {
       return { error: { event: 'user-not-mod', data: null } };
     }
 
@@ -228,16 +232,16 @@ export class RoomService implements OnModuleDestroy {
   claimModerator(code: string, id: string): RoomResult<Membership> {
     const membership = this.findMember(code, id);
     if ('error' in membership) return membership;
-    if (membership.user.role === 'mod') return membership;
     if (
-      membership.room.users.some(
-        (user) => user.role === 'mod' && user.status === 'connected',
+      !this.participants.canClaimModerator(
+        membership.room.users,
+        membership.user,
       )
     ) {
       return { error: { event: 'moderator-online', data: null } };
     }
 
-    membership.user.role = 'mod';
+    this.participants.promote(membership.user);
     return membership;
   }
 
@@ -255,7 +259,7 @@ export class RoomService implements OnModuleDestroy {
       return { error: { event: 'target-user-not-found', data: null } };
     }
 
-    user.role = 'mod';
+    this.participants.promote(user);
     return { room: membership.room, user };
   }
 
@@ -276,10 +280,10 @@ export class RoomService implements OnModuleDestroy {
     if (!user) {
       return { error: { event: 'target-user-not-found', data: null } };
     }
+    this.cancelUserExpiration(user);
     membership.room.users = membership.room.users.filter(
       (candidate) => candidate.id !== userId,
     );
-    this.cancelUserExpiration(user);
     return { room: membership.room, user };
   }
 
@@ -324,7 +328,7 @@ export class RoomService implements OnModuleDestroy {
   private findModerator(code: string, id: string): RoomResult<Membership> {
     const membership = this.findMember(code, id);
     if ('error' in membership) return membership;
-    if (membership.user.role !== 'mod') {
+    if (membership.user.role !== 'moderator') {
       return { error: { event: 'user-not-mod', data: null } };
     }
     return membership;
@@ -352,61 +356,61 @@ export class RoomService implements OnModuleDestroy {
   }
 
   private scheduleUserExpiration(room: Room, user: User) {
-    this.cancelUserExpiration(user);
-    const inactiveSince = Date.now();
-    const timer = setTimeout(() => {
-      const expiration = this.userExpirations.get(user);
-      if (expiration?.inactiveSince !== inactiveSince) return;
-      this.userExpirations.delete(user);
-
-      const current = this.rooms.get(room.code);
-      if (
-        current !== room ||
-        user.status !== 'disconnected' ||
-        !current.users.includes(user)
-      ) {
-        return;
-      }
-      current.users = current.users.filter(
-        (participant) => participant !== user,
-      );
-      for (const listener of this.userExpiredListeners) listener(current, user);
-    }, OFFLINE_USER_RETENTION_MS);
-    timer.unref?.();
-    this.userExpirations.set(user, { inactiveSince, timer });
+    this.retention.schedule(
+      ROOM_NAMESPACE,
+      this.userRetentionKey(room.code, user.id),
+      OFFLINE_USER_RETENTION_MS,
+      () => {
+        const current = this.get(room.code);
+        if (
+          current !== room ||
+          user.connected ||
+          !current.users.includes(user)
+        ) {
+          return;
+        }
+        current.users = current.users.filter(
+          (participant) => participant !== user,
+        );
+        for (const listener of this.userExpiredListeners)
+          listener(current, user);
+      },
+    );
   }
 
   private cancelUserExpiration(user: User) {
-    const expiration = this.userExpirations.get(user);
-    if (!expiration) return;
-    clearTimeout(expiration.timer);
-    this.userExpirations.delete(user);
+    for (const [code, room] of this.registry.entries<Room>(ROOM_NAMESPACE)) {
+      if (!room.users.includes(user)) continue;
+      this.retention.cancel(
+        ROOM_NAMESPACE,
+        this.userRetentionKey(code, user.id),
+      );
+      return;
+    }
   }
 
   private scheduleExpiration(room: Room) {
-    this.cancelExpiration(room.code);
-    const inactiveSince = Date.now();
-    const timer = setTimeout(() => {
-      const expiration = this.expirations.get(room.code);
-      if (expiration?.inactiveSince !== inactiveSince) return;
-
-      const current = this.rooms.get(room.code);
-      if (
-        current === room &&
-        current.users.every((user) => user.status === 'disconnected')
-      ) {
-        this.rooms.delete(room.code);
-      }
-      this.expirations.delete(room.code);
-    }, EMPTY_ROOM_RETENTION_MS);
-    timer.unref?.();
-    this.expirations.set(room.code, { inactiveSince, timer });
+    this.retention.schedule(
+      ROOM_NAMESPACE,
+      this.roomRetentionKey(room.code),
+      EMPTY_ROOM_RETENTION_MS,
+      () => {
+        const current = this.get(room.code);
+        if (current === room && current.users.every((user) => !user.connected))
+          this.registry.delete(ROOM_NAMESPACE, room.code);
+      },
+    );
   }
 
   private cancelExpiration(code: string) {
-    const expiration = this.expirations.get(code);
-    if (!expiration) return;
-    clearTimeout(expiration.timer);
-    this.expirations.delete(code);
+    this.retention.cancel(ROOM_NAMESPACE, this.roomRetentionKey(code));
+  }
+
+  private roomRetentionKey(code: string) {
+    return `room:${code}`;
+  }
+
+  private userRetentionKey(code: string, userId: string) {
+    return `participant:${code}:${userId}`;
   }
 }

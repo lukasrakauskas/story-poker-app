@@ -10,12 +10,15 @@ import {
 } from '@nestjs/websockets';
 import { WebSocket, type Server } from 'ws';
 import type { RetroServerEvent } from 'shared/retrospective';
+import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import {
   RetroError,
   RetroService,
   type RetroSession,
 } from './retro.service.js';
 import { retroCommandSchema } from './retro.schema.js';
+
+const CONNECTION_NAMESPACE = 'retro';
 
 @WebSocketGateway({ path: '/retro', maxPayload: 16 * 1024 })
 export class RetroGateway
@@ -33,10 +36,13 @@ export class RetroGateway
   private readonly alive = new WeakSet<WebSocket>();
   private cleanup?: ReturnType<typeof setInterval>;
 
-  constructor(private readonly retros: RetroService) {}
+  constructor(
+    private readonly retros: RetroService,
+    private readonly connections: ConnectionRegistryService,
+  ) {}
 
   afterInit(server: Server) {
-    this.onModuleDestroy();
+    this.stopCleanup();
     this.cleanup = setInterval(() => {
       this.expireRooms();
       for (const socket of server.clients) {
@@ -51,8 +57,8 @@ export class RetroGateway
   }
 
   onModuleDestroy() {
-    if (this.cleanup) clearInterval(this.cleanup);
-    this.cleanup = undefined;
+    this.stopCleanup();
+    this.connections.clear(CONNECTION_NAMESPACE);
   }
 
   handleConnection(socket: WebSocket) {
@@ -64,6 +70,12 @@ export class RetroGateway
     const session = this.sessions.get(socket);
     this.sessions.delete(socket);
     if (!session) return;
+    this.connections.release(
+      CONNECTION_NAMESPACE,
+      session.code,
+      session.id,
+      socket,
+    );
     this.retros.disconnect(session);
     this.broadcast(session.code);
   }
@@ -110,21 +122,22 @@ export class RetroGateway
         else session = this.retros.resume(command.code, command.token);
         // A resumed identity belongs to one live socket. The old socket cannot
         // mutate state or mark the replacement disconnected when it closes.
-        for (const [previous, previousSession] of this.sessions) {
-          if (
-            previousSession.code === session.code &&
-            previousSession.id === session.id
-          ) {
-            this.sessions.delete(previous);
-            this.sendError(
-              previous,
-              new RetroError(
-                'invalid-session',
-                'Your session was resumed in another connection.',
-              ),
-            );
-            previous.close(4001, 'Session replaced');
-          }
+        const previous = this.connections.replace(
+          CONNECTION_NAMESPACE,
+          session.code,
+          session.id,
+          socket,
+        );
+        if (previous) {
+          this.sessions.delete(previous);
+          this.sendError(
+            previous,
+            new RetroError(
+              'invalid-session',
+              'Your session was resumed in another connection.',
+            ),
+          );
+          previous.close(4001, 'Session replaced');
         }
         this.sessions.set(socket, session);
       } else {
@@ -148,6 +161,12 @@ export class RetroGateway
     for (const [socket, session] of this.sessions) {
       if (this.retros.isExpired(session.code)) {
         this.sessions.delete(socket);
+        this.connections.release(
+          CONNECTION_NAMESPACE,
+          session.code,
+          session.id,
+          socket,
+        );
         this.sendError(
           socket,
           new RetroError(
@@ -174,9 +193,20 @@ export class RetroGateway
       } catch (error) {
         if (!(error instanceof RetroError)) throw error;
         this.sessions.delete(socket);
+        this.connections.release(
+          CONNECTION_NAMESPACE,
+          session.code,
+          session.id,
+          socket,
+        );
         this.sendError(socket, error);
       }
     }
+  }
+
+  private stopCleanup() {
+    if (this.cleanup) clearInterval(this.cleanup);
+    this.cleanup = undefined;
   }
 
   private sendError(socket: WebSocket, error: RetroError, requestId?: string) {

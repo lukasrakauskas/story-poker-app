@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { ParticipantService } from '../collaboration/participant.service.js';
 import { UserService } from './user.service.js';
 
-const users = new UserService();
+const users = new UserService(new ParticipantService());
 
 describe('UserService', () => {
   it.each([3, 30])('accepts a name of length %i', (length) => {
@@ -25,8 +26,8 @@ describe('UserService', () => {
     expect(user).toMatchObject({
       id: 'one',
       name: 'Alice',
-      role: 'user',
-      status: 'connected',
+      role: 'participant',
+      connected: true,
       vote: null,
     });
     expect(user.token).toHaveLength(32);
@@ -41,7 +42,16 @@ describe('UserService', () => {
     expect(hidden).not.toHaveProperty('vote');
     expect(hidden).not.toHaveProperty('token');
     expect(users.toPublic(user, true)).toEqual({ ...hidden, vote: '0' });
-    expect(users.toSelf(user)).toEqual({ ...user, voted: true });
+    expect(users.toSelf(user)).toEqual({
+      id: 'one',
+      name: 'Alice',
+      role: 'user',
+      status: 'connected',
+      avatar: null,
+      voted: true,
+      vote: '0',
+      token: user.token,
+    });
     expect(user.vote).toBe('0');
     expect(user.token).toHaveLength(32);
   });

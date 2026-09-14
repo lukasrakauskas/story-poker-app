@@ -18,7 +18,7 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 
 ## Lifetime and limitations
 
-- Live collaboration still exists **only in backend process memory**. There is no server database or disk persistence. Each participating browser separately saves token-free snapshots in localStorage.
+- Live collaboration still exists **only in backend process memory**. The domain-neutral collaboration registry is shared in code by Poker and Retro, but there is no server database or disk persistence. Each participating browser separately saves token-free snapshots in localStorage.
 - Rooms expire **two hours after creation**, even if active. Expired rooms reject commands immediately and are swept every 30 seconds. A server restart loses all rooms.
 - Reconnection credentials are stored in one host-only cookie per room (`retro-session-<code>`, `Path=/retro`, `SameSite=Lax`, `Secure` on HTTPS). Cookies expire with the room, not with the tab, and are never stored in localStorage. Reopening the room link restores the same identity, note ownership, votes, and moderator access while the live room exists. Joining a remembered room by code also resumes that identity.
 - Cookies are JavaScript-readable, **not HttpOnly**: the existing WebSocket protocol explicitly sends the credential in a resume command rather than authenticating through HTTP cookies. This is not an XSS-hardening change. Invalid/expired credentials are cleared; rejected resumes do not silently create a new identity. Opening the same room in another tab moves the live connection to that tab without deleting its shared cookie.
@@ -30,7 +30,8 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 ## Implementation
 
 - `packages/shared/retrospective.ts`: client/server protocol types.
-- `apps/backend/src/retro`: command validation, in-memory service, WebSocket transport and cleanup.
+- `apps/backend/src/collaboration`: domain-neutral participant identity, normalized-name validation, roles, presence, reconnect tokens, connection replacement, room registration, and configurable retention scheduling.
+- `apps/backend/src/retro`: retrospective notes/phases/actions, fixed two-hour expiry policy, command handling, WebSocket transport, and cleanup; `RetroModule` imports the dedicated `CollaborationModule`.
 - `apps/frontend/app/retro`: retrospective routes and UI, including the responsive room status card.
 - `apps/frontend/hooks/use-retro-socket.ts`: isolated connection, cookie resume lifecycle, and snapshot persistence.
 - `apps/frontend/lib/retro-session.ts`: expiring cookie helpers.
@@ -61,4 +62,4 @@ bunx playwright install chromium
 bun run test:e2e
 ```
 
-The WebSocket end-to-end tests exercise real clients, room broadcasts, private credentials, permissions, reconnect replacement, and coexistence with the original poker endpoint. Service/gateway unit tests cover phase transitions, voting budgets, validation, resource limits, expiry, and heartbeat cleanup. Bun frontend unit tests cover history updates, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, connected/disconnected/expiring/storage-failure status, responsive status placement, and dark mode.
+The WebSocket end-to-end tests exercise real clients, room broadcasts, private credentials, permissions, shared reconnect replacement, and coexistence with the original poker endpoint. Cross-domain contract tests prove that Poker and Retro receive the same normalized-name, unique-name, role, token, disconnect, and resume guarantees. Service/gateway unit tests cover phase transitions, voting budgets, validation, resource limits, domain-specific retention/expiry, and heartbeat cleanup. Bun frontend unit tests cover history updates, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, connected/disconnected/expiring/storage-failure status, responsive status placement, and dark mode.

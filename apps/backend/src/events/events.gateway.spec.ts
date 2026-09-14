@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
+import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
+import { ParticipantService } from '../collaboration/participant.service.js';
+import { RetentionService } from '../collaboration/retention.service.js';
+import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { EventsModule } from './events.module.js';
 import { OFFLINE_USER_RETENTION_MS, RoomService } from './room.service.js';
 import { UserService } from './user.service.js';
@@ -12,6 +16,7 @@ let gateway: EventsGateway;
 let rooms: RoomService;
 let clients: Set<Client>;
 let config: ConfigService;
+let connections: ConnectionRegistryService;
 
 function client(id: string) {
   const socket = {
@@ -48,9 +53,16 @@ function messages(socket: Client) {
 beforeEach(() => {
   clients = new Set();
   config = new ConfigService();
-  const users = new UserService();
-  rooms = new RoomService(users);
-  gateway = new EventsGateway(config, rooms, users);
+  const participants = new ParticipantService();
+  const users = new UserService(participants);
+  connections = new ConnectionRegistryService();
+  rooms = new RoomService(
+    users,
+    participants,
+    new RoomRegistryService(),
+    new RetentionService(),
+  );
+  gateway = new EventsGateway(config, rooms, users, connections);
   gateway.server = { clients } as typeof gateway.server;
 });
 
@@ -68,6 +80,12 @@ it('wires gateway services through Nest dependency injection', async () => {
   expect(testingModule.get(EventsGateway)).toBeInstanceOf(EventsGateway);
   expect(testingModule.get(RoomService)).toBeInstanceOf(RoomService);
   expect(testingModule.get(UserService)).toBeInstanceOf(UserService);
+  expect(testingModule.get(ParticipantService)).toBeInstanceOf(
+    ParticipantService,
+  );
+  expect(testingModule.get(RoomRegistryService)).toBeInstanceOf(
+    RoomRegistryService,
+  );
   await testingModule.close();
 });
 

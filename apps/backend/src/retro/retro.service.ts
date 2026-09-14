@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type {
-  RetroCommand,
-  RetroMember,
-  RetroRoom,
-} from 'shared/retrospective';
+import type { RetroCommand, RetroRoom } from 'shared/retrospective';
+import {
+  ParticipantService,
+  type CollaborationParticipant,
+  type CollaborationRole,
+} from '../collaboration/participant.service.js';
+import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 
 export const RETRO_LIFETIME_MS = 2 * 60 * 60 * 1000;
 const MAX_ROOMS = 100;
@@ -27,75 +29,82 @@ export interface RetroSession {
   token: string;
 }
 type StoredRoom = Omit<RetroRoom, 'members'> & {
-  members: (RetroMember & { token: string })[];
+  members: CollaborationParticipant[];
 };
 type Mutation = Exclude<RetroCommand, { type: 'create' | 'join' | 'resume' }>;
 
+const ROOM_NAMESPACE = 'retro';
+
 @Injectable()
 export class RetroService {
-  private readonly rooms = new Map<string, StoredRoom>();
+  constructor(
+    private readonly participants: ParticipantService,
+    private readonly registry: RoomRegistryService,
+  ) {}
 
   create(name: string, title: string): RetroSession {
     this.sweep();
-    if (this.rooms.size >= MAX_ROOMS)
+    if (this.registry.size(ROOM_NAMESPACE) >= MAX_ROOMS)
       throw new RetroError(
         'capacity',
         'All retrospective rooms are in use. Try again later.',
       );
-    const member = this.member(name, true);
-    let code: string;
-    do {
-      code = nanoid(10);
-    } while (this.rooms.has(code));
-    this.rooms.set(code, {
-      code,
-      title,
-      phase: 'write',
-      expiresAt: Date.now() + RETRO_LIFETIME_MS,
-      members: [member],
-      notes: [],
-      actions: [],
-    });
-    return { code, id: member.id, token: member.token };
+    const member = this.createParticipant(name, 'moderator');
+    const room = this.registry.register<StoredRoom>(
+      ROOM_NAMESPACE,
+      { codeLength: 10, maxRooms: MAX_ROOMS },
+      (code) => ({
+        code,
+        title,
+        phase: 'write',
+        expiresAt: Date.now() + RETRO_LIFETIME_MS,
+        members: [member],
+        notes: [],
+        actions: [],
+      }),
+    );
+    if (!room)
+      throw new RetroError(
+        'capacity',
+        'All retrospective rooms are in use. Try again later.',
+      );
+    return { code: room.code, id: member.id, token: member.token };
   }
 
   join(code: string, name: string): RetroSession {
     const room = this.room(code);
     if (room.members.length >= MAX_MEMBERS)
       throw new RetroError('capacity', 'This room is full (30 people).');
-    if (
-      room.members.some(
-        (member) => member.name.toLowerCase() === name.toLowerCase(),
-      )
-    ) {
+    const normalizedName = this.validName(name);
+    if (this.participants.isNameTaken(room.members, normalizedName)) {
       throw new RetroError(
         'name-taken',
         'That name is already in use. Choose another name.',
       );
     }
-    const member = this.member(name, false);
+    const member = this.participants.create(normalizedName);
     room.members.push(member);
     return { code, id: member.id, token: member.token };
   }
 
   resume(code: string, token: string): RetroSession {
     const room = this.room(code);
-    const member = room.members.find((member) => member.token === token);
+    const member = this.participants.findByToken(room.members, token);
     if (!member)
       throw new RetroError(
         'invalid-session',
         'This session is no longer available. Join again.',
       );
-    member.connected = true;
+    this.participants.reconnect(member);
     return { code, id: member.id, token };
   }
 
   disconnect(session: RetroSession) {
-    const room = this.rooms.get(session.code);
+    const room = this.registry.get<StoredRoom>(ROOM_NAMESPACE, session.code);
     const member = room?.members.find(
       (member) => member.id === session.id && member.token === session.token,
     );
-    if (member) member.connected = false;
+    if (member) this.participants.disconnect(member);
   }
 
   snapshot(session: RetroSession): RetroRoom {
@@ -109,10 +118,10 @@ export class RetroService {
     // Explicitly exclude credentials, and never expose mutable internal state.
     return structuredClone({
       ...room,
-      members: room.members.map(({ id, name, moderator, connected }) => ({
+      members: room.members.map(({ id, name, role, connected }) => ({
         id,
         name,
-        moderator,
+        moderator: role === 'moderator',
         connected,
       })),
       notes,
@@ -215,22 +224,21 @@ export class RetroService {
   }
 
   isExpired(code: string): boolean {
-    return (this.rooms.get(code)?.expiresAt ?? 0) <= Date.now();
+    return (
+      (this.registry.get<StoredRoom>(ROOM_NAMESPACE, code)?.expiresAt ?? 0) <=
+      Date.now()
+    );
   }
 
   sweep(): string[] {
-    const expired: string[] = [];
-    for (const [code, room] of this.rooms) {
-      if (room.expiresAt <= Date.now()) {
-        this.rooms.delete(code);
-        expired.push(code);
-      }
-    }
-    return expired;
+    return this.registry.sweep<StoredRoom>(
+      ROOM_NAMESPACE,
+      (room) => room.expiresAt <= Date.now(),
+    );
   }
 
   private room(code: string): StoredRoom {
-    const room = this.rooms.get(code);
+    const room = this.registry.get<StoredRoom>(ROOM_NAMESPACE, code);
     if (!room || room.expiresAt <= Date.now()) {
       // The periodic sweep owns deletion so it can notify all attached sockets.
       throw new RetroError(
@@ -254,18 +262,19 @@ export class RetroService {
     return { room, member };
   }
 
-  private member(name: string, moderator: boolean) {
-    return {
-      id: nanoid(),
-      token: nanoid(32),
-      name,
-      moderator,
-      connected: true,
-    };
+  private createParticipant(name: string, role: CollaborationRole) {
+    return this.participants.create(this.validName(name), role);
   }
 
-  private requireModerator(member: RetroMember) {
-    if (!member.moderator)
+  private validName(name: string) {
+    const normalized = this.participants.normalizeName(name);
+    const error = this.participants.validateName(normalized);
+    if (error) throw new RetroError('invalid-command', error);
+    return normalized;
+  }
+
+  private requireModerator(member: CollaborationParticipant) {
+    if (member.role !== 'moderator')
       throw new RetroError('forbidden', 'Only the moderator can do that.');
   }
 
