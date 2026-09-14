@@ -23,12 +23,23 @@ export function UserAuthForm({
   const pathname = usePathname();
   const { state } = usePlanning();
   const [name, setName] = React.useState("");
+  const [nameError, setNameError] = React.useState("");
   const [password, setPassword] = React.useState("");
 
   const { createRoom, joinRoom, roomCode } = usePlanning();
 
   async function onSubmit(event: React.SyntheticEvent) {
     event.preventDefault();
+    const normalizedName = name.trim();
+    if (normalizedName.length < 3 || normalizedName.length > 30) {
+      setNameError(
+        "Name must be 3 to 30 characters after surrounding spaces are removed."
+      );
+      return;
+    }
+    setName(normalizedName);
+    setNameError("");
+
     const url = new URL(window.location.href);
     const cardSet =
       url.searchParams
@@ -38,9 +49,9 @@ export function UserAuthForm({
         .filter(Boolean) ?? [];
 
     if (!roomCode) {
-      createRoom(name, cardSet, password);
+      createRoom(normalizedName, cardSet, password);
     } else {
-      joinRoom(name, roomCode, password);
+      joinRoom(normalizedName, roomCode, password);
     }
   }
 
@@ -54,22 +65,36 @@ export function UserAuthForm({
 
   return (
     <div className={cn("grid gap-6", className)} {...props}>
-      <form onSubmit={onSubmit}>
+      <form onSubmit={onSubmit} noValidate>
         <div className="grid gap-2">
           <div className="grid gap-1.5">
             <Label htmlFor="name">Name</Label>
             <Input
               id="name"
+              name="name"
               type="text"
               autoCapitalize="none"
               autoCorrect="off"
               autoComplete="nickname"
-              minLength={3}
-              maxLength={30}
               required
+              aria-invalid={nameError ? true : undefined}
+              aria-describedby={nameError ? "name-error" : undefined}
               disabled={isLoading}
-              onChange={(event) => setName(event.target.value)}
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                setNameError("");
+              }}
             />
+            {nameError && (
+              <p
+                id="name-error"
+                role="alert"
+                className="text-sm text-destructive"
+              >
+                {nameError}
+              </p>
+            )}
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="room-password">

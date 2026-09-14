@@ -197,7 +197,7 @@ describe('room membership', () => {
     expect(first.users[0]).not.toHaveProperty('vote');
   });
 
-  it.each(['ab', 'a'.repeat(31)])(
+  it.each(['   ', ' ab ', 'a'.repeat(31)])(
     'rejects invalid username %s on create and join',
     (name) => {
       const owner = client('owner');

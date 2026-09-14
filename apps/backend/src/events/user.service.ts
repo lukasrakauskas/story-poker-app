@@ -6,11 +6,16 @@ import type { ClientUser, User } from './events.types.js';
 
 const usernameSchema = z
   .string()
-  .min(3, 'It must be at least 3 characters')
-  .max(30, 'That is a long username, might want to trim that!');
+  .trim()
+  .min(3, 'Name must be at least 3 characters after trimming spaces')
+  .max(30, 'Name must be at most 30 characters after trimming spaces');
 
 @Injectable()
 export class UserService {
+  normalizeName(name: string) {
+    return typeof name === 'string' ? name.trim() : '';
+  }
+
   validateName(name: string): string | null {
     const parsed = usernameSchema.safeParse(name);
     return parsed.success ? null : parsed.error.format()._errors.join(', ');
@@ -19,7 +24,7 @@ export class UserService {
   create(id: string, name: string, role: User['role'] = 'user'): User {
     return {
       id,
-      name,
+      name: this.normalizeName(name),
       role,
       vote: null,
       token: nanoid(32),

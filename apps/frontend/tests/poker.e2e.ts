@@ -50,6 +50,45 @@ async function planningLayoutAnchors(page: Page) {
   });
 }
 
+test("participant names are normalized and validated on create and join", async ({
+  page,
+  browser,
+}) => {
+  const validationMessage =
+    "Name must be 3 to 30 characters after surrounding spaces are removed.";
+  await page.goto("/");
+  await page.getByLabel("Name", { exact: true }).fill("   ");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByText(validationMessage, { exact: true })
+  ).toBeVisible();
+
+  await page.getByLabel("Name", { exact: true }).fill("  Alice  ");
+  await page.getByRole("button", { name: "Create room", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Choose your estimate", exact: true })
+  ).toBeVisible();
+
+  const guestContext = await browser.newContext();
+  const guest = await guestContext.newPage();
+  try {
+    await guest.goto(page.url());
+    await guest.getByLabel("Name", { exact: true }).fill(" x ");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(
+      guest.getByText(validationMessage, { exact: true })
+    ).toBeVisible();
+
+    await guest.getByLabel("Name", { exact: true }).fill("  Bobby  ");
+    await guest.getByRole("button", { name: "Join room", exact: true }).click();
+    await expect(
+      page.getByLabel("People in the room").getByText("Bobby", { exact: true })
+    ).toBeVisible();
+  } finally {
+    await guestContext.close();
+  }
+});
+
 test("room controls persist and protect a planning session", async ({
   page,
   browser,

@@ -49,7 +49,21 @@ describe('RoomService', () => {
     expect(rooms.join(room.code, 'two', 'ab')).toMatchObject({
       error: { event: 'bad-username' },
     });
+    expect(rooms.join(room.code, 'two', '   ')).toMatchObject({
+      error: { event: 'bad-username' },
+    });
     expect(room.users).toHaveLength(1);
+  });
+
+  it('stores normalized names and reserves the normalized form', () => {
+    const { room, user } = success(rooms.create('one', '  Alice  '));
+    expect(user.name).toBe('Alice');
+    expect(rooms.join(room.code, 'two', ' Alice ')).toEqual({
+      error: { event: 'name-taken', data: null },
+    });
+    expect(success(rooms.join(room.code, 'two', '  Bobby  ')).user.name).toBe(
+      'Bobby',
+    );
   });
 
   it('aggregates votes safely and keeps a current results snapshot', () => {

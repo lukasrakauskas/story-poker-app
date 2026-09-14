@@ -70,7 +70,8 @@ export class RoomService implements OnModuleDestroy {
     cardSet?: string[],
     password?: string,
   ): RoomResult<Membership> {
-    const nameError = this.users.validateName(name);
+    const normalizedName = this.users.normalizeName(name);
+    const nameError = this.users.validateName(normalizedName);
     if (nameError) {
       return { error: { event: 'bad-username', data: { error: nameError } } };
     }
@@ -86,7 +87,7 @@ export class RoomService implements OnModuleDestroy {
       return { error: { event: 'wrong-room-password', data: null } };
     }
 
-    const user = this.users.create(id, name, 'mod');
+    const user = this.users.create(id, normalizedName, 'mod');
     const room: Room = {
       code: nanoid(7),
       users: [user],
@@ -110,15 +111,16 @@ export class RoomService implements OnModuleDestroy {
     if (room.password !== null && room.password !== password) {
       return { error: { event: 'wrong-room-password', data: null } };
     }
-    if (room.users.some((user) => user.name === name)) {
-      return { error: { event: 'name-taken', data: null } };
-    }
-    const nameError = this.users.validateName(name);
+    const normalizedName = this.users.normalizeName(name);
+    const nameError = this.users.validateName(normalizedName);
     if (nameError) {
       return { error: { event: 'bad-username', data: { error: nameError } } };
     }
+    if (room.users.some((user) => user.name === normalizedName)) {
+      return { error: { event: 'name-taken', data: null } };
+    }
 
-    const user = this.users.create(id, name);
+    const user = this.users.create(id, normalizedName);
     room.users.push(user);
     this.cancelExpiration(room.code);
     return { room, user };
