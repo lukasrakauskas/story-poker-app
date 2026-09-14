@@ -324,6 +324,17 @@ export class RetroService {
         for (const note of notes) note.groupId = group.id;
         return;
       }
+      case 'move-note': {
+        this.requireModerator(member);
+        this.requirePhase(room, 'group');
+        const note = this.note(room, command.id);
+        const group = room.groups.find((item) => item.id === command.groupId);
+        if (!group)
+          throw new RetroError('not-found', 'That theme no longer exists.');
+        note.groupId = group.id;
+        this.cleanupGroups(room);
+        return;
+      }
       case 'ungroup-note': {
         this.requireModerator(member);
         this.requirePhase(room, 'group');

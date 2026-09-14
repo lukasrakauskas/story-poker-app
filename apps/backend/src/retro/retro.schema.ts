@@ -28,6 +28,7 @@ export const retroCommandSchema: z.ZodType<RetroCommand> = z.discriminatedUnion(
       noteIds: z.array(id).min(2).max(300),
     }),
     z.object({ type: z.literal('ungroup-note'), id }),
+    z.object({ type: z.literal('move-note'), id, groupId: id }),
     z.object({ type: z.literal('remove-member'), memberId: id }),
     z.object({ type: z.literal('toggle-vote'), id }),
     z.object({ type: z.literal('toggle-ready') }),

@@ -54,6 +54,7 @@ export type RetroCommand =
   | { type: "delete-note"; id: string }
   | { type: "group-notes"; title: string; noteIds: string[] }
   | { type: "ungroup-note"; id: string }
+  | { type: "move-note"; id: string; groupId: string }
   | { type: "remove-member"; memberId: string }
   | { type: "toggle-vote"; id: string }
   | { type: "toggle-ready" }

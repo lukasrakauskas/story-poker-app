@@ -13,6 +13,7 @@ import { Label } from "ui/components/label";
 import { Badge } from "ui/components/badge";
 import { Textarea } from "ui/components/textarea";
 import { ItemActions } from "./item-actions";
+import { NoteStack } from "./note-stack";
 
 export const columns: {
   id: RetroColumn;
@@ -242,16 +243,12 @@ function ThemeCard({
   );
   const notes = room.notes.filter((note) => note.groupId === group.id);
   return (
-    <article className="space-y-3 rounded-lg border bg-card p-4 text-card-foreground shadow-sm">
-      <div>
-        <Badge variant="secondary">Theme</Badge>
-        <h3 className="mt-2 font-semibold">{group.title}</h3>
-      </div>
-      <ul className="space-y-2 border-l-2 pl-3">
+    <NoteStack title={group.title} count={notes.length}>
+      <ul className="space-y-2">
         {notes.map((note) => (
           <li
             key={note.id}
-            className="flex items-start justify-between gap-2 text-sm"
+            className="flex items-start justify-between gap-2 rounded-md border bg-muted/20 p-3 text-sm"
           >
             <div className="min-w-0">
               <p className="whitespace-pre-wrap break-words">{note.text}</p>
@@ -285,7 +282,7 @@ function ThemeCard({
           {group.voteCount ?? 0} {group.voteCount === 1 ? "vote" : "votes"}
         </p>
       )}
-    </article>
+    </NoteStack>
   );
 }
 

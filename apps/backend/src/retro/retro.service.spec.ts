@@ -410,6 +410,47 @@ describe('retrospective workflow', () => {
     ).toThrow('group phase');
   });
 
+  it('moves notes between stacks without replacing the target theme or attribution', () => {
+    const ids = [add('One'), add('Two'), add('Three'), add('Four')];
+    service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, {
+      type: 'group-notes',
+      title: 'First',
+      noteIds: ids.slice(0, 2),
+    });
+    service.mutate(owner, {
+      type: 'group-notes',
+      title: 'Second',
+      noteIds: ids.slice(2),
+    });
+    const before = service.snapshot(owner);
+    const target = before.groups[1];
+    const command = {
+      type: 'move-note' as const,
+      id: ids[0],
+      groupId: target.id,
+    };
+    expect(() => service.mutate(guest, command)).toThrow('moderator');
+    expect(() =>
+      service.mutate(owner, { ...command, groupId: 'missing' }),
+    ).toThrow('no longer exists');
+    expect(service.snapshot(owner)).toEqual(before);
+    service.mutate(owner, command);
+    const moved = service.snapshot(guest);
+    expect(moved.groups).toEqual([target]);
+    expect(moved.notes.find((note) => note.id === ids[0])).toEqual({
+      ...before.notes[0],
+      groupId: target.id,
+    });
+    expect(moved.notes.find((note) => note.id === ids[1])?.groupId).toBeNull();
+    service.mutate(owner, command); // Idempotent drop onto the same stack.
+    service.disconnect(guest);
+    service.resume(guest.code, guest.token);
+    expect(service.snapshot(guest).groups).toEqual([target]);
+    service.mutate(owner, { type: 'advance' });
+    expect(() => service.mutate(owner, command)).toThrow('group phase');
+  });
+
   it('keeps open voting blind and anonymous while preserving own selections', () => {
     const ids = [add('One'), add('Two'), add('Three'), add('Four')];
     service.mutate(owner, { type: 'advance' });

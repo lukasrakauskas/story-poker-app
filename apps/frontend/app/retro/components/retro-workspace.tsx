@@ -37,7 +37,7 @@ const phases: {
     id: "vote",
     label: "Vote",
     description:
-      "Choose your priorities. Three votes per person, one per note. Totals stay hidden until discussion; click a voted note again to remove your vote.",
+      "Choose your priorities. Three votes per person, one per theme or ungrouped note. Totals stay hidden until discussion; click a voted target again to remove your vote.",
     next: "Start discussion",
   },
   {
@@ -292,24 +292,30 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               phase={room.phase}
             />
             <div className="order-2 min-w-0 space-y-6 xl:col-start-1 xl:row-span-2 xl:row-start-1">
-              {room.phase === "group" && moderator && (
-                <NoteGrouping room={room} disabled={disabled} send={send} />
+              {room.phase === "group" ? (
+                <NoteGrouping
+                  room={room}
+                  moderator={moderator}
+                  disabled={disabled}
+                  send={send}
+                />
+              ) : (
+                <NoteBoard
+                  room={room}
+                  selfId={selfId}
+                  disabled={disabled}
+                  send={send}
+                  onDraftChange={(column, hasDraft) =>
+                    setDraftColumns((currentDrafts) =>
+                      hasDraft
+                        ? currentDrafts.includes(column)
+                          ? currentDrafts
+                          : [...currentDrafts, column]
+                        : currentDrafts.filter((item) => item !== column)
+                    )
+                  }
+                />
               )}
-              <NoteBoard
-                room={room}
-                selfId={selfId}
-                disabled={disabled}
-                send={send}
-                onDraftChange={(column, hasDraft) =>
-                  setDraftColumns((currentDrafts) =>
-                    hasDraft
-                      ? currentDrafts.includes(column)
-                        ? currentDrafts
-                        : [...currentDrafts, column]
-                      : currentDrafts.filter((item) => item !== column)
-                  )
-                }
-              />
               {room.phase === "closed" && (
                 <RetroExport room={room} selfId={selfId} />
               )}
