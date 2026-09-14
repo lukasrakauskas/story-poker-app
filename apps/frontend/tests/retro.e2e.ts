@@ -257,10 +257,26 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     owner.getByText("Disconnected · changes are disabled", { exact: true })
   ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Claim moderator role", exact: true })
+    .click();
+  await expect(
+    guest.getByRole("button", { name: "Start voting", exact: true })
+  ).toBeEnabled();
+
   await owner.getByRole("button", { name: "Retry connection" }).click();
   await expect(
     owner.getByText("Connected · changes sync live", { exact: true })
   ).toBeVisible();
+  await expect(
+    owner.getByRole("button", { name: "Start voting", exact: true })
+  ).toHaveCount(0);
+  await guest
+    .getByRole("button", { name: "Transfer moderator to Alice", exact: true })
+    .click();
+  await expect(
+    owner.getByRole("button", { name: "Start voting", exact: true })
+  ).toBeEnabled();
 
   await expect(
     owner.getByText("Keep the takeaways", { exact: true })
@@ -503,6 +519,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
       (note: { text: string }) => note.text === "Teamwork was excellent"
     )
   ).toMatchObject({ voteCount: 1, votedBySelf: false });
+  expect(
+    exported.members.filter(
+      (member: { moderator: boolean }) => member.moderator
+    )
+  ).toEqual([expect.objectContaining({ name: "Alice" })]);
   expect(JSON.stringify(exported)).not.toContain("token");
   expect(JSON.stringify(exported)).not.toContain("voterIds");
   await owner.setViewportSize({ width: 390, height: 844 });

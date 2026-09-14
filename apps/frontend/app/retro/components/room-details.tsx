@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { RetroRoom } from "shared/retrospective";
+import type { RetroSession } from "../../../hooks/use-retro-socket";
 import { Button } from "ui/components/button";
 import {
   Card,
@@ -16,9 +17,13 @@ import { Label } from "ui/components/label";
 export function RoomDetails({
   room,
   selfId,
+  disabled,
+  send,
 }: {
   room: RetroRoom;
   selfId: string | null;
+  disabled: boolean;
+  send: RetroSession["send"];
 }) {
   const [origin, setOrigin] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -27,6 +32,10 @@ export function RoomDetails({
     undefined
   );
   const link = `${origin}/retro/${encodeURIComponent(room.code)}`;
+  const self = room.members.find((member) => member.id === selfId);
+  const connectedModerator = room.members.find(
+    (member) => member.moderator && member.connected
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -88,6 +97,33 @@ export function RoomDetails({
               {copyStatus}
             </output>
           </div>
+          <div className="space-y-2 border-t pt-4">
+            <h2 className="text-sm font-semibold">Facilitation</h2>
+            {connectedModerator ? (
+              <p className="text-xs text-muted-foreground">
+                {connectedModerator.id === selfId
+                  ? "You are the moderator. You can hand off facilitation to another connected participant."
+                  : `${connectedModerator.name} is the moderator.`}
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  No moderator is online. A connected participant can claim the
+                  role; the first accepted claim wins.
+                </p>
+                {self?.connected && room.phase !== "closed" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={disabled}
+                    onClick={() => void send({ type: "claim-moderator" })}
+                  >
+                    Claim moderator role
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
           <div className="space-y-3 border-t pt-4">
             <h2 className="text-sm font-semibold">
               People ·{" "}
@@ -109,14 +145,35 @@ export function RoomDetails({
                       <p className="text-xs text-muted-foreground">Moderator</p>
                     )}
                   </div>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {!member.connected
-                      ? "Offline"
-                      : (room.phase === "write" || room.phase === "vote") &&
-                          member.ready
-                        ? "Ready"
-                        : "Online"}
-                  </span>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span className="text-xs text-muted-foreground">
+                      {!member.connected
+                        ? "Offline"
+                        : (room.phase === "write" || room.phase === "vote") &&
+                            member.ready
+                          ? "Ready"
+                          : "Online"}
+                    </span>
+                    {self?.moderator &&
+                      member.connected &&
+                      member.id !== self.id &&
+                      room.phase !== "closed" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={disabled}
+                          aria-label={`Transfer moderator to ${member.name}`}
+                          onClick={() =>
+                            void send({
+                              type: "transfer-moderator",
+                              memberId: member.id,
+                            })
+                          }
+                        >
+                          Make moderator
+                        </Button>
+                      )}
+                  </div>
                 </li>
               ))}
             </ul>

@@ -308,7 +308,12 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                   send={send}
                 />
               )}
-              <RoomDetails room={room} selfId={selfId} />
+              <RoomDetails
+                room={room}
+                selfId={selfId}
+                disabled={disabled}
+                send={send}
+              />
             </aside>
           </div>
         </>

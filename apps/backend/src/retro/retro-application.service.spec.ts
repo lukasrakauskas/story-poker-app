@@ -161,6 +161,43 @@ describe('RetroApplicationService', () => {
     });
   });
 
+  it('accepts only the first moderator recovery claim', () => {
+    const created = state(
+      application.execute('owner', {
+        type: 'create',
+        name: 'Alice',
+        title: 'Retro',
+      }),
+      'owner',
+    );
+    application.execute('guest', {
+      type: 'join',
+      name: 'Bobby',
+      code: created.room.code,
+    });
+    application.execute('third', {
+      type: 'join',
+      name: 'Carol',
+      code: created.room.code,
+    });
+    application.disconnect('owner');
+
+    const accepted = application.execute('guest', {
+      type: 'claim-moderator',
+    });
+    expect(
+      state(accepted, 'guest').room.members.filter(
+        (member) => member.moderator,
+      ),
+    ).toEqual([expect.objectContaining({ name: 'Bobby' })]);
+    expect(
+      event(application.execute('third', { type: 'claim-moderator' }), 'third'),
+    ).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'moderator-active' },
+    });
+  });
+
   it('broadcasts disconnect presence without transport dependencies', () => {
     const created = state(
       application.execute('owner', {

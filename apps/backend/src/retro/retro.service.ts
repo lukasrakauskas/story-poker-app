@@ -155,6 +155,36 @@ export class RetroService {
         'This retrospective is closed and read-only.',
       );
     switch (command.type) {
+      case 'transfer-moderator': {
+        this.requireModerator(member);
+        if (command.memberId === member.id)
+          throw new RetroError(
+            'invalid-command',
+            'Choose another connected participant for the handoff.',
+          );
+        const successor = this.member(room, command.memberId);
+        if (!successor.connected)
+          throw new RetroError(
+            'not-connected',
+            'Choose a participant who is currently connected.',
+          );
+        this.setModerator(room, successor);
+        return;
+      }
+      case 'claim-moderator':
+        if (
+          !this.participants.canClaimModerator(room.members, member) ||
+          room.members.some(
+            (candidate) =>
+              candidate.role === 'moderator' && candidate.connected,
+          )
+        )
+          throw new RetroError(
+            'moderator-active',
+            'A moderator is already connected.',
+          );
+        this.setModerator(room, member);
+        return;
       case 'advance': {
         this.requireModerator(member);
         const next = {
@@ -306,6 +336,18 @@ export class RetroService {
   private requireModerator(member: CollaborationParticipant) {
     if (member.role !== 'moderator')
       throw new RetroError('forbidden', 'Only the moderator can do that.');
+  }
+
+  private setModerator(room: StoredRoom, moderator: CollaborationParticipant) {
+    for (const member of room.members) member.role = 'participant';
+    this.participants.promote(moderator);
+  }
+
+  private member(room: StoredRoom, id: string) {
+    const member = room.members.find((candidate) => candidate.id === id);
+    if (!member)
+      throw new RetroError('not-found', 'That participant no longer exists.');
+    return member;
   }
 
   private requirePhase(room: StoredRoom, phase: RetroRoom['phase']) {

@@ -42,6 +42,8 @@ export type RetroCommand =
   | { type: "delete-note"; id: string }
   | { type: "toggle-vote"; id: string }
   | { type: "toggle-ready" }
+  | { type: "transfer-moderator"; memberId: string }
+  | { type: "claim-moderator" }
   | { type: "advance" }
   | { type: "add-action"; text: string; owner: string }
   | { type: "toggle-action"; id: string }

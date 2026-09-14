@@ -168,6 +168,58 @@ describe('retrospective workflow', () => {
     ).toThrow('write phase');
   });
 
+  it('transfers moderation and recovers it only while no moderator is connected', () => {
+    const third = service.join(owner.code, 'Carol');
+    service.mutate(owner, {
+      type: 'transfer-moderator',
+      memberId: guest.id,
+    });
+    expect(
+      service.snapshot(owner).members.map(({ id, moderator }) => ({
+        id,
+        moderator,
+      })),
+    ).toEqual([
+      { id: owner.id, moderator: false },
+      { id: guest.id, moderator: true },
+      { id: third.id, moderator: false },
+    ]);
+    expect(() => service.mutate(owner, { type: 'advance' })).toThrow(
+      'moderator',
+    );
+    expect(() => service.mutate(owner, { type: 'claim-moderator' })).toThrow(
+      'already connected',
+    );
+
+    service.disconnect(guest);
+    service.mutate(owner, { type: 'claim-moderator' });
+    expect(
+      service.snapshot(owner).members.filter((item) => item.moderator),
+    ).toEqual([expect.objectContaining({ id: owner.id })]);
+    expect(() => service.mutate(third, { type: 'claim-moderator' })).toThrow(
+      'already connected',
+    );
+    expect(() =>
+      service.mutate(owner, {
+        type: 'transfer-moderator',
+        memberId: guest.id,
+      }),
+    ).toThrow('currently connected');
+    expect(() =>
+      service.mutate(owner, {
+        type: 'transfer-moderator',
+        memberId: 'missing',
+      }),
+    ).toThrow('no longer exists');
+
+    service.disconnect(owner);
+    service.mutate(third, { type: 'claim-moderator' });
+    service.resume(owner.code, owner.token);
+    expect(
+      service.snapshot(owner).members.filter((item) => item.moderator),
+    ).toEqual([expect.objectContaining({ id: third.id })]);
+  });
+
   it('tracks current-phase readiness across joins, disconnects, and resumes', () => {
     expect(
       service.snapshot(owner).members.map((member) => member.ready),
