@@ -52,6 +52,15 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     )
   ).toBeVisible();
   await expect(owner.getByLabel("Room link")).toHaveValue(owner.url());
+  const desktopStatus = owner
+    .locator('[data-slot="card"]')
+    .filter({ hasText: "Room status" });
+  await expect(desktopStatus).toBeVisible();
+  const desktopStatusBox = (await desktopStatus.boundingBox())!;
+  const desktopBoardBox = (await owner
+    .getByLabel("Retrospective notes")
+    .boundingBox())!;
+  expect(desktopStatusBox.x).toBeGreaterThan(desktopBoardBox.x);
   const roomUrl = owner.url();
   const cookies = await context.cookies(roomUrl);
   const credential = cookies.find((cookie) =>
@@ -209,6 +218,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     fullPage: true,
   });
   await owner.setViewportSize({ width: 390, height: 844 });
+  const mobileStatusBox = (await desktopStatus.boundingBox())!;
+  const mobileBoardBox = (await owner
+    .getByLabel("Retrospective notes")
+    .boundingBox())!;
+  expect(mobileStatusBox.y).toBeLessThan(mobileBoardBox.y);
   await noteActions.click();
   await expect(
     owner.getByRole("menuitem", { name: "Edit", exact: true })
@@ -240,6 +254,9 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     )?.value
   ).toBe(credential.value);
   await owner.evaluate(() => window.retroTestSocket.close());
+  await expect(
+    owner.getByText("Disconnected · changes are disabled", { exact: true })
+  ).toBeVisible();
   await owner.getByRole("button", { name: "Retry connection" }).click();
   await expect(
     owner.getByText("Connected · changes sync live", { exact: true })

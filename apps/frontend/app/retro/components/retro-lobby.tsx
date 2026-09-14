@@ -14,7 +14,7 @@ import { Label } from "ui/components/label";
 import { useRetro } from "./retro-provider";
 
 export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
-  const { send, connection, pending, error } = useRetro();
+  const { send, connection, pending, error, retry } = useRetro();
   const [mode, setMode] = useState<"create" | "join">(
     initialCode ? "join" : "create"
   );
@@ -75,7 +75,45 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
               : "Enter the room code from your invitation. Writing stays private until the moderator starts voting and reveals every note."}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
+            <output aria-live="polite" aria-atomic="true">
+              {pending
+                ? "Waiting for the room…"
+                : connection === "connecting"
+                  ? "Connecting to retrospective…"
+                  : connection === "connected"
+                    ? "Connected · ready to enter"
+                    : "Disconnected · room entry is unavailable"}
+            </output>
+            {error && (
+              <p role="alert" className="text-destructive">
+                {error.message}
+              </p>
+            )}
+            {connection === "disconnected" &&
+              error?.code !== "room-expired" &&
+              error?.code !== "invalid-session" && (
+                <Button size="sm" variant="outline" onClick={retry}>
+                  Retry connection
+                </Button>
+              )}
+            {(error?.code === "room-expired" ||
+              error?.code === "invalid-session") && (
+              <a
+                className="block underline underline-offset-4"
+                href={
+                  error.code === "invalid-session" && initialCode
+                    ? `/retro/${encodeURIComponent(initialCode)}`
+                    : "/retro"
+                }
+              >
+                {error.code === "invalid-session"
+                  ? "Rejoin as a new participant"
+                  : "Start or join another room"}
+              </a>
+            )}
+          </div>
           <form
             className="space-y-4"
             onSubmit={(event) => {

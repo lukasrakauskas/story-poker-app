@@ -10,6 +10,12 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 4. **Closed:** the moderator closes the retrospective. The board stays read-only until it expires, and the final-step takeaway card makes Copy Markdown and Markdown, text, and JSON downloads available immediately. Connected browsers save the completed snapshot, including final action owners and completion status.
 5. **Previous retrospectives:** open `/retro/history` to read saved notes, participants, and action items without an account or a live room. Every saved entry keeps its export controls, including incomplete snapshots. Live-room export controls are deliberately hidden during writing, voting, and discussion so partial work is not presented as the outcome.
 
+## Room status and supporting information
+
+- In a live room, connection/retry, expiry, rejoin-cookie, and browser-history state share one compact status card. It sits in the right sidebar on desktop and immediately before the board on mobile, rather than stacking banners above the workflow.
+- The status card includes a concise privacy/browser-storage disclosure. Terminal expiry and invalid-session errors remain prominent above the room, while command errors stay next to the active workflow.
+- Before a room is entered, connection failures and Retry remain inside the lobby card next to the create/join form; room-only expiry and storage notices are not rendered above the lobby.
+
 ## Lifetime and limitations
 
 - Live collaboration still exists **only in backend process memory**. There is no server database or disk persistence. Each participating browser separately saves token-free snapshots in localStorage.
@@ -25,7 +31,7 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 
 - `packages/shared/retrospective.ts`: client/server protocol types.
 - `apps/backend/src/retro`: command validation, in-memory service, WebSocket transport and cleanup.
-- `apps/frontend/app/retro`: retrospective routes and UI.
+- `apps/frontend/app/retro`: retrospective routes and UI, including the responsive room status card.
 - `apps/frontend/hooks/use-retro-socket.ts`: isolated connection, cookie resume lifecycle, and snapshot persistence.
 - `apps/frontend/lib/retro-session.ts`: expiring cookie helpers.
 - `apps/frontend/lib/retro-history.ts`: versioned, validated, token-free localStorage snapshots.
@@ -55,4 +61,4 @@ bunx playwright install chromium
 bun run test:e2e
 ```
 
-The WebSocket end-to-end tests exercise real clients, room broadcasts, private credentials, permissions, reconnect replacement, and coexistence with the original poker endpoint. Service/gateway unit tests cover phase transitions, voting budgets, validation, resource limits, expiry, and heartbeat cleanup. Bun frontend unit tests cover history updates, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, storage failures, and mobile/dark mode.
+The WebSocket end-to-end tests exercise real clients, room broadcasts, private credentials, permissions, reconnect replacement, and coexistence with the original poker endpoint. Service/gateway unit tests cover phase transitions, voting budgets, validation, resource limits, expiry, and heartbeat cleanup. Bun frontend unit tests cover history updates, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, connected/disconnected/expiring/storage-failure status, responsive status placement, and dark mode.
