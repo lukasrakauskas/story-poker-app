@@ -406,6 +406,26 @@ describe('voting', () => {
     });
   });
 
+  it('uses connected participants for both progress events and results', () => {
+    const owner = client('owner');
+    const room = create(owner);
+    const guest = client('guest');
+    gateway.onJoinRoom(guest, { name: 'Guest', room: room.code });
+    gateway.onCastVote(owner, { vote: '3' });
+    gateway.onCastVote(guest, { vote: '5' });
+
+    gateway.handleDisconnect(guest);
+    expect(messages(owner).at(-1)).toMatchObject({
+      event: 'user-left',
+      data: { user: { id: 'guest', status: 'disconnected', voted: true } },
+    });
+    gateway.onRevealResults(owner);
+    expect(messages(owner).at(-1)).toMatchObject({
+      event: 'results-revealed',
+      data: { results: { '3': 1 } },
+    });
+  });
+
   it.each(['onCastVote', 'onRevealResults', 'onStartVoting'] as const)(
     '%s rejects missing rooms and users',
     (method) => {

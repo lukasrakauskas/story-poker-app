@@ -87,6 +87,29 @@ describe('RoomService', () => {
     );
   });
 
+  it('excludes offline votes unless the participant reconnects before reveal', () => {
+    const { room, user: owner } = success(rooms.create('one', 'Alice'));
+    const { user: guest } = success(rooms.join(room.code, 'two', 'Bobby'));
+    success(rooms.castVote(room.code, owner.id, '3'));
+    success(rooms.castVote(room.code, guest.id, '5'));
+    rooms.disconnect(room.code, guest.id);
+
+    expect(success(rooms.revealResults(room.code, owner.id)).results).toEqual({
+      '3': 1,
+    });
+
+    success(rooms.startVoting(room.code, owner.id));
+    success(rooms.reconnect(guest.token, room.code));
+    success(rooms.castVote(room.code, owner.id, '3'));
+    success(rooms.castVote(room.code, guest.id, '5'));
+    rooms.disconnect(room.code, guest.id);
+    success(rooms.reconnect(guest.token, room.code));
+    expect(success(rooms.revealResults(room.code, owner.id)).results).toEqual({
+      '3': 1,
+      '5': 1,
+    });
+  });
+
   it('only accepts cards in the room set and lets a user remove a vote', () => {
     const { room, user } = success(rooms.create('one', 'Alice', ['1', '2']));
     expect(rooms.castVote(room.code, user.id, '3')).toEqual({

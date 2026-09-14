@@ -190,8 +190,11 @@ export class RoomService implements OnModuleDestroy {
     }
 
     const counts = new Map<string, number>();
+    // Readiness and progress use connected participants, so result aggregation
+    // uses that same set. An offline vote remains on the user for reconnects,
+    // but is included only if that participant reconnects before reveal.
     for (const participant of room.users) {
-      if (participant.vote !== null) {
+      if (participant.status === 'connected' && participant.vote !== null) {
         counts.set(participant.vote, (counts.get(participant.vote) ?? 0) + 1);
       }
     }
