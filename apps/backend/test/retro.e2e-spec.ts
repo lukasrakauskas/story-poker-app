@@ -2,13 +2,16 @@ import { Test } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { WebSocket } from 'ws';
+import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RetentionService } from '../src/collaboration/retention.service.js';
+import { OriginAllowlistService } from '../src/transport/origin-allowlist.service.js';
 import { RETRO_OFFLINE_RETENTION_MS } from '../src/retro/retro.service.js';
 import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
 import { AppModule } from '../src/app.module.js';
 
 let app: INestApplication;
+let httpUrl: string;
 let url: string;
 let sockets: WebSocket[];
 
@@ -28,14 +31,35 @@ function next(socket: WebSocket): Promise<RetroServerEvent> {
     socket.on('message', onMessage);
   });
 }
-async function connect(path = '/retro') {
-  const socket = new WebSocket(`${url}${path}`);
+async function connect(path = '/retro', cookie?: string, origin?: string) {
+  const headers: Record<string, string> = {};
+  if (cookie) headers.Cookie = cookie;
+  if (origin) headers.Origin = origin;
+  const socket = new WebSocket(`${url}${path}`, { headers });
   sockets.push(socket);
   await new Promise<void>((resolve, reject) => {
     socket.once('open', resolve);
     socket.once('error', reject);
   });
   return socket;
+}
+async function establish(data: RetroCommand) {
+  const response = await request(httpUrl).post('/retro/session').send(data);
+  expect(response.status).toBe(201);
+  const setCookie = response.headers['set-cookie']?.[0];
+  expect(setCookie).toBeTruthy();
+  return {
+    view: response.body as { room: { code: string }; self: { id: string } },
+    cookie: setCookie!.split(';', 1)[0],
+  };
+}
+async function enter(data: Extract<RetroCommand, { type: 'create' | 'join' }>) {
+  const established = await establish(data);
+  const socket = await connect('/retro', established.cookie);
+  const view = state(
+    await command(socket, { type: 'resume', code: established.view.room.code }),
+  );
+  return { socket, cookie: established.cookie, view };
 }
 async function command(socket: WebSocket, data: RetroCommand | unknown) {
   const response = next(socket);
@@ -53,9 +77,15 @@ beforeEach(async () => {
     imports: [AppModule],
   }).compile();
   app = fixture.createNestApplication();
+  const origins = app.get(OriginAllowlistService);
+  app.enableCors({
+    credentials: true,
+    origin: (origin, callback) => origins.corsOrigin(origin, callback),
+  });
   app.useWebSocketAdapter(new WsAdapter(app));
   await app.listen(0, '127.0.0.1');
-  url = (await app.getUrl()).replace('http:', 'ws:');
+  httpUrl = await app.getUrl();
+  url = httpUrl.replace('http:', 'ws:');
 });
 afterEach(async () => {
   sockets.forEach((socket) => socket.terminate());
@@ -64,6 +94,86 @@ afterEach(async () => {
 });
 
 describe('retrospective WebSocket route', () => {
+  it('rejects a cross-site WebSocket origin before it can establish a session', async () => {
+    const blocked = await new Promise<{ socket: WebSocket; code: number }>(
+      (resolve, reject) => {
+        const socket = new WebSocket(`${url}/retro`, {
+          headers: { Origin: 'https://evil.example' },
+        });
+        sockets.push(socket);
+        socket.once('error', () => undefined);
+        const timeout = setTimeout(
+          () => reject(new Error('Origin rejection timed out')),
+          3000,
+        );
+        socket.once('close', (code) => {
+          clearTimeout(timeout);
+          resolve({ socket, code });
+        });
+      },
+    );
+    expect(blocked.code).toBe(1008);
+  });
+
+  it('applies the exact origin policy to HTTP session establishment', async () => {
+    const blocked = await request(httpUrl)
+      .post('/retro/session')
+      .set('Origin', 'https://evil.example')
+      .send({ type: 'create', name: 'Alice', title: 'Blocked' });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body).toMatchObject({ code: 'origin-not-allowed' });
+
+    const allowed = await request(httpUrl)
+      .post('/retro/session')
+      .set('Origin', 'http://localhost:3001')
+      .send({ type: 'create', name: 'Alice', title: 'Allowed' });
+    expect(allowed.status).toBe(201);
+    expect(allowed.headers['access-control-allow-origin']).toBe(
+      'http://localhost:3001',
+    );
+    expect(allowed.headers['access-control-allow-credentials']).toBe('true');
+  });
+
+  it('rotates HTTP credentials, rejects replay, and leaves state token-free', async () => {
+    const createdResponse = await request(httpUrl)
+      .post('/retro/session')
+      .send({ type: 'create', name: 'Alice', title: 'Rotate' });
+    expect(createdResponse.status).toBe(201);
+    expect(JSON.stringify(createdResponse.body)).not.toContain('token');
+    const oldCookie = createdResponse.headers['set-cookie'][0].split(';', 1)[0];
+    const code = createdResponse.body.room.code as string;
+    const original = await connect('/retro', oldCookie);
+    expect(await command(original, { type: 'resume', code })).toMatchObject({
+      event: 'retro-state',
+      data: { self: { id: expect.any(String) } },
+    });
+
+    const displaced = next(original);
+    const rotated = await request(httpUrl)
+      .post(`/retro/session/${code}/resume`)
+      .set('Cookie', oldCookie)
+      .send();
+    expect(rotated.status).toBe(201);
+    expect(JSON.stringify(rotated.body)).not.toContain('token');
+    const newCookie = rotated.headers['set-cookie'][0].split(';', 1)[0];
+    expect(newCookie).not.toBe(oldCookie);
+    expect(await displaced).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+
+    const replay = await connect('/retro', oldCookie);
+    expect(await command(replay, { type: 'resume', code })).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+    const active = await connect('/retro', newCookie);
+    expect(await command(active, { type: 'resume', code })).toMatchObject({
+      event: 'retro-state',
+      data: { self: { id: createdResponse.body.self.id } },
+    });
+  });
+
   it('broadcasts offline membership expiry and rejects its stale credential', async () => {
     const retention = app.get(RetentionService);
     const schedule = retention.schedule.bind(retention);
@@ -72,22 +182,20 @@ describe('retrospective WebSocket route', () => {
       .mockImplementation((namespace, key, delay, expire) =>
         schedule(namespace, key, namespace === 'retro' ? 50 : delay, expire),
       );
-    const owner = await connect();
-    const guest = await connect();
-    const created = state(
-      await command(owner, {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retention',
-      }),
-    );
-    const joined = state(
-      await command(guest, {
-        type: 'join',
-        name: 'Bobby',
-        code: created.room.code,
-      }),
-    );
+    const ownerEntry = await enter({
+      type: 'create',
+      name: 'Alice',
+      title: 'Retention',
+    });
+    const owner = ownerEntry.socket;
+    const guestEntry = await enter({
+      type: 'join',
+      name: 'Bobby',
+      code: ownerEntry.view.room.code,
+    });
+    const guest = guestEntry.socket;
+    const created = ownerEntry.view;
+    const joined = guestEntry.view;
     await command(guest, {
       type: 'add-note',
       column: 'ideas',
@@ -113,50 +221,45 @@ describe('retrospective WebSocket route', () => {
       text: 'Keep attribution',
       authorName: 'Bobby',
     });
-    const returning = await connect();
+    const returning = await connect('/retro', guestEntry.cookie);
     expect(
       await command(returning, {
         type: 'resume',
         code: created.room.code,
-        token: joined.self.token,
       }),
     ).toMatchObject({
       event: 'retro-error',
       data: { code: 'invalid-session' },
     });
-    const replacement = state(
-      await command(returning, {
-        type: 'join',
-        code: created.room.code,
-        name: 'Bobby',
-      }),
-    );
+    const replacementEntry = await establish({
+      type: 'join',
+      code: created.room.code,
+      name: 'Bobby',
+    });
+    const replacement = replacementEntry.view;
     expect(replacement.self.id).not.toBe(joined.self.id);
   });
   it('runs a shared retrospective without leaking credentials or affecting poker', async () => {
-    const owner = await connect();
-    const guest = await connect();
+    const ownerEntry = await enter({
+      type: 'create',
+      name: 'Alice',
+      title: 'Sprint 1',
+    });
+    const owner = ownerEntry.socket;
+    const ownerJoin = next(owner);
+    const guestEntry = await enter({
+      type: 'join',
+      name: 'Bobby',
+      code: ownerEntry.view.room.code,
+    });
+    const guest = guestEntry.socket;
     const outsider = await connect();
-    const created = state(
-      await command(owner, {
-        type: 'create',
-        name: 'Alice',
-        title: 'Sprint 1',
-      }),
-    );
+    const created = ownerEntry.view;
+    const joined = guestEntry.view;
     expect(created.room.phase).toBe('write');
     expect(JSON.stringify(created.room)).not.toContain('token');
-    const ownerJoin = next(owner);
-    const joined = state(
-      await command(guest, {
-        type: 'join',
-        name: 'Bobby',
-        code: created.room.code,
-      }),
-    );
     expect(state(await ownerJoin).room.members).toHaveLength(2);
-    expect(joined.self.token).not.toBe(created.self.token);
-    expect(JSON.stringify(joined)).not.toContain(created.self.token);
+    expect(JSON.stringify(joined)).not.toContain('token');
     expect(await command(outsider, { type: 'advance' })).toMatchObject({
       event: 'retro-error',
       data: { code: 'invalid-session' },
@@ -269,21 +372,25 @@ describe('retrospective WebSocket route', () => {
   });
 
   it('resumes an identity, disconnects its old socket and validates commands', async () => {
-    const original = await connect();
-    const created = state(
-      await command(original, {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-    );
-    const replacement = await connect();
+    const originalEntry = await enter({
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    const original = originalEntry.socket;
+    const created = originalEntry.view;
     const displaced = next(original);
+    const rotated = await request(httpUrl)
+      .post(`/retro/session/${created.room.code}/resume`)
+      .set('Cookie', originalEntry.cookie)
+      .send();
+    expect(rotated.status).toBe(201);
+    const replacementCookie = rotated.headers['set-cookie'][0].split(';', 1)[0];
+    const replacement = await connect('/retro', replacementCookie);
     const resumed = state(
       await command(replacement, {
         type: 'resume',
         code: created.room.code,
-        token: created.self.token,
       }),
     );
     expect(resumed.self).toEqual(created.self);
@@ -310,12 +417,16 @@ describe('retrospective WebSocket route', () => {
       }),
     ).toMatchObject({ event: 'retro-error', data: { code: 'already-joined' } });
 
-    const target = await connect();
+    const targetEntry = await establish({
+      type: 'join',
+      name: 'Bobby',
+      code: created.room.code,
+    });
+    const target = await connect('/retro', targetEntry.cookie);
     const ownerJoinedUpdate = next(replacement);
     const targetSession = state(
       await command(target, {
-        type: 'join',
-        name: 'Bobby',
+        type: 'resume',
         code: created.room.code,
       }),
     );

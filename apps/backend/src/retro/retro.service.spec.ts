@@ -80,7 +80,7 @@ describe('room lifecycle and privacy', () => {
     service.mutate(owner, { type: 'toggle-vote', id: noteId });
     service.disconnect(owner);
     vi.advanceTimersByTime(RETRO_OFFLINE_RETENTION_MS - 1);
-    service.resume(owner.code, owner.token);
+    owner = service.resume(owner.code, owner.token);
     vi.advanceTimersByTime(RETRO_OFFLINE_RETENTION_MS);
     expect(
       service.snapshot(owner).members.find((member) => member.id === owner.id)
@@ -132,7 +132,7 @@ describe('room lifecycle and privacy', () => {
     ]);
 
     service.disconnect(guest);
-    service.resume(guest.code, guest.token);
+    guest = service.resume(guest.code, guest.token);
     expect(service.snapshot(guest).notes.map((note) => note.text)).toEqual([
       'Guest thought',
     ]);
@@ -153,7 +153,9 @@ describe('room lifecycle and privacy', () => {
     expect(service.snapshot(guest).members[0].connected).toBe(false);
     expect(() => service.join(owner.code, 'ALICE')).toThrow('already in use');
     vi.advanceTimersByTime(60_000);
-    expect(service.resume(owner.code, owner.token)).toEqual(owner);
+    const previousOwnerToken = owner.token;
+    owner = service.resume(owner.code, owner.token);
+    expect(owner.token).not.toBe(previousOwnerToken);
     expect(service.snapshot(owner).members[0].connected).toBe(true);
     expect(service.snapshot(owner).expiresAt).toBe(expiresAt);
   });
@@ -349,7 +351,7 @@ describe('retrospective workflow', () => {
 
     service.disconnect(owner);
     service.mutate(third, { type: 'claim-moderator' });
-    service.resume(owner.code, owner.token);
+    owner = service.resume(owner.code, owner.token);
     expect(
       service.snapshot(owner).members.filter((item) => item.moderator),
     ).toEqual([expect.objectContaining({ id: third.id })]);
@@ -375,7 +377,7 @@ describe('retrospective workflow', () => {
       connected: true,
       ready: false,
     });
-    service.resume(guest.code, guest.token);
+    guest = service.resume(guest.code, guest.token);
     expect(service.snapshot(guest).members[1]).toMatchObject({
       connected: true,
       ready: true,
@@ -412,7 +414,7 @@ describe('retrospective workflow', () => {
     service.mutate(owner, { type: 'advance' });
     service.mutate(owner, { type: 'advance' });
     service.disconnect(guest);
-    service.resume(guest.code, guest.token);
+    guest = service.resume(guest.code, guest.token);
     expect(service.snapshot(guest).notes.map((note) => note.id)).toEqual([
       ids[0],
       ids[2],
@@ -485,7 +487,7 @@ describe('retrospective workflow', () => {
     ).toBe(true);
 
     service.disconnect(guest);
-    service.resume(guest.code, guest.token);
+    guest = service.resume(guest.code, guest.token);
     expect(service.snapshot(guest).groups[0].votedBySelf).toBe(true);
     service.mutate(owner, { type: 'advance' });
     const discussed = service.snapshot(owner);
@@ -537,7 +539,7 @@ describe('retrospective workflow', () => {
     expect(moved.notes.find((note) => note.id === ids[1])?.groupId).toBeNull();
     service.mutate(owner, command); // Idempotent drop onto the same stack.
     service.disconnect(guest);
-    service.resume(guest.code, guest.token);
+    guest = service.resume(guest.code, guest.token);
     expect(service.snapshot(guest).groups).toEqual([target]);
     service.mutate(owner, { type: 'advance' });
     expect(() => service.mutate(owner, command)).toThrow('group phase');
@@ -581,7 +583,7 @@ describe('retrospective workflow', () => {
     expect(JSON.stringify(guestVoting)).not.toContain('voterIds');
 
     service.disconnect(guest);
-    service.resume(guest.code, guest.token);
+    guest = service.resume(guest.code, guest.token);
     expect(
       service.snapshot(guest).notes.map((note) => note.votedBySelf),
     ).toEqual([false, true, true, true]);
@@ -644,7 +646,7 @@ describe('retrospective workflow', () => {
     service.mutate(owner, { type: 'remove-member', memberId: guest.id });
     service.mutate(owner, { ...edit, text: 'Still assigned' });
     service.disconnect(owner);
-    service.resume(owner.code, owner.token);
+    owner = service.resume(owner.code, owner.token);
     expect(service.snapshot(owner).actions[0]).toEqual({
       id,
       text: 'Still assigned',
@@ -696,9 +698,9 @@ describe('retrospective workflow', () => {
     expect(final.closedAt).toBe(Date.now());
     expect(final.members[1].connected).toBe(false);
     service.disconnect(owner);
-    service.resume(guest.code, guest.token);
+    guest = service.resume(guest.code, guest.token);
     vi.advanceTimersByTime(RETRO_OFFLINE_RETENTION_MS + 1);
-    service.resume(owner.code, owner.token);
+    owner = service.resume(owner.code, owner.token);
     expect(service.snapshot(owner)).toEqual(final);
     expect(service.snapshot(guest)).toEqual(final);
     expect(() => service.join(owner.code, 'Carol')).toThrow('complete');
@@ -791,7 +793,7 @@ it.each([
     text: 'Hello',
     owner: { kind: 'external', name: 'x'.repeat(61) },
   },
-  { type: 'resume', code: 'room', token: '' },
+  { type: 'resume', code: '' },
 ])('rejects malformed and oversized commands: %j', (command) => {
   expect(retroCommandSchema.safeParse(command).success).toBe(false);
 });

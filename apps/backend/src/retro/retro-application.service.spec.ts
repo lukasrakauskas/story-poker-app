@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { RetroServerEvent } from 'shared/retrospective';
+import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
@@ -40,24 +40,38 @@ function state(
   return message.data;
 }
 
+function enter(
+  connectionId: string,
+  command: Extract<RetroCommand, { type: 'create' | 'join' }>,
+) {
+  const established = application.establish(command);
+  const result = application.execute(
+    connectionId,
+    { type: 'resume', code: established.session.code },
+    undefined,
+    established.session.token,
+  );
+  return {
+    ...state(result, connectionId),
+    session: established.session,
+    result,
+  };
+}
+
 describe('RetroApplicationService', () => {
   it('owns session routing, recipient privacy, and synchronized reveal', () => {
-    const created = state(
-      application.execute('owner-connection', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'owner-connection',
-    );
-    const joinedResult = application.execute('guest-connection', {
+    const created = enter('owner-connection', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    const joined = enter('guest-connection', {
       type: 'join',
       name: 'Bobby',
       code: created.room.code,
     });
-    const joined = state(joinedResult, 'guest-connection');
     expect(
-      joinedResult.messages.map((message) => message.connectionId),
+      joined.result.messages.map((message) => message.connectionId),
     ).toEqual(['owner-connection', 'guest-connection']);
 
     const ownerWrite = application.execute('owner-connection', {
@@ -129,26 +143,20 @@ describe('RetroApplicationService', () => {
       voteCount: 1,
       votedBySelf: false,
     });
-    expect(joined.self.token).not.toBe(created.self.token);
+    expect(joined.session.token).not.toBe(created.session.token);
   });
 
   it('revokes and closes a participant removed by a moderator', () => {
-    const created = state(
-      application.execute('owner', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'owner',
-    );
-    const joined = state(
-      application.execute('guest', {
-        type: 'join',
-        name: 'Bobby',
-        code: created.room.code,
-      }),
-      'guest',
-    );
+    const created = enter('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    const joined = enter('guest', {
+      type: 'join',
+      name: 'Bobby',
+      code: created.room.code,
+    });
     application.execute('guest', {
       type: 'add-note',
       column: 'ideas',
@@ -169,11 +177,12 @@ describe('RetroApplicationService', () => {
     expect(state(removed, 'owner').room.members).toHaveLength(1);
     expect(
       event(
-        application.execute('replacement', {
-          type: 'resume',
-          code: created.room.code,
-          token: joined.self.token,
-        }),
+        application.execute(
+          'replacement',
+          { type: 'resume', code: created.room.code },
+          undefined,
+          joined.session.token,
+        ),
         'replacement',
       ),
     ).toMatchObject({
@@ -183,31 +192,33 @@ describe('RetroApplicationService', () => {
   });
 
   it('returns explicit replacement messages and close effects', () => {
-    const created = state(
-      application.execute('original', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'original',
-    );
-    const resumed = application.execute('replacement', {
-      type: 'resume',
-      code: created.room.code,
-      token: created.self.token,
+    const created = enter('original', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
     });
-    expect(event(resumed, 'original')).toMatchObject({
+    const resumed = application.resumeSession(
+      created.room.code,
+      created.session.token,
+    );
+    expect(event(resumed.transport, 'original')).toMatchObject({
       event: 'retro-error',
       data: { code: 'invalid-session' },
     });
-    expect(state(resumed, 'replacement').self).toEqual(created.self);
-    expect(resumed.closes).toEqual([
+    expect(resumed.transport.closes).toEqual([
       {
         connectionId: 'original',
         code: 4001,
         reason: 'Session replaced',
       },
     ]);
+    const replacement = application.execute(
+      'replacement',
+      { type: 'resume', code: created.room.code },
+      undefined,
+      resumed.session.token,
+    );
+    expect(state(replacement, 'replacement').self).toEqual(created.self);
     expect(
       event(
         application.execute('original', {
@@ -223,21 +234,89 @@ describe('RetroApplicationService', () => {
     });
   });
 
-  it('accepts only the first moderator recovery claim', () => {
-    const created = state(
-      application.execute('owner', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'owner',
+  it('rotates HTTP resume credentials and invalidates the displaced connection', () => {
+    const established = application.establish({
+      type: 'create',
+      name: 'Alice',
+      title: 'Rotate',
+    });
+    const attached = application.execute(
+      'original',
+      { type: 'resume', code: established.session.code },
+      undefined,
+      established.session.token,
     );
-    application.execute('guest', {
+    expect(state(attached, 'original').self).toEqual({
+      id: established.session.id,
+    });
+
+    const rotated = application.resumeSession(
+      established.session.code,
+      established.session.token,
+    );
+    expect(rotated.session.token).not.toBe(established.session.token);
+    expect(rotated.transport.closes).toEqual([
+      { connectionId: 'original', code: 4001, reason: 'Session replaced' },
+    ]);
+    expect(event(rotated.transport, 'original')).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+    expect(() =>
+      application.inspectSession(
+        established.session.code,
+        established.session.token,
+      ),
+    ).toThrow('no longer available');
+    expect(
+      application.inspectSession(
+        established.session.code,
+        rotated.session.token,
+      ).self,
+    ).toEqual({ id: established.session.id });
+  });
+
+  it('rejects a direct duplicate socket until HTTP rotates the cookie', () => {
+    const created = enter('original', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    const duplicate = application.execute(
+      'duplicate',
+      { type: 'resume', code: created.room.code },
+      undefined,
+      created.session.token,
+    );
+    expect(event(duplicate, 'duplicate')).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'session-in-use' },
+    });
+    expect(duplicate.closes).toEqual([]);
+    expect(
+      event(
+        application.execute('original', {
+          type: 'add-note',
+          column: 'ideas',
+          text: 'Still owned',
+        }),
+        'original',
+      ),
+    ).toMatchObject({ event: 'retro-state' });
+  });
+
+  it('accepts only the first moderator recovery claim', () => {
+    const created = enter('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    enter('guest', {
       type: 'join',
       name: 'Bobby',
       code: created.room.code,
     });
-    application.execute('third', {
+    enter('third', {
       type: 'join',
       name: 'Carol',
       code: created.room.code,
@@ -261,15 +340,12 @@ describe('RetroApplicationService', () => {
   });
 
   it('broadcasts disconnect presence without transport dependencies', () => {
-    const created = state(
-      application.execute('owner', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'owner',
-    );
-    application.execute('guest', {
+    const created = enter('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    enter('guest', {
       type: 'join',
       name: 'Bobby',
       code: created.room.code,

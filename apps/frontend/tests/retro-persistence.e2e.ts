@@ -1,5 +1,9 @@
 import { test, expect } from "@playwright/test";
 
+function backendRoomUrl(room: string) {
+  return `http://localhost:4000${new URL(room).pathname}`;
+}
+
 async function createRoom(
   page: import("@playwright/test").Page,
   title: string
@@ -21,8 +25,8 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   context,
 }) => {
   const first = await createRoom(page, "First retrospective");
-  const firstCookie = (await context.cookies(first)).find((cookie) =>
-    cookie.name.startsWith("retro-session-")
+  const firstCookie = (await context.cookies(backendRoomUrl(first))).find(
+    (cookie) => cookie.name.startsWith("retro-session-")
   )!;
   const reopened = await context.newPage();
   await reopened.goto(first);
@@ -34,12 +38,11 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
       exact: true,
     })
   ).toBeVisible();
-  // The displaced tab must not delete the cookie now used by the replacement.
-  expect(
-    (await context.cookies(first)).find(
-      (cookie) => cookie.name === firstCookie.name
-    )?.value
-  ).toBe(firstCookie.value);
+  // The displaced tab must not delete the rotated cookie now used by the replacement.
+  const replacementCookie = (await context.cookies(backendRoomUrl(first))).find(
+    (cookie) => cookie.name === firstCookie.name
+  )!;
+  expect(replacementCookie.value).not.toBe(firstCookie.value);
   await page.close();
   await reopened.reload();
   await expect(
@@ -51,7 +54,7 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   const second = await createRoom(reopened, "Second retrospective");
   expect(second).not.toBe(first);
   expect(
-    (await context.cookies(second)).filter((cookie) =>
+    (await context.cookies(backendRoomUrl(second))).filter((cookie) =>
       cookie.name.startsWith("retro-session-")
     )
   ).toHaveLength(2);
@@ -84,12 +87,46 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   ).toHaveCount(2);
 });
 
-test("rejects and clears stale credentials, then allows joining again", async ({
+test("forget revokes the server cookie without using JavaScript cookie access", async ({
+  page,
+  context,
+}) => {
+  const url = await createRoom(page, "Forget session retro");
+  const roomUrl = backendRoomUrl(url);
+  await page.getByText("Privacy and browser storage", { exact: true }).click();
+  await expect(
+    page.getByRole("button", {
+      name: "Forget this browser session",
+      exact: true,
+    })
+  ).toBeVisible();
+  await page
+    .getByRole("button", {
+      name: "Forget this browser session",
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByText(
+      "This browser session was forgotten. Join again to reconnect.",
+      { exact: true }
+    )
+  ).toBeVisible();
+  expect(
+    (await context.cookies(roomUrl)).some((item) =>
+      item.name.startsWith("retro-session-")
+    )
+  ).toBe(false);
+  await page.reload();
+  await expect(page.getByLabel("Room code")).toHaveValue(url.split("/").pop()!);
+});
+
+test("rejects stale credentials without clearing them, then allows joining again", async ({
   page,
   context,
 }) => {
   const url = await createRoom(page, "Stale cookie retro");
-  const cookie = (await context.cookies(url)).find((item) =>
+  const cookie = (await context.cookies(backendRoomUrl(url))).find((item) =>
     item.name.startsWith("retro-session-")
   )!;
   await context.addCookies([
@@ -102,8 +139,10 @@ test("rejects and clears stale credentials, then allows joining again", async ({
     })
   ).toBeVisible();
   expect(
-    (await context.cookies(url)).find((item) => item.name === cookie.name)
-  ).toBeUndefined();
+    (await context.cookies(backendRoomUrl(url))).find(
+      (item) => item.name === cookie.name
+    )?.value
+  ).toBe("invalid-token-with-enough-characters");
   await page
     .getByRole("link", { name: "Rejoin as a new participant", exact: true })
     .click();
@@ -129,15 +168,11 @@ test("storage failures stay in the mobile room status without blocking collabora
     Storage.prototype.setItem = () => {
       throw new Error("QuotaExceededError");
     };
-    Object.defineProperty(document, "cookie", { get: () => "", set: () => {} });
   });
   await createRoom(page, "Storage blocked retro");
   const status = page
     .locator('[data-slot="card"]')
     .filter({ hasText: "Room status" });
-  await expect(
-    status.getByText(/Could not save your rejoin cookie/)
-  ).toBeVisible();
   await expect(
     status.getByText(/Could not save this snapshot in browser history/)
   ).toBeVisible();

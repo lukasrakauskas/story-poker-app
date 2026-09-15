@@ -131,17 +131,47 @@ export class RetroService {
     return { code, id: member.id, token: member.token };
   }
 
+  /**
+   * Rotate a reconnect credential during the HTTP resume flow. The new value
+   * is returned to the HTTP boundary only so it can be written as an
+   * HttpOnly cookie; it is never part of a room snapshot or WebSocket event.
+   */
   resume(code: string, token: string): RetroSession {
     const room = this.room(code);
-    const member = this.participants.findByToken(room.members, token);
-    if (!member)
-      throw new RetroError(
-        'invalid-session',
-        'This session is no longer available. Join again.',
-      );
+    const member = this.findMemberByToken(room, token);
     this.retention.cancel(ROOM_NAMESPACE, `participant:${code}:${member.id}`);
     if (room.phase !== 'closed') this.participants.reconnect(member);
-    return { code, id: member.id, token };
+    return {
+      code,
+      id: member.id,
+      token: this.participants.rotateToken(member),
+    };
+  }
+
+  /** Attach a WebSocket using the credential already installed by HTTP. */
+  attach(code: string, token: string): RetroSession {
+    const room = this.room(code);
+    const member = this.findMemberByToken(room, token);
+    this.retention.cancel(ROOM_NAMESPACE, `participant:${code}:${member.id}`);
+    if (room.phase !== 'closed') this.participants.reconnect(member);
+    return { code, id: member.id, token: member.token };
+  }
+
+  /** Inspect without changing presence or rotating the credential. */
+  inspect(code: string, token: string): RetroSession {
+    const room = this.room(code);
+    const member = this.findMemberByToken(room, token);
+    return { code, id: member.id, token: member.token };
+  }
+
+  /** Explicitly forget a browser credential while retaining offline ownership. */
+  forget(code: string, token: string): RetroSession {
+    const room = this.room(code);
+    const member = this.findMemberByToken(room, token);
+    const session = { code, id: member.id, token: member.token };
+    this.participants.rotateToken(member);
+    if (room.phase !== 'closed') this.disconnectMember(room, member);
+    return session;
   }
 
   disconnect(session: RetroSession) {
@@ -149,36 +179,8 @@ export class RetroService {
     const member = room?.members.find(
       (member) => member.id === session.id && member.token === session.token,
     );
-    if (
-      !room ||
-      room.phase === 'closed' ||
-      !member ||
-      !this.participants.disconnect(member)
-    )
-      return;
-    this.retention.schedule(
-      ROOM_NAMESPACE,
-      `participant:${room.code}:${member.id}`,
-      RETRO_OFFLINE_RETENTION_MS,
-      () => {
-        if (
-          this.registry.get<StoredRoom>(ROOM_NAMESPACE, room.code) !== room ||
-          room.phase === 'closed' ||
-          room.expiresAt <= Date.now() ||
-          member.connected ||
-          !room.members.includes(member)
-        )
-          return;
-        room.members = room.members.filter(
-          (candidate) => candidate.id !== member.id,
-        );
-        room.readyMemberIds.delete(member.id);
-        for (const target of [...room.notes, ...room.groups])
-          target.voterIds = target.voterIds.filter((id) => id !== member.id);
-        for (const listener of this.memberExpiredListeners)
-          listener(room.code, member.id);
-      },
-    );
+    if (!room || room.phase === 'closed' || !member) return;
+    this.disconnectMember(room, member);
   }
 
   snapshot(session: RetroSession): RetroRoom {
@@ -510,6 +512,43 @@ export class RetroService {
         'Join a room before making changes.',
       );
     return { room, member };
+  }
+
+  private findMemberByToken(room: StoredRoom, token: string) {
+    const member = this.participants.findByToken(room.members, token);
+    if (!member)
+      throw new RetroError(
+        'invalid-session',
+        'This session is no longer available. Join again.',
+      );
+    return member;
+  }
+
+  private disconnectMember(room: StoredRoom, member: CollaborationParticipant) {
+    if (!this.participants.disconnect(member)) return;
+    this.retention.schedule(
+      ROOM_NAMESPACE,
+      `participant:${room.code}:${member.id}`,
+      RETRO_OFFLINE_RETENTION_MS,
+      () => {
+        if (
+          this.registry.get<StoredRoom>(ROOM_NAMESPACE, room.code) !== room ||
+          room.phase === 'closed' ||
+          room.expiresAt <= Date.now() ||
+          member.connected ||
+          !room.members.includes(member)
+        )
+          return;
+        room.members = room.members.filter(
+          (candidate) => candidate.id !== member.id,
+        );
+        room.readyMemberIds.delete(member.id);
+        for (const target of [...room.notes, ...room.groups])
+          target.voterIds = target.voterIds.filter((id) => id !== member.id);
+        for (const listener of this.memberExpiredListeners)
+          listener(room.code, member.id);
+      },
+    );
   }
 
   private createParticipant(name: string, role: CollaborationRole) {

@@ -1,4 +1,5 @@
 import { type OnModuleDestroy } from '@nestjs/common';
+import type { IncomingMessage } from 'node:http';
 import {
   ConnectedSocket,
   MessageBody,
@@ -10,6 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { WebSocket, type Server } from 'ws';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
+import { OriginAllowlistService } from '../transport/origin-allowlist.service.js';
 import { RateLimitService } from '../transport/rate-limit.service.js';
 import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
 import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
@@ -19,6 +21,7 @@ import {
 } from './retro-application.service.js';
 import { retroCommandSchema } from './retro.schema.js';
 import { RetroError } from './retro.service.js';
+import { RetroSessionCookieService } from './retro-session-cookie.service.js';
 
 @WebSocketGateway({ path: '/retro', maxPayload: 16 * 1024 })
 export class RetroGateway
@@ -29,12 +32,15 @@ export class RetroGateway
     OnModuleDestroy
 {
   private readonly unsubscribeEvents: () => void;
+  private readonly cookieHeaders = new WeakMap<WebSocket, string | undefined>();
 
   constructor(
     private readonly application: RetroApplicationService,
     private readonly transport: WebSocketTransportService,
     private readonly heartbeat: WebSocketHeartbeatService,
     private readonly rateLimits: RateLimitService,
+    private readonly origins: OriginAllowlistService,
+    private readonly cookies: RetroSessionCookieService,
     events: ApplicationEventBus,
   ) {
     this.unsubscribeEvents = events.on(RETRO_APPLICATION_NAMESPACE, (event) =>
@@ -57,7 +63,16 @@ export class RetroGateway
     this.rateLimits.clear(RETRO_APPLICATION_NAMESPACE);
   }
 
-  handleConnection(socket: WebSocket) {
+  handleConnection(socket: WebSocket, request?: IncomingMessage) {
+    const origin =
+      typeof request?.headers.origin === 'string'
+        ? request.headers.origin
+        : undefined;
+    if (!this.origins.isAllowed(origin)) {
+      socket.close(1008, 'Origin not allowed');
+      return;
+    }
+    this.cookieHeaders.set(socket, request?.headers.cookie);
     this.transport.register(socket);
     this.heartbeat.register(RETRO_APPLICATION_NAMESPACE, socket, true);
   }
@@ -117,8 +132,20 @@ export class RetroGateway
         ),
       );
     }
+    const credential =
+      command.data.type === 'resume'
+        ? (this.cookies.readHeader(
+            this.cookieHeaders.get(socket),
+            command.data.code,
+          ) ?? undefined)
+        : undefined;
     return this.transport.dispatch(
-      this.application.execute(connectionId, command.data, requestId),
+      this.application.execute(
+        connectionId,
+        command.data,
+        requestId,
+        credential,
+      ),
     );
   }
 }

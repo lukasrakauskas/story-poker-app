@@ -89,7 +89,11 @@ const domains: { name: string; setup: () => Contract }[] = [
             .members.find((participant) => participant.id === id)?.connected ??
           false,
         disconnectGuest: () => rooms.disconnect(guest),
-        resumeGuest: () => rooms.resume(guest.code, guest.token),
+        resumeGuest: () => {
+          const resumed = rooms.resume(guest.code, guest.token);
+          guest.token = resumed.token;
+          return resumed;
+        },
         duplicateNameIsRejected: () => {
           try {
             rooms.join(owner.code, ' bObBy ');
@@ -120,7 +124,7 @@ describe.each(domains)('$name shared collaboration contract', ({ setup }) => {
     }
   });
 
-  it('retains a disconnected identity and restores it with the same token', () => {
+  it('retains a disconnected identity and restores it with a valid credential', () => {
     const room = setup();
     try {
       room.disconnectGuest();

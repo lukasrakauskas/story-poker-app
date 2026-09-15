@@ -68,6 +68,11 @@ export class ParticipantService {
     return participant;
   }
 
+  rotateToken<T extends CollaborationParticipant>(participant: T): string {
+    participant.token = nanoid(32);
+    return participant.token;
+  }
+
   disconnect<T extends CollaborationParticipant>(participant: T): boolean {
     if (!participant.connected) return false;
     participant.connected = false;

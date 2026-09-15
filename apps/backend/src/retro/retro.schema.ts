@@ -2,6 +2,9 @@ import { z } from 'zod';
 import type { RetroCommand } from 'shared/retrospective';
 import { participantNameSchema } from '../collaboration/participant.service.js';
 
+export const retroCodeSchema = z
+  .string()
+  .regex(/^[a-zA-Z0-9_-]{1,64}$/, 'Invalid retrospective room code.');
 const id = z.string().min(1).max(64);
 const text = z.string().trim().min(1).max(1000);
 const name = participantNameSchema;
@@ -13,6 +16,15 @@ const owner = z.discriminatedUnion('kind', [
     name: z.string().trim().min(1).max(60),
   }),
 ]);
+export const retroSessionEstablishmentSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('create'),
+    name,
+    title: z.string().trim().min(1).max(100),
+  }),
+  z.object({ type: z.literal('join'), name, code: retroCodeSchema }),
+]);
+
 export const retroCommandSchema: z.ZodType<RetroCommand> = z.discriminatedUnion(
   'type',
   [
@@ -22,7 +34,7 @@ export const retroCommandSchema: z.ZodType<RetroCommand> = z.discriminatedUnion(
       title: z.string().trim().min(1).max(100),
     }),
     z.object({ type: z.literal('join'), name, code: id }),
-    z.object({ type: z.literal('resume'), code: id, token: id }),
+    z.object({ type: z.literal('resume'), code: retroCodeSchema }),
     z.object({
       type: z.literal('add-note'),
       column: z.enum(['went-well', 'improve', 'ideas']),

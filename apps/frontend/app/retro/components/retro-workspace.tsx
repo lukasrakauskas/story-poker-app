@@ -73,7 +73,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     error,
     retry,
     send,
-    cookieSaved,
+    forgetSession,
     historySaved,
   } = useRetro();
   const compactDiscussion = useCompactDiscussion();
@@ -285,8 +285,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               pending={pending}
               error={supportingError}
               retry={retry}
-              cookieSaved={cookieSaved}
               historySaved={historySaved}
+              forgetSession={forgetSession}
               expired={expired}
               terminal={expired || invalid}
               minutes={minutes}

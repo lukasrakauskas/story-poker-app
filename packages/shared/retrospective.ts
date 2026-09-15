@@ -65,7 +65,8 @@ export interface RetroRoom {
 export type RetroCommand =
   | { type: "create"; name: string; title: string }
   | { type: "join"; name: string; code: string }
-  | { type: "resume"; code: string; token: string }
+  /** The server reads the room-scoped HttpOnly cookie at the WebSocket boundary. */
+  | { type: "resume"; code: string }
   | { type: "add-note"; column: RetroColumn; text: string }
   | { type: "edit-note"; id: string; text: string }
   | { type: "delete-note"; id: string }
@@ -87,12 +88,18 @@ export type RetroCommand =
     }
   | { type: "toggle-action"; id: string }
   | { type: "delete-action"; id: string };
+export interface RetroSessionView {
+  room: RetroRoom;
+  self: { id: string };
+}
+
 export type RetroServerEvent =
   | {
       event: "retro-state";
       data: {
         room: RetroRoom;
-        self: { id: string; token: string };
+        /** The participant identity is not a reconnect credential. */
+        self: { id: string };
         requestId?: string;
       };
     }

@@ -22,10 +22,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
   const [title, setTitle] = useState("");
   const [code, setCode] = useState(initialCode);
   const disabled =
-    connection !== "connected" ||
-    pending ||
-    error?.code === "room-expired" ||
-    error?.code === "invalid-session";
+    connection !== "connected" || pending || error?.code === "room-expired";
 
   return (
     <div className="mx-auto max-w-lg space-y-6 py-6 sm:py-12">
@@ -196,8 +193,9 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
         </CardContent>
       </Card>
       <p className="text-center text-sm text-muted-foreground">
-        No account needed. Cookies let you rejoin until the room expires two
-        hours after creation. Previous retros and actions stay on this browser.
+        No account needed. A secure server-managed cookie lets you rejoin until
+        the room expires two hours after creation. Previous retros and actions
+        stay on this browser.
       </p>
     </div>
   );
