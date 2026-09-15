@@ -4,6 +4,8 @@ import { type Server, WebSocket } from 'ws';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
+import { RetentionService } from '../collaboration/retention.service.js';
+import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import { RateLimitService } from '../transport/rate-limit.service.js';
 import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
 import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
@@ -35,13 +37,16 @@ beforeEach(() => {
   service = new RetroService(
     new ParticipantService(),
     new RoomRegistryService(),
+    new RetentionService(),
   );
+  const events = new ApplicationEventBus();
   const connections = new ConnectionRegistryService();
   gateway = new RetroGateway(
-    new RetroApplicationService(service, connections),
+    new RetroApplicationService(service, connections, events),
     new WebSocketTransportService(),
     new WebSocketHeartbeatService(),
     new RateLimitService(),
+    events,
   );
 });
 afterEach(() => {

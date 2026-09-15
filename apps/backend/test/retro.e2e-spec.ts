@@ -2,7 +2,9 @@ import { Test } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { WebSocket } from 'ws';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RetentionService } from '../src/collaboration/retention.service.js';
+import { RETRO_OFFLINE_RETENTION_MS } from '../src/retro/retro.service.js';
 import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
 import { AppModule } from '../src/app.module.js';
 
@@ -58,9 +60,79 @@ beforeEach(async () => {
 afterEach(async () => {
   sockets.forEach((socket) => socket.terminate());
   await app.close();
+  vi.restoreAllMocks();
 });
 
 describe('retrospective WebSocket route', () => {
+  it('broadcasts offline membership expiry and rejects its stale credential', async () => {
+    const retention = app.get(RetentionService);
+    const schedule = retention.schedule.bind(retention);
+    const scheduled = vi
+      .spyOn(retention, 'schedule')
+      .mockImplementation((namespace, key, delay, expire) =>
+        schedule(namespace, key, namespace === 'retro' ? 50 : delay, expire),
+      );
+    const owner = await connect();
+    const guest = await connect();
+    const created = state(
+      await command(owner, {
+        type: 'create',
+        name: 'Alice',
+        title: 'Retention',
+      }),
+    );
+    const joined = state(
+      await command(guest, {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+      }),
+    );
+    await command(guest, {
+      type: 'add-note',
+      column: 'ideas',
+      text: 'Keep attribution',
+    });
+    await command(owner, { type: 'advance' });
+    const offline = next(owner);
+    guest.close();
+    expect(
+      state(await offline).room.members.find(
+        (member) => member.id === joined.self.id,
+      )?.connected,
+    ).toBe(false);
+    const expired = state(await next(owner));
+    expect(scheduled).toHaveBeenCalledWith(
+      'retro',
+      expect.any(String),
+      RETRO_OFFLINE_RETENTION_MS,
+      expect.any(Function),
+    );
+    expect(expired.room.members).toHaveLength(1);
+    expect(expired.room.notes[0]).toMatchObject({
+      text: 'Keep attribution',
+      authorName: 'Bobby',
+    });
+    const returning = await connect();
+    expect(
+      await command(returning, {
+        type: 'resume',
+        code: created.room.code,
+        token: joined.self.token,
+      }),
+    ).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+    const replacement = state(
+      await command(returning, {
+        type: 'join',
+        code: created.room.code,
+        name: 'Bobby',
+      }),
+    );
+    expect(replacement.self.id).not.toBe(joined.self.id);
+  });
   it('runs a shared retrospective without leaking credentials or affecting poker', async () => {
     const owner = await connect();
     const guest = await connect();

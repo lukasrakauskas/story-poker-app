@@ -69,6 +69,7 @@ const domains: { name: string; setup: () => Contract }[] = [
       const rooms = new RetroService(
         new ParticipantService(),
         new RoomRegistryService(),
+        new RetentionService(),
       );
       const owner = rooms.create('  Alice  ', 'Retro');
       const guest = rooms.join(owner.code, '  Bobby  ');

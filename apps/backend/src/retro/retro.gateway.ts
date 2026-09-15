@@ -9,6 +9,7 @@ import {
   type OnGatewayInit,
 } from '@nestjs/websockets';
 import { WebSocket, type Server } from 'ws';
+import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import { RateLimitService } from '../transport/rate-limit.service.js';
 import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
 import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
@@ -27,12 +28,19 @@ export class RetroGateway
     OnGatewayInit<Server>,
     OnModuleDestroy
 {
+  private readonly unsubscribeEvents: () => void;
+
   constructor(
     private readonly application: RetroApplicationService,
     private readonly transport: WebSocketTransportService,
     private readonly heartbeat: WebSocketHeartbeatService,
     private readonly rateLimits: RateLimitService,
-  ) {}
+    events: ApplicationEventBus,
+  ) {
+    this.unsubscribeEvents = events.on(RETRO_APPLICATION_NAMESPACE, (event) =>
+      this.transport.dispatch(event),
+    );
+  }
 
   afterInit(_server: Server) {
     this.heartbeat.start(RETRO_APPLICATION_NAMESPACE, {
@@ -44,6 +52,7 @@ export class RetroGateway
   }
 
   onModuleDestroy() {
+    this.unsubscribeEvents();
     this.heartbeat.stop(RETRO_APPLICATION_NAMESPACE);
     this.rateLimits.clear(RETRO_APPLICATION_NAMESPACE);
   }

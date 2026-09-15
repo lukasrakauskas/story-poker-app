@@ -4,14 +4,21 @@ import { ConnectionRegistryService } from '../collaboration/connection-registry.
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { RetroApplicationService } from './retro-application.service.js';
+import { RetentionService } from '../collaboration/retention.service.js';
+import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import { RetroService } from './retro.service.js';
 
 let application: RetroApplicationService;
 
 beforeEach(() => {
   application = new RetroApplicationService(
-    new RetroService(new ParticipantService(), new RoomRegistryService()),
+    new RetroService(
+      new ParticipantService(),
+      new RoomRegistryService(),
+      new RetentionService(),
+    ),
     new ConnectionRegistryService(),
+    new ApplicationEventBus(),
   );
 });
 

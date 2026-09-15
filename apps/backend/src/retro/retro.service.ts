@@ -14,8 +14,10 @@ import {
   type CollaborationRole,
 } from '../collaboration/participant.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
+import { RetentionService } from '../collaboration/retention.service.js';
 
 export const RETRO_LIFETIME_MS = 2 * 60 * 60 * 1000;
+export const RETRO_OFFLINE_RETENTION_MS = 5 * 60 * 1000;
 const MAX_ROOMS = 100;
 const MAX_MEMBERS = 30;
 const MAX_NOTES = 300;
@@ -59,9 +61,21 @@ const ROOM_NAMESPACE = 'retro';
 
 @Injectable()
 export class RetroService {
+  private readonly memberExpiredListeners = new Set<
+    (code: string, id: string) => void
+  >();
+
+  onMemberExpired(listener: (code: string, id: string) => void): () => void {
+    this.memberExpiredListeners.add(listener);
+    return () => {
+      this.memberExpiredListeners.delete(listener);
+    };
+  }
+
   constructor(
     private readonly participants: ParticipantService,
     private readonly registry: RoomRegistryService,
+    private readonly retention: RetentionService,
   ) {}
 
   create(name: string, title: string): RetroSession {
@@ -119,6 +133,7 @@ export class RetroService {
         'invalid-session',
         'This session is no longer available. Join again.',
       );
+    this.retention.cancel(ROOM_NAMESPACE, `participant:${code}:${member.id}`);
     this.participants.reconnect(member);
     return { code, id: member.id, token };
   }
@@ -128,7 +143,30 @@ export class RetroService {
     const member = room?.members.find(
       (member) => member.id === session.id && member.token === session.token,
     );
-    if (member) this.participants.disconnect(member);
+    if (!room || !member || !this.participants.disconnect(member)) return;
+    this.retention.schedule(
+      ROOM_NAMESPACE,
+      `participant:${room.code}:${member.id}`,
+      RETRO_OFFLINE_RETENTION_MS,
+      () => {
+        if (
+          this.registry.get<StoredRoom>(ROOM_NAMESPACE, room.code) !== room ||
+          room.phase === 'closed' ||
+          room.expiresAt <= Date.now() ||
+          member.connected ||
+          !room.members.includes(member)
+        )
+          return;
+        room.members = room.members.filter(
+          (candidate) => candidate.id !== member.id,
+        );
+        room.readyMemberIds.delete(member.id);
+        for (const target of [...room.notes, ...room.groups])
+          target.voterIds = target.voterIds.filter((id) => id !== member.id);
+        for (const listener of this.memberExpiredListeners)
+          listener(room.code, member.id);
+      },
+    );
   }
 
   snapshot(session: RetroSession): RetroRoom {
@@ -193,6 +231,10 @@ export class RetroService {
             'Transfer moderation before removing yourself.',
           );
         const removed = this.member(room, command.memberId);
+        this.retention.cancel(
+          ROOM_NAMESPACE,
+          `participant:${room.code}:${removed.id}`,
+        );
         room.members = room.members.filter(
           (candidate) => candidate.id !== removed.id,
         );

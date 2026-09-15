@@ -1,15 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ParticipantService } from '../collaboration/participant.service.js';
+import { RetentionService } from '../collaboration/retention.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import {
   RETRO_LIFETIME_MS,
+  RETRO_OFFLINE_RETENTION_MS,
   RetroService,
   type RetroSession,
 } from './retro.service.js';
 import { retroCommandSchema } from './retro.schema.js';
 
 function createService() {
-  return new RetroService(new ParticipantService(), new RoomRegistryService());
+  return new RetroService(
+    new ParticipantService(),
+    new RoomRegistryService(),
+    new RetentionService(),
+  );
 }
 
 let service: RetroService;
@@ -28,6 +34,71 @@ function add(text = 'Great teamwork') {
 }
 
 describe('room lifecycle and privacy', () => {
+  it('recovers stale capacity and names after five minutes while retaining author and owner display', () => {
+    service.mutate(guest, {
+      type: 'add-note',
+      column: 'ideas',
+      text: 'Original author',
+    });
+    for (let i = 0; i < 28; i++) service.join(owner.code, `Member ${i}`);
+    expect(() => service.join(owner.code, 'Carol')).toThrow('full');
+    for (let i = 0; i < 3; i++) service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, {
+      type: 'add-action',
+      text: 'Follow up',
+      owner: { kind: 'participant', participantId: guest.id },
+    });
+    const expired = vi.fn();
+    service.onMemberExpired(expired);
+    service.disconnect(guest);
+    vi.advanceTimersByTime(RETRO_OFFLINE_RETENTION_MS - 1);
+    expect(() => service.join(owner.code, 'Carol')).toThrow('full');
+    service.disconnect(guest); // Repeated disconnect must not extend the window.
+    vi.advanceTimersByTime(1);
+    expect(expired).toHaveBeenCalledWith(owner.code, guest.id);
+    expect(() => service.resume(guest.code, guest.token)).toThrow(
+      'no longer available',
+    );
+    const replacement = service.join(owner.code, 'Bobby');
+    expect(replacement.id).not.toBe(guest.id);
+    expect(service.snapshot(owner).notes[0]).toMatchObject({
+      authorId: guest.id,
+      authorName: 'Bobby',
+      text: 'Original author',
+    });
+    expect(service.snapshot(owner).actions[0].owner).toEqual({
+      kind: 'participant',
+      participantId: guest.id,
+      name: 'Bobby',
+    });
+  });
+
+  it('cancels stale cleanup on resume and coordinates moderator expiry with recovery', () => {
+    const noteId = add('Keep identity');
+    service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, { type: 'toggle-vote', id: noteId });
+    service.disconnect(owner);
+    vi.advanceTimersByTime(RETRO_OFFLINE_RETENTION_MS - 1);
+    service.resume(owner.code, owner.token);
+    vi.advanceTimersByTime(RETRO_OFFLINE_RETENTION_MS);
+    expect(
+      service.snapshot(owner).members.find((member) => member.id === owner.id)
+        ?.moderator,
+    ).toBe(true);
+    expect(service.snapshot(owner).notes[0]).toMatchObject({
+      authorId: owner.id,
+      votedBySelf: true,
+    });
+    service.disconnect(owner);
+    vi.advanceTimersByTime(RETRO_OFFLINE_RETENTION_MS);
+    expect(service.snapshot(guest).members).toHaveLength(1);
+    service.mutate(guest, { type: 'claim-moderator' });
+    expect(service.snapshot(guest).members[0].moderator).toBe(true);
+    expect(() => service.resume(owner.code, owner.token)).toThrow(
+      'no longer available',
+    );
+  });
   it('keeps rooms isolated, credentials private and snapshots detached', () => {
     add();
     const other = service.create('Carol', 'Other room');

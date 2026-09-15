@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import {
@@ -15,13 +16,25 @@ import {
 export const RETRO_APPLICATION_NAMESPACE = 'retro';
 
 @Injectable()
-export class RetroApplicationService {
+export class RetroApplicationService implements OnModuleDestroy {
+  private readonly unsubscribeMemberExpired: () => void;
   private readonly sessions = new Map<string, RetroSession>();
 
   constructor(
     private readonly retros: RetroService,
     private readonly connections: ConnectionRegistryService,
-  ) {}
+    events: ApplicationEventBus,
+  ) {
+    this.unsubscribeMemberExpired = retros.onMemberExpired((code, id) => {
+      this.connections.revoke(RETRO_APPLICATION_NAMESPACE, code, id);
+      events.emit(RETRO_APPLICATION_NAMESPACE, this.broadcast(code));
+    });
+  }
+
+  onModuleDestroy() {
+    this.unsubscribeMemberExpired();
+    this.sessions.clear();
+  }
 
   execute(
     connectionId: string,
