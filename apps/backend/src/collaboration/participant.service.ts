@@ -7,6 +7,7 @@ import {
 
 export {
   normalizeParticipantName,
+  participantNameError,
   participantNameSchema,
 } from 'shared/participant';
 
