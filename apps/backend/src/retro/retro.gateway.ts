@@ -11,6 +11,7 @@ import {
 } from '@nestjs/websockets';
 import { WebSocket, type Server } from 'ws';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
+import { OriginAllowlistService } from '../transport/origin-allowlist.service.js';
 import { RateLimitService } from '../transport/rate-limit.service.js';
 import {
   ADMISSION_CLOSE_CODE,
@@ -28,6 +29,7 @@ import {
 } from './retro-application.service.js';
 import { retroCommandMessageSchema } from './retro.schema.js';
 import { RetroError } from './retro.service.js';
+import { RetroSessionCookieService } from './retro-session-cookie.service.js';
 
 @WebSocketGateway({
   path: '/retro',
@@ -43,6 +45,9 @@ export class RetroGateway
 {
   private readonly unsubscribeEvents: () => void;
   private readonly admission: WebSocketAdmissionService;
+  private readonly origins: OriginAllowlistService;
+  private readonly cookies: RetroSessionCookieService;
+  private readonly cookieHeaders = new WeakMap<WebSocket, string | undefined>();
 
   constructor(
     private readonly application: RetroApplicationService,
@@ -52,7 +57,11 @@ export class RetroGateway
     events: ApplicationEventBus,
     @Optional() admission?: WebSocketAdmissionService,
     @Optional() metrics?: TransportMetricsService,
+    @Optional() origins?: OriginAllowlistService,
+    @Optional() cookies?: RetroSessionCookieService,
   ) {
+    this.origins = origins ?? new OriginAllowlistService();
+    this.cookies = cookies ?? new RetroSessionCookieService();
     this.admission =
       admission ??
       new WebSocketAdmissionService(
@@ -90,6 +99,15 @@ export class RetroGateway
   }
 
   handleConnection(socket: WebSocket, request?: IncomingMessage) {
+    const origin =
+      typeof request?.headers.origin === 'string'
+        ? request.headers.origin
+        : undefined;
+    if (!this.origins.isAllowed(origin)) {
+      socket.close(1008, 'Origin not allowed');
+      return;
+    }
+    this.cookieHeaders.set(socket, request?.headers.cookie);
     this.ensureConnection(socket, request);
   }
 
@@ -102,6 +120,7 @@ export class RetroGateway
       this.transport.dispatch(await this.application.disconnect(connectionId));
     }
     this.transport.unregister(socket);
+    this.cookieHeaders.delete(socket);
   }
 
   @SubscribeMessage('retro-command')
@@ -193,10 +212,18 @@ export class RetroGateway
     }
 
     const { requestId: parsedRequestId, ...commandData } = command.data;
+    const credential =
+      commandData.type === 'resume'
+        ? (this.cookies.readHeader(
+            this.cookieHeaders.get(socket),
+            commandData.code,
+          ) ?? undefined)
+        : undefined;
     const applicationResult = await this.application.execute(
       connectionId,
       commandData,
       parsedRequestId ?? requestId,
+      credential,
     );
     if (operation && hasStateFor(applicationResult, connectionId))
       this.admission.authenticate(connectionId);

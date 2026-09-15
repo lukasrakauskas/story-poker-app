@@ -59,10 +59,22 @@ test("closure freezes snapshots and save times across presence, reopen and late 
   const reopened = await guestContext.newPage();
   await reopened.goto(url);
   await expect(
+    reopened.getByRole("button", { name: "Continue as Bobby", exact: true })
+  ).toBeVisible();
+  await reopened
+    .getByRole("button", { name: "Continue as Bobby", exact: true })
+    .click();
+  await expect(
     reopened.getByText("Retrospective complete · read-only", { exact: true })
   ).toBeVisible();
   expect(await saved(reopened)).toBe(originalGuest);
   await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
   await expect(
     page.getByText("Retrospective complete · read-only", { exact: true })
   ).toBeVisible();
@@ -70,11 +82,13 @@ test("closure freezes snapshots and save times across presence, reopen and late 
   const lateContext = await browser.newContext();
   const late = await lateContext.newPage();
   await late.goto(url);
-  await late.getByLabel("Your name").fill("Carol");
-  await late
-    .getByRole("button", { name: "Join retrospective", exact: true })
-    .click();
-  await expect(late.getByText(/New participants cannot join/)).toBeVisible();
+  await expect(
+    late.getByText(
+      "This room link is expired, closed, full, or does not exist. No room details were shared.",
+      { exact: true }
+    )
+  ).toBeVisible();
+  await expect(late.getByLabel("Your name")).toHaveCount(0);
   expect(await saved(page)).toBe(originalOwner);
   expect(await saved(reopened)).toBe(originalGuest);
   await page

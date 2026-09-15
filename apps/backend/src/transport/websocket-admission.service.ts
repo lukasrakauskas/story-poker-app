@@ -16,7 +16,13 @@ export const ADMISSION_CLOSE_CODE = 1013;
 export const ADMISSION_CLOSE_REASON =
   'Connection limit reached. Try again later.';
 
-export type AdmissionOperation = 'create' | 'join' | 'resume' | 'password';
+export type AdmissionOperation =
+  | 'create'
+  | 'join'
+  | 'resume'
+  | 'password'
+  | 'inspect'
+  | 'forget';
 
 export type WebSocketAdmissionPolicy = {
   maxActiveSockets: number;
@@ -173,10 +179,28 @@ export class WebSocketAdmissionService implements OnModuleDestroy {
     operation: AdmissionOperation,
   ): boolean {
     const source = this.connections.get(connectionId)?.source ?? UNKNOWN_SOURCE;
+    return this.consumeSourceOperation(namespace, source, operation);
+  }
+
+  /** Apply the same source-scoped window to HTTP entry/session operations. */
+  consumeHttpOperation(
+    namespace: string,
+    source: string,
+    operation: AdmissionOperation,
+  ): boolean {
+    return this.consumeSourceOperation(namespace, source, operation);
+  }
+
+  private consumeSourceOperation(
+    namespace: string,
+    source: string,
+    operation: AdmissionOperation,
+  ): boolean {
+    const safeSource = normalizeSourceKey(source);
     const limit = this.operationLimit(operation);
     const allowed = this.rateLimits.consume(
       SOURCE_RATE_NAMESPACE,
-      `${namespace}\0${operation}\0${source}`,
+      `${namespace}\0${operation}\0${safeSource}`,
       { limit, windowMs: this.policy.attemptWindowMs },
     );
     if (!allowed) this.metrics.recordOperationThrottled(namespace, operation);
@@ -248,6 +272,10 @@ export class WebSocketAdmissionService implements OnModuleDestroy {
         return this.policy.maxResumeAttemptsPerSource;
       case 'password':
         return this.policy.maxPasswordAttemptsPerSource;
+      case 'inspect':
+        return this.policy.maxJoinAttemptsPerSource;
+      case 'forget':
+        return this.policy.maxResumeAttemptsPerSource;
     }
   }
 

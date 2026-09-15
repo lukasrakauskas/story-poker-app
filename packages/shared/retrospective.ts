@@ -173,16 +173,23 @@ export const retroSnapshotSchema = retroPublicRoomSchema;
 
 /**
  * Internal state is intentionally a different schema from the public room.
- * It may contain reconnect tokens and voter identities, but it is never a
- * network or archive payload.
+ * It contains only a token digest and ephemeral connection ownership; the
+ * bearer credential itself is never persisted or sent on the wire.
  */
 export const retroInternalParticipantSchema = z
   .object({
     id: retroIdSchema,
     name: participantNameSchema,
     role: z.enum(["participant", "moderator"]),
-    token: retroTokenSchema,
+    tokenHash: z.string().length(64),
     connected: z.boolean(),
+    offlineExpiresAt: retroTimestampSchema.nullable(),
+    connection: z
+      .object({
+        instanceId: retroIdSchema,
+        connectionId: retroIdSchema,
+      })
+      .nullable(),
   })
   .strict();
 
@@ -212,7 +219,7 @@ export const retroInternalRoomSchema = z
     members: z.array(retroInternalParticipantSchema).max(RETRO_MAX_MEMBERS),
     notes: z.array(retroInternalNoteSchema).max(RETRO_MAX_NOTES),
     groups: z.array(retroInternalGroupSchema).max(RETRO_MAX_NOTES),
-    readyMemberIds: z.set(retroIdSchema).max(RETRO_MAX_MEMBERS),
+    readyMemberIds: z.array(retroIdSchema).max(RETRO_MAX_MEMBERS),
   })
   .strict();
 export const retroPrivateRoomSchema = retroInternalRoomSchema;
@@ -222,6 +229,23 @@ export const retroSessionSchema = z
     code: retroCodeSchema,
     id: retroIdSchema,
     token: retroTokenSchema,
+  })
+  .strict();
+
+/** HTTP responses expose identity and room state, never the bearer token. */
+export const retroSessionViewSchema = z
+  .object({
+    room: retroPublicRoomSchema,
+    self: z.object({ id: retroIdSchema }).strict(),
+  })
+  .strict();
+
+/** Minimal metadata used for an explicit Continue/Forget decision. */
+export const retroRememberedIdentitySchema = z
+  .object({
+    code: retroCodeSchema,
+    name: participantNameSchema,
+    moderator: z.boolean(),
   })
   .strict();
 
@@ -256,13 +280,7 @@ export const retroCommandSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("inspect"), code: retroCodeSchema }).strict(),
-  z
-    .object({
-      type: z.literal("resume"),
-      code: retroCodeSchema,
-      token: retroTokenSchema,
-    })
-    .strict(),
+  z.object({ type: z.literal("resume"), code: retroCodeSchema }).strict(),
   z
     .object({
       type: z.literal("add-note"),
@@ -330,11 +348,9 @@ export const retroCommandMessageSchema = retroCommandSchema.and(
   z.object({ requestId: retroRequestIdSchema.optional() }).strict()
 );
 
-export const retroClientSelfSchema = z
-  .object({ id: retroIdSchema, token: retroTokenSchema })
-  .strict();
+export const retroClientSelfSchema = z.object({ id: retroIdSchema }).strict();
 
-/** Recipient-specific state includes that recipient's resume token. */
+/** Routine state contains identity only; the HttpOnly cookie carries credentials. */
 export const retroClientStateSchema = z
   .object({
     room: retroPublicRoomSchema,
@@ -511,6 +527,10 @@ export type RetroInternalGroup = z.infer<typeof retroInternalGroupSchema>;
 export type RetroInternalRoom = z.infer<typeof retroInternalRoomSchema>;
 export type RetroPrivateRoom = z.infer<typeof retroPrivateRoomSchema>;
 export type RetroSession = z.infer<typeof retroSessionSchema>;
+export type RetroSessionView = z.infer<typeof retroSessionViewSchema>;
+export type RetroRememberedIdentity = z.infer<
+  typeof retroRememberedIdentitySchema
+>;
 export type RetroCommand = z.infer<typeof retroCommandSchema>;
 export type RetroCommandMessage = z.infer<typeof retroCommandMessageSchema>;
 export type RetroClientSelf = z.infer<typeof retroClientSelfSchema>;

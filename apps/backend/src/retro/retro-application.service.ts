@@ -8,7 +8,9 @@ import {
   RETRO_PROTOCOL_ERROR_MESSAGE,
   retroServerEventSchema,
   type RetroCommand,
+  type RetroRememberedIdentity,
   type RetroServerEvent,
+  type RetroSessionView,
 } from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import {
@@ -25,6 +27,12 @@ import {
 import type { RetroRoomChange } from './retro-room.repository.js';
 
 export const RETRO_APPLICATION_NAMESPACE = 'retro';
+
+export type RetroSessionOperation = {
+  session: RetroSession;
+  view: RetroSessionView;
+  transport: ApplicationResult;
+};
 
 @Injectable()
 export class RetroApplicationService implements OnModuleDestroy {
@@ -55,6 +63,7 @@ export class RetroApplicationService implements OnModuleDestroy {
     connectionId: string,
     command: RetroCommand,
     requestId?: string,
+    credential?: string,
   ): Promise<ApplicationResult> {
     const context = this.context();
     let expired: ApplicationResult = result();
@@ -100,46 +109,25 @@ export class RetroApplicationService implements OnModuleDestroy {
             'You are already in a retrospective. Open a new tab to join another.',
           );
 
-        let previousConnection: RetroConnection | undefined;
-        const connectionContext = this.context(connectionId);
-        if (command.type === 'create') {
-          if (
-            this.admission &&
-            !this.admission.allowRoomCreation(RETRO_APPLICATION_NAMESPACE)
-          )
-            throw new RetroError(
-              'capacity',
-              'Room creation is temporarily unavailable. Try again later.',
-            );
-          this.requireBroadcastCapacity('', 1);
-          session = await this.retros.create(
-            command.name,
-            command.title,
-            command.password,
-            connectionContext,
+        if (command.type !== 'resume')
+          throw new RetroError(
+            'http-required',
+            'Create or join through the secure session endpoint.',
           );
-        } else if (command.type === 'join') {
-          this.requireBroadcastCapacity(
-            command.code,
-            this.roomAudienceSize(command.code) > 0 ? 1 : 0,
+        if (!credential)
+          throw new RetroError(
+            'session-required',
+            'Establish this room session before opening the live board.',
           );
-          session = await this.retros.join(
-            command.code,
-            command.name,
-            command.password,
-            connectionContext,
-          );
-        } else {
-          this.requireBroadcastCapacity(command.code);
-          const resumed = await this.retros.resumeWithConnection(
-            command.code,
-            command.token,
-            this.connection(connectionId),
-            context,
-          );
-          session = resumed.session;
-          previousConnection = resumed.previousConnection;
-        }
+        this.requireBroadcastCapacity(command.code, 1);
+        const resumed = await this.retros.resumeWithConnection(
+          command.code,
+          credential,
+          this.connection(connectionId),
+          context,
+        );
+        session = resumed.session;
+        const previousConnection = resumed.previousConnection;
 
         const localPrevious = this.connections.replace(
           RETRO_APPLICATION_NAMESPACE,
@@ -207,6 +195,157 @@ export class RetroApplicationService implements OnModuleDestroy {
     } finally {
       this.refreshMetrics();
     }
+  }
+
+  /**
+   * Establishment is intentionally HTTP-only. It creates the member and
+   * returns a secret-free view; the HTTP controller writes the bearer token to
+   * an HttpOnly cookie before the browser opens a WebSocket.
+   */
+  async establish(
+    command: Extract<RetroCommand, { type: 'create' | 'join' }>,
+    source = 'unknown',
+  ): Promise<RetroSessionOperation> {
+    const operation = command.type;
+    if (
+      this.admission &&
+      !this.admission.consumeHttpOperation(
+        RETRO_APPLICATION_NAMESPACE,
+        source,
+        operation,
+      )
+    )
+      throw new RetroError(
+        'rate-limit',
+        'Too many attempts. Wait a minute before trying again.',
+      );
+    if (
+      command.type === 'create' &&
+      this.admission &&
+      !this.admission.allowRoomCreation(RETRO_APPLICATION_NAMESPACE)
+    )
+      throw new RetroError(
+        'capacity',
+        'Room creation is temporarily unavailable. Try again later.',
+      );
+
+    const code = command.type === 'join' ? command.code : '';
+    this.requireBroadcastCapacity(
+      code,
+      command.type === 'join' && this.roomAudienceSize(code) > 0 ? 1 : 0,
+    );
+    const context = this.context();
+    const session =
+      command.type === 'create'
+        ? await this.retros.create(
+            command.name,
+            command.title,
+            command.password,
+            context,
+          )
+        : await this.retros.join(
+            command.code,
+            command.name,
+            command.password,
+            context,
+          );
+    const view = await this.view(session);
+    const transport = await this.broadcast(
+      session.code,
+      undefined,
+      undefined,
+      true,
+    );
+    this.refreshMetrics();
+    return { session, view, transport };
+  }
+
+  async inspectSession(
+    code: string,
+    token: string,
+    source = 'unknown',
+  ): Promise<RetroRememberedIdentity> {
+    if (
+      this.admission &&
+      !this.admission.consumeHttpOperation(
+        RETRO_APPLICATION_NAMESPACE,
+        source,
+        'inspect',
+      )
+    )
+      throw new RetroError(
+        'rate-limit',
+        'Too many attempts. Wait a minute before trying again.',
+      );
+    return this.retros.inspectSession(code, token, this.context());
+  }
+
+  /** Rotate a cookie and invalidate any socket using its previous value. */
+  async resumeSession(
+    code: string,
+    token: string,
+    source = 'unknown',
+  ): Promise<RetroSessionOperation> {
+    if (
+      this.admission &&
+      !this.admission.consumeHttpOperation(
+        RETRO_APPLICATION_NAMESPACE,
+        source,
+        'resume',
+      )
+    )
+      throw new RetroError(
+        'rate-limit',
+        'Too many attempts. Wait a minute before trying again.',
+      );
+    this.requireBroadcastCapacity(code);
+    const rotation = await this.retros.rotateSession(
+      code,
+      token,
+      this.context(),
+    );
+    const replaced = rotation.previousConnection
+      ? this.replaceIfLocal(rotation.previousConnection)
+      : result();
+    const view = await this.view(rotation.session);
+    const transport = this.merge(
+      replaced,
+      await this.broadcast(code, undefined, undefined, true),
+    );
+    this.refreshMetrics();
+    return { session: rotation.session, view, transport };
+  }
+
+  /** Revoke a cookie while retaining the member's notes and attribution. */
+  async forgetSession(
+    code: string,
+    token: string,
+    source = 'unknown',
+  ): Promise<ApplicationResult> {
+    if (
+      this.admission &&
+      !this.admission.consumeHttpOperation(
+        RETRO_APPLICATION_NAMESPACE,
+        source,
+        'forget',
+      )
+    )
+      throw new RetroError(
+        'rate-limit',
+        'Too many attempts. Wait a minute before trying again.',
+      );
+    this.requireBroadcastCapacity(code);
+    const forgotten = await this.retros.forgetSession(
+      code,
+      token,
+      this.context(),
+    );
+    const disconnected = forgotten.previousConnection
+      ? this.forgetIfLocal(forgotten.previousConnection)
+      : result();
+    const broadcast = await this.broadcast(code, undefined, undefined, true);
+    this.refreshMetrics();
+    return this.merge(disconnected, broadcast);
   }
 
   async disconnect(connectionId: string): Promise<ApplicationResult> {
@@ -318,6 +457,27 @@ export class RetroApplicationService implements OnModuleDestroy {
       );
     }
 
+    if (
+      (change.kind === 'session-replaced' ||
+        change.kind === 'session-forgotten') &&
+      change.previousConnection &&
+      change.memberId &&
+      change.previousConnection.instanceId === this.instanceId
+    ) {
+      const local = this.connections.get<string>(
+        RETRO_APPLICATION_NAMESPACE,
+        change.code,
+        change.memberId,
+      );
+      if (local === change.previousConnection.connectionId)
+        effects = this.merge(
+          effects,
+          change.kind === 'session-forgotten'
+            ? this.forget(local)
+            : this.replace(local),
+        );
+    }
+
     if (change.kind === 'session-replaced' && change.replacement) {
       const local = this.connections.get<string>(
         RETRO_APPLICATION_NAMESPACE,
@@ -348,6 +508,13 @@ export class RetroApplicationService implements OnModuleDestroy {
     // reconnect credentials.
     const events = this.events;
     events.emit(RETRO_APPLICATION_NAMESPACE, applicationResult);
+  }
+
+  private async view(session: RetroSession): Promise<RetroSessionView> {
+    return {
+      room: await this.retros.snapshot(session, this.context()),
+      self: { id: session.id },
+    };
   }
 
   private async expireLocalRoom(code: string): Promise<ApplicationResult> {
@@ -414,6 +581,37 @@ export class RetroApplicationService implements OnModuleDestroy {
     return this.replace(previous.connectionId);
   }
 
+  private forgetIfLocal(previous: RetroConnection): ApplicationResult {
+    if (previous.instanceId !== this.instanceId) return result();
+    return this.forget(previous.connectionId);
+  }
+
+  private forget(previousConnectionId: string): ApplicationResult {
+    this.sessions.delete(previousConnectionId);
+    this.admission?.release(previousConnectionId);
+    return result(
+      undefined,
+      [
+        {
+          connectionId: previousConnectionId,
+          event: this.errorEvent(
+            new RetroError(
+              'invalid-session',
+              'This browser session was forgotten. Join again to reconnect.',
+            ),
+          ),
+        },
+      ],
+      [
+        {
+          connectionId: previousConnectionId,
+          code: 4002,
+          reason: 'Session forgotten',
+        },
+      ],
+    );
+  }
+
   private replace(previousConnectionId: string): ApplicationResult {
     this.sessions.delete(previousConnectionId);
     this.admission?.release(previousConnectionId);
@@ -466,7 +664,7 @@ export class RetroApplicationService implements OnModuleDestroy {
           event: 'retro-state',
           data: {
             room: await this.retros.snapshot(session, this.context()),
-            self: { id: session.id, token: session.token },
+            self: { id: session.id },
             ...(connectionId === requester && requestId ? { requestId } : {}),
           },
         };

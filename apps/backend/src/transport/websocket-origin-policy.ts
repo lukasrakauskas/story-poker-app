@@ -1,5 +1,9 @@
 import { Logger } from '@nestjs/common';
 import type { IncomingMessage } from 'node:http';
+import {
+  normalizeHttpOrigin,
+  parseRetroOrigins,
+} from './origin-allowlist.service.js';
 
 export type WebSocketOriginPolicyOptions = {
   allowedOrigins?: string;
@@ -7,7 +11,6 @@ export type WebSocketOriginPolicyOptions = {
   allowNoOrigin?: boolean;
 };
 
-const HTTP_PROTOCOLS = new Set(['http:', 'https:']);
 const logger = new Logger('WebSocketOriginPolicy');
 let lastOriginRejectionLogAt = Number.NEGATIVE_INFINITY;
 
@@ -15,18 +18,13 @@ let lastOriginRejectionLogAt = Number.NEGATIVE_INFINITY;
  * Parse an exact-origin allowlist. Wildcards are intentionally not accepted;
  * production deployments must name every browser origin explicitly.
  */
-export function parseWebSocketOrigins(value = ''): string[] {
-  return value
-    .split(',')
-    .map((origin) => normalizeHttpOrigin(origin.trim()))
-    .filter((origin): origin is string => origin !== undefined);
-}
+export const parseWebSocketOrigins = parseRetroOrigins;
 
 export function isWebSocketOriginAllowed(
   origin: string | undefined,
   options: WebSocketOriginPolicyOptions = readWebSocketOriginPolicy(),
 ): boolean {
-  const configured = parseWebSocketOrigins(options.allowedOrigins ?? '');
+  const configured = parseRetroOrigins(options.allowedOrigins ?? '');
   if (!origin && options.allowNoOrigin) return true;
   if (configured.length > 0) {
     const candidate =
@@ -60,29 +58,12 @@ export function readWebSocketOriginPolicy(
 ): WebSocketOriginPolicyOptions {
   return {
     allowedOrigins:
-      environment.WS_ALLOWED_ORIGINS ?? environment.WEBSOCKET_ALLOWED_ORIGINS,
+      environment.RETRO_ALLOWED_ORIGINS ??
+      environment.WS_ALLOWED_ORIGINS ??
+      environment.WEBSOCKET_ALLOWED_ORIGINS,
     production: environment.NODE_ENV === 'production',
     allowNoOrigin: environment.WS_ALLOW_NO_ORIGIN === 'true',
   };
-}
-
-function normalizeHttpOrigin(origin: string): string | undefined {
-  if (!origin || origin === '*') return;
-  try {
-    const parsed = new URL(origin);
-    if (
-      !HTTP_PROTOCOLS.has(parsed.protocol) ||
-      parsed.username !== '' ||
-      parsed.password !== '' ||
-      parsed.pathname !== '/' ||
-      parsed.search !== '' ||
-      parsed.hash !== ''
-    )
-      return;
-    return parsed.origin;
-  } catch {
-    return;
-  }
 }
 
 function headerValue(value: string | string[] | undefined): string | undefined {

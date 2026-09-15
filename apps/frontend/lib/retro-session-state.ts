@@ -1,4 +1,8 @@
-import type { RetroRoom, RetroRoomInfo } from "shared/retrospective";
+import type {
+  RetroRememberedIdentity,
+  RetroRoom,
+  RetroRoomInfo,
+} from "shared/retrospective";
 
 export type RetroConnection = "connecting" | "connected" | "disconnected";
 export type RetroSessionPhase =
@@ -7,6 +11,13 @@ export type RetroSessionPhase =
   | "active"
   | "terminal";
 export type RetroFailure = { code: string; message: string };
+export type RememberedIdentityStatus =
+  | "idle"
+  | "checking"
+  | "valid"
+  | "resuming"
+  | "invalid"
+  | "forgotten";
 
 /**
  * State exposed by the retrospective client. `phase` is deliberately separate
@@ -23,6 +34,8 @@ export interface RetroSessionState {
   error: RetroFailure | null;
   cookieSaved: boolean | null;
   historySaved: boolean | null;
+  rememberedIdentity: RetroRememberedIdentity | null;
+  rememberedStatus: RememberedIdentityStatus;
 }
 
 export const initialRetroSessionState: RetroSessionState = {
@@ -35,6 +48,8 @@ export const initialRetroSessionState: RetroSessionState = {
   error: null,
   cookieSaved: null,
   historySaved: null,
+  rememberedIdentity: null,
+  rememberedStatus: "idle",
 };
 
 type RetroSessionAction =
@@ -48,8 +63,15 @@ type RetroSessionAction =
       acknowledged: boolean;
     }
   | { type: "room-info"; info: RetroRoomInfo }
+  | {
+      type: "remembered-identity";
+      identity: RetroRememberedIdentity;
+    }
+  | { type: "remembered-status"; status: RememberedIdentityStatus }
+  | { type: "remembered-cleared"; status: RememberedIdentityStatus }
   | { type: "request-settled"; requestId: string; success: boolean }
   | { type: "server-error"; error: RetroFailure }
+  | { type: "entry-failed"; error: RetroFailure }
   | {
       type: "connection-failed";
       error: RetroFailure;
@@ -113,6 +135,21 @@ export function retroSessionReducer(
       };
     case "room-info":
       return { ...state, roomInfo: action.info, error: null };
+    case "remembered-identity":
+      return {
+        ...state,
+        rememberedIdentity: action.identity,
+        rememberedStatus: "valid",
+        error: null,
+      };
+    case "remembered-status":
+      return { ...state, rememberedStatus: action.status };
+    case "remembered-cleared":
+      return {
+        ...state,
+        rememberedIdentity: null,
+        rememberedStatus: action.status,
+      };
     case "request-settled":
       if (state.pendingRequestId !== action.requestId) return state;
       return {
@@ -122,6 +159,14 @@ export function retroSessionReducer(
       };
     case "server-error":
       return { ...state, error: action.error };
+    case "entry-failed":
+      return {
+        ...state,
+        connection: "connected",
+        phase: "anonymous",
+        pendingRequestId: null,
+        error: action.error,
+      };
     case "connection-failed":
       return {
         ...state,

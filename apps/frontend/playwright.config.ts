@@ -15,7 +15,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `bun run --cwd ../backend build && PORT=${backendPort} bun ../backend/dist/main.js`,
+      command: `bun run --cwd ../backend build && PORT=${backendPort} RETRO_ALLOWED_ORIGINS=http://localhost:${frontendPort} bun ../backend/dist/main.js`,
       url: `http://localhost:${backendPort}`,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

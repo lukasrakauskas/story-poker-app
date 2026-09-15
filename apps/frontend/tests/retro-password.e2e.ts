@@ -85,6 +85,12 @@ test("protects retrospective entry without leaking room content or passwords", a
 
     await guest.reload();
     await expect(
+      guest.getByRole("button", { name: "Continue as Bobby", exact: true })
+    ).toBeVisible();
+    await guest
+      .getByRole("button", { name: "Continue as Bobby", exact: true })
+      .click();
+    await expect(
       guest.getByRole("heading", {
         name: "Sensitive retrospective",
         exact: true,

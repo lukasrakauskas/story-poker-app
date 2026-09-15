@@ -136,31 +136,40 @@ describe('shared retrospective room repository', () => {
     ownerEvents.on('retro', (result) => ownerMessages.push(result));
     guestEvents.on('retro', (result) => guestMessages.push(result));
 
-    const created = await ownerApplication.execute('owner-a', {
+    const createdOperation = await ownerApplication.establish({
       type: 'create',
       name: 'Carol',
       title: 'Replica room',
     });
-    const createdState = created.messages[0].event as {
-      event: 'retro-state';
-      data: { room: { code: string }; self: RetroSession };
-    };
-    const code = createdState.data.room.code;
-    const joined = await ownerApplication.execute('guest-a', {
+    const code = createdOperation.session.code;
+    await ownerApplication.execute(
+      'owner-a',
+      { type: 'resume', code },
+      undefined,
+      createdOperation.session.token,
+    );
+    const joinedOperation = await ownerApplication.establish({
       type: 'join',
       name: 'Drew',
       code,
     });
+    const joined = await ownerApplication.execute(
+      'guest-a',
+      { type: 'resume', code },
+      undefined,
+      joinedOperation.session.token,
+    );
     const guestState = joined.messages.find(
       (message) => message.connectionId === 'guest-a',
-    )!.event as { event: 'retro-state'; data: { self: RetroSession } };
+    )!.event as { event: 'retro-state'; data: { self: { id: string } } };
     await settle();
 
-    const resumed = await guestApplication.execute('guest-b', {
-      type: 'resume',
-      code,
-      token: guestState.data.self.token,
-    });
+    const resumed = await guestApplication.execute(
+      'guest-b',
+      { type: 'resume', code },
+      undefined,
+      joinedOperation.session.token,
+    );
     expect(
       resumed.messages.some((message) => message.connectionId === 'guest-b'),
     ).toBe(true);
@@ -203,11 +212,17 @@ describe('shared retrospective room repository', () => {
       ),
     ).toBe(true);
 
-    await guestApplication.execute('guest-c', {
+    const lateOperation = await guestApplication.establish({
       type: 'join',
       name: 'Erin',
       code,
     });
+    await guestApplication.execute(
+      'guest-c',
+      { type: 'resume', code },
+      undefined,
+      lateOperation.session.token,
+    );
     await settle();
     await guestApplication.disconnect('guest-c');
     await settle();

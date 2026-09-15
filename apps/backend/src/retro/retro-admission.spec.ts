@@ -41,6 +41,24 @@ function setup(
   };
 }
 
+async function establish(
+  application: RetroApplicationService,
+  connectionId: string,
+  command: Extract<
+    Parameters<RetroApplicationService['establish']>[0],
+    { type: 'create' | 'join' }
+  >,
+) {
+  const operation = await application.establish(command, 'ip:127.0.0.1');
+  const result = await application.execute(
+    connectionId,
+    { type: 'resume', code: operation.session.code },
+    undefined,
+    operation.session.token,
+  );
+  return { operation, result };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
@@ -50,30 +68,26 @@ afterEach(() => {
 });
 
 describe('retrospective admission integration', () => {
-  it('rejects room creation when the process circuit is open', async () => {
+  it('rejects HTTP room creation when the process circuit is open', async () => {
     const { application, metrics } = setup({
       globalCreateLimit: 1,
       globalCreateWindowMs: 1_000,
       createCircuitCooldownMs: 100,
     });
-    const created = await application.execute('owner', {
+    await establish(application, 'owner', {
       type: 'create',
       name: 'Alice',
       title: 'Retro',
     });
-    expect(created.messages[0].event).toMatchObject({ event: 'retro-state' });
 
-    const rejected = await application.execute('new-connection', {
-      type: 'create',
-      name: 'Bobby',
-      title: 'Another',
-    });
-    expect(rejected.messages[0].event).toMatchObject({
-      event: 'retro-error',
-      data: { code: 'capacity' },
-    });
+    await expect(
+      application.establish(
+        { type: 'create', name: 'Bobby', title: 'Another' },
+        'ip:127.0.0.1',
+      ),
+    ).rejects.toMatchObject({ code: 'capacity' });
     expect(
-      metrics.counter('websocket.capacity.exhausted', {
+      metrics.counter('websocket.operations.throttled', {
         namespace: 'retro',
         operation: 'create',
       }),
@@ -83,16 +97,15 @@ describe('retrospective admission integration', () => {
 
   it('backs off a mutation before changing the room when broadcast pressure trips', async () => {
     const { application } = setup({
-      broadcastBudget: 1,
+      broadcastBudget: 2,
       broadcastWindowMs: 1_000,
       broadcastCircuitCooldownMs: 100,
     });
-    const created = await application.execute('owner', {
+    await establish(application, 'owner', {
       type: 'create',
       name: 'Alice',
       title: 'Retro',
     });
-    expect(created.messages[0].event).toMatchObject({ event: 'retro-state' });
 
     const rejected = await application.execute('owner', {
       type: 'add-note',
@@ -121,5 +134,21 @@ describe('retrospective admission integration', () => {
         },
       },
     });
+  });
+
+  it('shares source admission windows across HTTP session operations', async () => {
+    const { application } = setup({ maxJoinAttemptsPerSource: 1 });
+    await expect(
+      application.establish(
+        { type: 'join', name: 'Alice', code: 'missing-room' },
+        'ip:10.0.0.1',
+      ),
+    ).rejects.toMatchObject({ code: 'room-expired' });
+    await expect(
+      application.establish(
+        { type: 'join', name: 'Bobby', code: 'missing-room' },
+        'ip:10.0.0.1',
+      ),
+    ).rejects.toMatchObject({ code: 'rate-limit' });
   });
 });

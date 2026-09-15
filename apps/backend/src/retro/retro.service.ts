@@ -6,6 +6,7 @@ import {
   type RetroCommand,
   type RetroActionAssignment,
   type RetroActionOwner,
+  type RetroRememberedIdentity,
   type RetroRoom,
 } from 'shared/retrospective';
 import {
@@ -38,6 +39,7 @@ const MAX_MEMBERS = 30;
 const MAX_NOTES = 300;
 const MAX_ACTIONS = 100;
 const VOTES_PER_MEMBER = 3;
+const RETRO_CODE = /^[a-zA-Z0-9_-]{1,64}$/;
 
 export class RetroError extends Error {
   constructor(
@@ -56,6 +58,11 @@ export interface RetroSession {
 
 export interface RetroMutationResult {
   removedMemberId?: string;
+}
+
+export interface RetroSessionRotation {
+  session: RetroSession;
+  previousConnection?: RetroConnection;
 }
 
 export type RetroConnection = RetroConnectionOwner;
@@ -195,8 +202,15 @@ export class RetroService {
   }
 
   async inspect(code: string, context?: RetroRepositoryContext) {
+    if (!RETRO_CODE.test(code))
+      return { code, available: false, requiresPassword: false };
     const room = await this.repository.get(code, context);
-    if (!room || room.expiresAt <= Date.now())
+    if (
+      !room ||
+      room.expiresAt <= Date.now() ||
+      room.phase === 'closed' ||
+      room.members.length >= MAX_MEMBERS
+    )
       return { code, available: false, requiresPassword: false };
     return {
       code,
@@ -227,6 +241,112 @@ export class RetroService {
       },
       context,
     );
+  }
+
+  /**
+   * Rotate a bearer credential before a browser reconnects. The old socket is
+   * detached in the same repository transaction, so a delayed request cannot
+   * restore a stale token after a newer rotation.
+   */
+  async rotateSession(
+    code: string,
+    token: string,
+    context?: RetroRepositoryContext,
+  ): Promise<RetroSessionRotation> {
+    return this.transact(
+      code,
+      (room) => {
+        const member = this.memberByToken(room, token);
+        if (!member)
+          throw new RetroError(
+            'invalid-session',
+            'This session is no longer available. Join again.',
+          );
+        const previousConnection = member.connection ?? undefined;
+        const nextToken = nanoid(32);
+        member.tokenHash = hashSessionToken(nextToken);
+        member.connection = null;
+        if (room.phase !== 'closed') {
+          member.connected = false;
+          member.offlineExpiresAt = Date.now() + RETRO_OFFLINE_RETENTION_MS;
+        }
+        return {
+          result: {
+            session: { code, id: member.id, token: nextToken },
+            ...(previousConnection ? { previousConnection } : {}),
+          },
+          ...(previousConnection
+            ? {
+                change: {
+                  kind: 'session-replaced' as const,
+                  memberId: member.id,
+                  previousConnection,
+                },
+              }
+            : {}),
+        };
+      },
+      context,
+    );
+  }
+
+  /** Rotate and revoke a remembered browser session without deleting content. */
+  async forgetSession(
+    code: string,
+    token: string,
+    context?: RetroRepositoryContext,
+  ): Promise<{ previousConnection?: RetroConnection }> {
+    return this.transact(
+      code,
+      (room) => {
+        const member = this.memberByToken(room, token);
+        if (!member)
+          throw new RetroError(
+            'invalid-session',
+            'This session is no longer available. Join again.',
+          );
+        const previousConnection = member.connection ?? undefined;
+        member.tokenHash = hashSessionToken(nanoid(32));
+        member.connection = null;
+        if (room.phase !== 'closed') {
+          member.connected = false;
+          member.offlineExpiresAt = Date.now() + RETRO_OFFLINE_RETENTION_MS;
+        }
+        return {
+          result: previousConnection ? { previousConnection } : {},
+          ...(previousConnection
+            ? {
+                change: {
+                  kind: 'session-forgotten' as const,
+                  memberId: member.id,
+                  previousConnection,
+                },
+              }
+            : {}),
+        };
+      },
+      context,
+    );
+  }
+
+  /** Inspect identity metadata without changing presence or room content. */
+  async inspectSession(
+    code: string,
+    token: string,
+    context?: RetroRepositoryContext,
+  ): Promise<RetroRememberedIdentity> {
+    const room = await this.room(code, context);
+    const member = this.memberByToken(room, token);
+    if (!member)
+      throw new RetroError(
+        'invalid-session',
+        'This session is no longer available. Join as someone else.',
+      );
+    return {
+      code,
+      name: member.name,
+      moderator: member.role === 'moderator',
+    };
   }
 
   /** Resume and claim the connection in the same optimistic transaction. */

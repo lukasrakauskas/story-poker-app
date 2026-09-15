@@ -117,8 +117,10 @@ describe('shared retrospective contracts', () => {
           id: 'alice',
           name: 'Alice',
           role: 'moderator' as const,
-          token: 'private-token',
+          tokenHash: 'a'.repeat(64),
           connected: true,
+          offlineExpiresAt: null,
+          connection: null,
         },
       ],
       notes: [
@@ -133,10 +135,10 @@ describe('shared retrospective contracts', () => {
         },
       ],
       groups: [],
-      readyMemberIds: new Set<string>(),
+      readyMemberIds: [],
     };
-    expect(retroInternalRoomSchema.parse(internal).members[0].token).toBe(
-      'private-token',
+    expect(retroInternalRoomSchema.parse(internal).members[0].tokenHash).toBe(
+      'a'.repeat(64),
     );
     expect(retroPublicRoomSchema.safeParse(internal).success).toBe(false);
 
@@ -144,7 +146,7 @@ describe('shared retrospective contracts', () => {
       event: 'retro-state' as const,
       data: {
         room: publicRoom,
-        self: { id: 'alice', token: 'private-token' },
+        self: { id: 'alice' },
       },
     };
     expect(retroServerEventSchema.safeParse(event).success).toBe(true);

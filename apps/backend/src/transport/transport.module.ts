@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ApplicationEventBus } from './application-event-bus.service.js';
+import { OriginAllowlistService } from './origin-allowlist.service.js';
 import { RATE_LIMIT_OPTIONS, RateLimitService } from './rate-limit.service.js';
 import {
   loadWebSocketAdmissionPolicy,
@@ -13,6 +14,7 @@ import { TransportMetricsService } from './transport-metrics.service.js';
 @Module({
   providers: [
     ApplicationEventBus,
+    OriginAllowlistService,
     {
       provide: RATE_LIMIT_OPTIONS,
       useValue: {},
@@ -29,6 +31,7 @@ import { TransportMetricsService } from './transport-metrics.service.js';
   ],
   exports: [
     ApplicationEventBus,
+    OriginAllowlistService,
     RateLimitService,
     WebSocketAdmissionService,
     TransportMetricsService,

@@ -1,24 +1,35 @@
 import type {
   RetroCommand,
+  RetroRememberedIdentity,
   RetroRoom,
   RetroServerEvent,
+  RetroSessionView,
 } from "shared/retrospective";
 import { parseRetroServerEvent } from "./retro-protocol";
 import {
   initialRetroSessionState,
   retroSessionReducer,
+  type RememberedIdentityStatus,
   type RetroFailure,
   type RetroSessionState,
 } from "./retro-session-state";
 import type {
-  WebSocketTransportEventMap,
   WebSocketTransportEvent,
+  WebSocketTransportEventMap,
 } from "./websocket-transport";
 
-export interface RetroCredentialStorage {
-  read(code: string): string | null;
-  save(code: string, token: string, expiresAt: number): boolean;
-  clear(code: string): void;
+/**
+ * Browser session boundary. Implementations use credentialed HTTP requests;
+ * the credential is intentionally not represented in this interface or in
+ * the client state, because the backend owns it in an HttpOnly cookie.
+ */
+export interface RetroSessionApi {
+  establish(
+    command: Extract<RetroCommand, { type: "create" | "join" }>
+  ): Promise<RetroSessionView>;
+  inspect(code: string): Promise<RetroRememberedIdentity>;
+  resume(code: string): Promise<RetroSessionView>;
+  forget(code: string): Promise<boolean>;
 }
 
 export interface RetroHistoryStorage {
@@ -55,7 +66,7 @@ export interface RetroTransport {
 export interface RetroSessionClientOptions {
   transport: RetroTransport;
   initialCode?: string | null;
-  credentials: RetroCredentialStorage;
+  sessions: RetroSessionApi;
   history: RetroHistoryStorage;
   clock: RetroClock;
   timers: RetroTimerStorage;
@@ -64,9 +75,11 @@ export interface RetroSessionClientOptions {
   requestTimeoutMs?: number;
 }
 
+type PendingKind = "resume" | "mutation" | "inspect";
 type PendingRequest = {
   id: string;
-  kind: "resume" | "mutation";
+  kind: PendingKind;
+  code?: string;
   timer: unknown;
   resolve: (success: boolean) => void;
 };
@@ -85,6 +98,11 @@ const CONFIGURATION_FAILURE: RetroFailure = {
   code: "configuration",
   message: "Could not connect. Check the NEXT_PUBLIC_WS_URL configuration.",
 };
+const INVALID_ROOM_CODE_FAILURE: RetroFailure = {
+  code: "invalid-room-code",
+  message:
+    "That room link is invalid. Room codes use 1–64 letters, numbers, hyphens, or underscores.",
+};
 const CONNECTION_TIMEOUT_FAILURE: RetroFailure = {
   code: "connection",
   message: "Connection timed out. Retry to resume this session.",
@@ -100,11 +118,29 @@ const INVALID_RESPONSE_FAILURE: RetroFailure = {
 };
 const TERMINAL_CODES = new Set(["room-expired", "invalid-session", "removed"]);
 
+function isEntryCommand(
+  command: RetroCommand
+): command is Extract<RetroCommand, { type: "create" | "join" }> {
+  return command.type === "create" || command.type === "join";
+}
+
+function failureFrom(cause: unknown, fallback: RetroFailure): RetroFailure {
+  if (typeof cause === "object" && cause !== null) {
+    const value = cause as { code?: unknown; message?: unknown };
+    if (typeof value.code === "string" && typeof value.message === "string")
+      return { code: value.code, message: value.message };
+  }
+  return fallback;
+}
+
+function isValidCode(code: string): boolean {
+  return /^[a-zA-Z0-9_-]{1,64}$/.test(code);
+}
+
 /**
- * Retrospective protocol/session client. It owns request correlation and
- * explicitly refuses to replay a mutation after a disconnected request.
- * Browser capabilities are all passed as adapters so this class is testable
- * without a DOM, WebSocket, clock, or storage implementation.
+ * Protocol/session client. It owns request correlation and refuses to replay a
+ * mutation after a disconnect. HTTP rotates the HttpOnly cookie before every
+ * reconnect; WebSocket only receives a room code and never a bearer token.
  */
 export class RetroSessionClient {
   private state = initialRetroSessionState;
@@ -113,16 +149,19 @@ export class RetroSessionClient {
   private readonly requestTimeoutMs: number;
   private started = false;
   private connectionTimer: unknown;
-  private credentialsValue: { code: string; token: string } | null = null;
   private pendingRequest: PendingRequest | null = null;
   private nextRequestId = 0;
   private notificationGeneration = 0;
   private scheduledNotificationGeneration: number | undefined;
   private transportSubscriptions: (() => void)[] = [];
+  private activeCode: string | null = null;
+  private resumeRequired = false;
+  private resumePrepared = false;
 
   constructor(private readonly options: RetroSessionClientOptions) {
     this.connectionTimeoutMs = options.connectionTimeoutMs ?? 15_000;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
+    this.activeCode = options.initialCode ?? null;
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -135,9 +174,15 @@ export class RetroSessionClient {
   start = (): void => {
     if (this.started || this.state.phase === "terminal") return;
     this.started = true;
-    this.loadInitialCredentials();
-    const resuming = !!this.credentialsValue;
-    this.transition({ type: "start", resuming });
+    if (this.activeCode && !isValidCode(this.activeCode)) {
+      this.transition({
+        type: "connection-failed",
+        error: INVALID_ROOM_CODE_FAILURE,
+        terminal: true,
+      });
+      return;
+    }
+    this.transition({ type: "start", resuming: false });
     this.transportSubscriptions = [
       this.options.transport.on("open", this.handleOpen),
       this.options.transport.on("message", this.handleMessage),
@@ -145,6 +190,7 @@ export class RetroSessionClient {
       this.options.transport.on("close", this.handleClose),
     ];
     this.armConnectionTimer();
+    if (this.activeCode) void this.inspectRemembered(this.activeCode);
     if (!this.options.transport.connect())
       this.failConnection(CONFIGURATION_FAILURE);
   };
@@ -163,8 +209,11 @@ export class RetroSessionClient {
   retry = (): void => {
     if (!this.started || this.state.phase === "terminal") return;
     this.clearConnectionTimer();
+    // A mutation that was not acknowledged is never replayed. An established
+    // room is resumed through a fresh HTTP rotation after the socket opens.
     this.finishPending(false);
-    const resuming = !!this.credentialsValue;
+    this.resumePrepared = false;
+    const resuming = !!this.activeCode && this.resumeRequired;
     this.transition({ type: "retry", resuming });
     this.armConnectionTimer();
     if (!this.options.transport.reconnect())
@@ -188,30 +237,88 @@ export class RetroSessionClient {
     )
       return Promise.resolve(false);
 
-    let outgoing = command;
-    let kind: PendingRequest["kind"] = "mutation";
-    if (command.type === "join") {
-      const token = this.readCredential(command.code);
-      if (token) {
-        this.credentialsValue = { code: command.code, token };
-        outgoing = { type: "resume", code: command.code, token };
-        kind = "resume";
-      }
-    } else if (command.type === "resume") {
-      this.credentialsValue = { code: command.code, token: command.token };
-      kind = "resume";
+    if (isEntryCommand(command)) return this.beginEstablish(command);
+    if (command.type === "resume") return this.beginResume(command.code);
+    return this.issue(
+      command,
+      command.type === "inspect" ? "inspect" : "mutation"
+    );
+  };
+
+  inspectRemembered = async (
+    code: string
+  ): Promise<"valid" | "invalid" | "none"> => {
+    if (!isValidCode(code)) {
+      this.setRememberedStatus("invalid");
+      return "invalid";
     }
-    return this.issue(outgoing, kind);
+    this.transition({ type: "remembered-status", status: "checking" });
+    try {
+      const identity = await this.options.sessions.inspect(code);
+      if (!this.started || identity.code !== code) return "invalid";
+      this.transition({ type: "remembered-identity", identity });
+      return "valid";
+    } catch (cause) {
+      if (!this.started) return "invalid";
+      const failure = failureFrom(cause, CONNECTION_FAILURE);
+      if (failure.code === "session-required") {
+        this.transition({ type: "remembered-cleared", status: "idle" });
+        return "none";
+      }
+      if (failure.code === "invalid-session") {
+        // A rejected remembered cookie is not a transport failure. Keep the
+        // anonymous entry form usable; the explicit status tells the user to
+        // choose a new identity and a later HTTP join replaces this cookie.
+        this.transition({ type: "remembered-cleared", status: "invalid" });
+        return "invalid";
+      }
+      this.transition({ type: "remembered-cleared", status: "idle" });
+      this.transition({ type: "server-error", error: failure });
+      return "invalid";
+    }
+  };
+
+  continueRememberedSession = (code?: string): Promise<boolean> => {
+    const target =
+      code ?? this.state.rememberedIdentity?.code ?? this.activeCode;
+    if (!target || !this.state.rememberedIdentity)
+      return Promise.resolve(false);
+    return this.beginResume(target);
+  };
+
+  forgetRememberedSession = async (code?: string): Promise<boolean> => {
+    const target =
+      code ?? this.state.rememberedIdentity?.code ?? this.activeCode;
+    if (!target || this.state.phase === "terminal") return false;
+    try {
+      const forgotten = await this.options.sessions.forget(target);
+      if (!forgotten || !this.started) return false;
+      if (this.activeCode === target) {
+        this.resumeRequired = false;
+        this.resumePrepared = false;
+      }
+      this.transition({ type: "remembered-cleared", status: "forgotten" });
+      return true;
+    } catch (cause) {
+      this.transition({
+        type: "server-error",
+        error: failureFrom(cause, CONNECTION_FAILURE),
+      });
+      return false;
+    }
   };
 
   private handleOpen = (): void => {
     if (!this.started || this.state.phase === "terminal") return;
     this.clearConnectionTimer();
-    const resuming = !!this.credentialsValue;
+    const resuming = !!this.activeCode && this.resumeRequired;
     this.transition({ type: "open", resuming });
-    if (this.credentialsValue) {
-      this.issue({ type: "resume", ...this.credentialsValue }, "resume");
+    if (!resuming) return;
+    if (this.resumePrepared && this.pendingRequest) {
+      this.sendPreparedResume();
+      return;
     }
+    if (!this.pendingRequest) void this.beginResume(this.activeCode!);
   };
 
   private handleMessage = (
@@ -238,6 +345,8 @@ export class RetroSessionClient {
     this.clearConnectionTimer();
     const hadPending = !!this.pendingRequest;
     this.finishPending(false);
+    if (this.activeCode && this.state.phase === "active")
+      this.resumeRequired = true;
     this.transition({
       type: "connection-failed",
       error: hadPending
@@ -255,8 +364,13 @@ export class RetroSessionClient {
       event.data.requestId === pending.id ||
       (pending.kind === "resume" && event.data.requestId === undefined);
     const { room, self } = event.data;
-    this.credentialsValue = { code: room.code, token: self.token };
-    this.saveCredentials(room.code, self.token, room.expiresAt);
+    if (this.activeCode && room.code !== this.activeCode) {
+      this.failConnection(INVALID_RESPONSE_FAILURE);
+      return;
+    }
+    this.activeCode = room.code;
+    this.resumeRequired = true;
+    this.resumePrepared = true;
     this.saveHistory(room, self.id);
     this.navigate(room.code);
     this.transition(
@@ -269,9 +383,6 @@ export class RetroSessionClient {
       false
     );
     if (acknowledged && pending) this.finishPending(true, false);
-    // Resolve the command before publishing the room update. React editors can
-    // clear their local draft in the promise continuation, preventing an
-    // intermediate render that shows both the committed note and old draft.
     this.notifySoon();
   }
 
@@ -279,6 +390,7 @@ export class RetroSessionClient {
     event: Extract<RetroServerEvent, { event: "retro-room-info" }>
   ) {
     const pending = this.pendingRequest;
+    if (pending?.kind === "inspect" && pending.code !== event.data.code) return;
     const acknowledged = !pending || event.data.requestId === pending.id;
     if (!acknowledged) return;
     const { requestId: _requestId, ...info } = event.data;
@@ -296,9 +408,6 @@ export class RetroSessionClient {
       !pending ||
       event.data.requestId === pending.id ||
       (pending.kind === "resume" && event.data.requestId === undefined);
-    // Connection-level rejection must still win over a pending mutation. The
-    // replacement close has no request id and must never be mistaken for an
-    // ordinary mutation response.
     if (!TERMINAL_CODES.has(event.data.code) && !acknowledged) return;
 
     if (TERMINAL_CODES.has(event.data.code)) {
@@ -309,21 +418,14 @@ export class RetroSessionClient {
     const failure = { code: event.data.code, message: event.data.message };
     this.transition({ type: "server-error", error: failure });
     if (this.state.phase === "resuming") {
-      // A failed resume must not leave a stale snapshot editable. Keep the
-      // server's useful error while making the socket/session unavailable.
       this.transition({ type: "connection-failed", error: failure });
       this.options.transport.close();
     }
   }
 
   private handleTerminalError(error: RetroFailure) {
-    const preserveCredential =
-      error.code === "invalid-session" &&
-      this.state.phase === "active" &&
-      this.state.room !== null;
-    if (this.credentialsValue && !preserveCredential)
-      this.clearCredential(this.credentialsValue.code);
-    this.credentialsValue = null;
+    // An active socket displaced by another tab must retain the cookie owned by
+    // that tab. HTTP rotation/forget has already made the old value unusable.
     this.finishPending(false);
     this.clearConnectionTimer();
     this.transition({
@@ -335,45 +437,141 @@ export class RetroSessionClient {
     this.options.transport.close();
   }
 
-  private issue(
-    command: RetroCommand,
-    kind: PendingRequest["kind"]
+  private beginEstablish(
+    command: Extract<RetroCommand, { type: "create" | "join" }>
   ): Promise<boolean> {
-    const requestId = String(++this.nextRequestId);
-    const promise = new Promise<boolean>((resolve) => {
-      const timer = this.options.timers.setTimeout(
-        () => this.handleRequestTimeout(requestId),
-        this.requestTimeoutMs
+    const pending = this.createPending("resume", true);
+    void this.options.sessions
+      .establish(command)
+      .then((view) => {
+        if (!this.started) return;
+        this.activeCode = view.room.code;
+        this.resumeRequired = true;
+        // The cookie was freshly installed by HTTP. It can be attached to the
+        // socket without another rotation; all subsequent reconnects rotate.
+        this.resumePrepared = true;
+        // The browser cannot change Cookie headers on an already-open
+        // WebSocket. Reopen after HTTP has installed the fresh HttpOnly
+        // cookie, then send the room-code-only resume on the new handshake.
+        const connected = this.options.transport.isOpen()
+          ? this.options.transport.reconnect()
+          : this.options.transport.connect();
+        if (!connected) this.failPending(CONNECTION_FAILURE);
+      })
+      .catch((cause) =>
+        this.failEstablishment(failureFrom(cause, CONNECTION_FAILURE))
       );
-      this.pendingRequest = { id: requestId, kind, timer, resolve };
-      this.transition({
-        type: "request-started",
-        requestId,
-        resuming: kind === "resume",
+    return pending.promise;
+  }
+
+  private beginResume(code: string): Promise<boolean> {
+    if (!isValidCode(code) || !this.started || this.pendingRequest)
+      return Promise.resolve(false);
+    this.activeCode = code;
+    this.resumeRequired = true;
+    const pending = this.createPending("resume", true);
+    this.transition({ type: "remembered-status", status: "resuming" });
+    void this.options.sessions
+      .resume(code)
+      .then((view) => {
+        if (!this.started || view.room.code !== code) return;
+        this.resumePrepared = true;
+        // Rotation changes the HttpOnly cookie, so an existing WebSocket must
+        // be replaced before the resume command can be authenticated.
+        const connected = this.options.transport.isOpen()
+          ? this.options.transport.reconnect()
+          : this.options.transport.connect();
+        if (!connected) this.failPending(CONNECTION_FAILURE);
+      })
+      .catch((cause) => {
+        const failure = failureFrom(cause, CONNECTION_FAILURE);
+        if (failure.code === "invalid-session")
+          this.transition({ type: "remembered-cleared", status: "invalid" });
+        if (!this.state.room) {
+          this.resumeRequired = false;
+          this.resumePrepared = false;
+          this.finishPending(false);
+          this.transition({ type: "entry-failed", error: failure });
+        } else {
+          this.failPending(failure);
+        }
       });
-      const sent = this.options.transport.send(
-        JSON.stringify({
-          event: "retro-command",
-          data: { ...command, requestId },
-        }),
-        { queue: false }
-      );
-      if (!sent) {
-        this.finishPending(false);
-        this.failConnection(CONNECTION_FAILURE);
-      }
+    return pending.promise;
+  }
+
+  private sendPreparedResume() {
+    const pending = this.pendingRequest;
+    if (!pending || pending.kind !== "resume" || !this.activeCode) return;
+    const sent = this.options.transport.send(
+      JSON.stringify({
+        event: "retro-command",
+        data: {
+          type: "resume",
+          code: this.activeCode,
+          requestId: pending.id,
+        },
+      }),
+      { queue: false }
+    );
+    if (!sent) this.failPending(CONNECTION_FAILURE);
+  }
+
+  private issue(command: RetroCommand, kind: PendingKind): Promise<boolean> {
+    const pending = this.createPending(
+      kind,
+      false,
+      command.type === "inspect" ? command.code : undefined
+    );
+    const sent = this.options.transport.send(
+      JSON.stringify({
+        event: "retro-command",
+        data: { ...command, requestId: pending.id },
+      }),
+      { queue: false }
+    );
+    if (!sent) this.failPending(CONNECTION_FAILURE);
+    return pending.promise;
+  }
+
+  private createPending(kind: PendingKind, resuming: boolean, code?: string) {
+    const id = String(++this.nextRequestId);
+    let resolvePromise!: (success: boolean) => void;
+    const promise = new Promise<boolean>((resolve) => {
+      resolvePromise = resolve;
     });
-    return promise;
+    const timer = this.options.timers.setTimeout(
+      () => this.handleRequestTimeout(id),
+      this.requestTimeoutMs
+    );
+    this.pendingRequest = {
+      id,
+      kind,
+      code,
+      timer,
+      resolve: resolvePromise,
+    };
+    this.transition({ type: "request-started", requestId: id, resuming });
+    return { id, promise };
   }
 
   private handleRequestTimeout(requestId: string) {
     if (!this.pendingRequest || this.pendingRequest.id !== requestId) return;
+    this.failPending(REQUEST_TIMEOUT_FAILURE);
+    this.options.transport.close();
+  }
+
+  private failEstablishment(error: RetroFailure) {
+    // HTTP entry failures (especially a wrong room password) must leave the
+    // anonymous lobby connected so the user can correct the form without a
+    // needless reconnect. No cookie has been issued on this path.
     this.finishPending(false);
-    this.clearConnectionTimer();
-    this.transition({
-      type: "connection-failed",
-      error: REQUEST_TIMEOUT_FAILURE,
-    });
+    this.transition({ type: "entry-failed", error });
+  }
+
+  private failPending(error: RetroFailure) {
+    this.finishPending(false);
+    this.transition({ type: "server-error", error });
+    this.transition({ type: "connection-failed", error });
     this.options.transport.close();
   }
 
@@ -393,40 +591,6 @@ export class RetroSessionClient {
     pending.resolve(success);
   }
 
-  private loadInitialCredentials() {
-    if (this.credentialsValue || !this.options.initialCode) return;
-    const token = this.readCredential(this.options.initialCode);
-    if (token)
-      this.credentialsValue = { code: this.options.initialCode, token };
-  }
-
-  private readCredential(code: string): string | null {
-    try {
-      return this.options.credentials.read(code);
-    } catch {
-      return null;
-    }
-  }
-
-  private saveCredentials(code: string, token: string, expiresAt: number) {
-    try {
-      this.state = {
-        ...this.state,
-        cookieSaved: this.options.credentials.save(code, token, expiresAt),
-      };
-    } catch {
-      this.state = { ...this.state, cookieSaved: false };
-    }
-  }
-
-  private clearCredential(code: string) {
-    try {
-      this.options.credentials.clear(code);
-    } catch {
-      // A blocked cookie store must not prevent the terminal transition.
-    }
-  }
-
   private saveHistory(room: RetroRoom, viewerId: string) {
     try {
       this.state = {
@@ -442,8 +606,8 @@ export class RetroSessionClient {
     try {
       this.options.navigation.replaceRoom(code);
     } catch {
-      // A history adapter failure should not turn a valid live snapshot into a
-      // protocol failure. The room remains usable at its current URL.
+      // A history adapter failure must not turn a valid live snapshot into a
+      // protocol failure.
     }
   }
 
@@ -476,6 +640,10 @@ export class RetroSessionClient {
     this.finishPending(false);
     this.transition({ type: "connection-failed", error });
     this.options.transport.close();
+  }
+
+  private setRememberedStatus(status: RememberedIdentityStatus) {
+    this.transition({ type: "remembered-status", status });
   }
 
   private transition(

@@ -4,8 +4,8 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type { RetroRoom } from "shared/retrospective";
 import {
   RetroSessionClient,
-  type RetroCredentialStorage,
   type RetroHistoryStorage,
+  type RetroSessionApi,
   type RetroTimerStorage,
 } from "../lib/retro-session-client";
 import {
@@ -14,16 +14,18 @@ import {
 } from "../lib/retro-route";
 import { saveRetroHistory } from "../lib/retro-history";
 import {
-  clearRetroToken,
-  readRetroToken,
-  saveRetroToken,
+  establishRetroSession,
+  forgetRetroSession,
+  inspectRetroSession,
+  resumeRetroSession,
 } from "../lib/retro-session";
 import { WebSocketTransport } from "../lib/websocket-transport";
 
-const browserCredentials: RetroCredentialStorage = {
-  read: readRetroToken,
-  save: saveRetroToken,
-  clear: clearRetroToken,
+const browserSessions: RetroSessionApi = {
+  establish: establishRetroSession,
+  inspect: inspectRetroSession,
+  resume: resumeRetroSession,
+  forget: forgetRetroSession,
 };
 const browserHistory: RetroHistoryStorage = {
   save: (room: RetroRoom, viewerId: string) => saveRetroHistory(room, viewerId),
@@ -36,7 +38,12 @@ const browserTimers: RetroTimerStorage = {
 
 function retroWebSocketUrl(): string {
   try {
-    const url = new URL(process.env.NEXT_PUBLIC_WS_URL ?? "");
+    const configured =
+      process.env.NEXT_PUBLIC_WS_URL ??
+      (typeof window !== "undefined"
+        ? window.location.origin
+        : "http://localhost:4000");
+    const url = new URL(configured);
     url.protocol =
       url.protocol === "https:"
         ? "wss:"
@@ -73,7 +80,7 @@ export function useRetroSocket(initialCode?: string) {
       new RetroSessionClient({
         transport,
         initialCode: routeCode,
-        credentials: browserCredentials,
+        sessions: browserSessions,
         history: browserHistory,
         clock: browserClock,
         timers: browserTimers,
@@ -104,6 +111,11 @@ export function useRetroSocket(initialCode?: string) {
     retry: client.retry,
     cookieSaved: state.cookieSaved,
     historySaved: state.historySaved,
+    rememberedIdentity: state.rememberedIdentity,
+    rememberedStatus: state.rememberedStatus,
+    inspectRemembered: client.inspectRemembered,
+    continueRememberedSession: client.continueRememberedSession,
+    forgetRememberedSession: client.forgetRememberedSession,
   };
 }
 

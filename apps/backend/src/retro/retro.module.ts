@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { RetroSessionController } from './retro-session.controller.js';
+import { RetroSessionCookieService } from './retro-session-cookie.service.js';
 import { CollaborationModule } from '../collaboration/collaboration.module.js';
 import { TransportModule } from '../transport/transport.module.js';
 import { RetroApplicationService } from './retro-application.service.js';
@@ -26,6 +28,7 @@ function createRepository(config: ConfigService): RetroRoomRepository {
 
 @Module({
   imports: [ConfigModule, CollaborationModule, TransportModule],
+  controllers: [RetroSessionController],
   providers: [
     {
       provide: RETRO_ROOM_REPOSITORY,
@@ -34,6 +37,7 @@ function createRepository(config: ConfigService): RetroRoomRepository {
     },
     RetroGateway,
     RetroApplicationService,
+    RetroSessionCookieService,
     RetroService,
   ],
   exports: [RETRO_ROOM_REPOSITORY, RetroApplicationService, RetroService],

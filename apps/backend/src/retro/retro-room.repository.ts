@@ -70,6 +70,7 @@ export type RetroRoomChangeKind =
   | 'member-expired'
   | 'member-removed'
   | 'session-replaced'
+  | 'session-forgotten'
   | 'room-expired';
 
 export interface RetroRoomChangeDetails {
@@ -80,6 +81,8 @@ export interface RetroRoomChangeDetails {
     participantId: string;
     owner: RetroConnectionOwner;
   };
+  /** Connection displaced by an HTTP rotation/forget operation. */
+  previousConnection?: RetroConnectionOwner;
 }
 
 export interface RetroRoomChange extends RetroRoomChangeDetails {
@@ -175,6 +178,9 @@ function changeFor(
     ...(details?.memberId ? { memberId: details.memberId } : {}),
     ...(details?.memberIds ? { memberIds: details.memberIds } : {}),
     ...(details?.replacement ? { replacement: details.replacement } : {}),
+    ...(details?.previousConnection
+      ? { previousConnection: details.previousConnection }
+      : {}),
   };
 }
 
