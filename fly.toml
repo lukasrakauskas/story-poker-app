@@ -9,11 +9,11 @@ primary_region = "ams"
 # Build context must be the repository root, not apps/backend.
 # Run `bun run deploy:backend` from the root or `bun run deploy` from apps/backend.
 [build]
-dockerfile = "./apps/backend/Dockerfile"
+  dockerfile = "./apps/backend/Dockerfile"
 
 [http_service]
-internal_port = 4000
-force_https = true
-# auto_stop_machines = true
-# auto_start_machines = true
-min_machines_running = 0
+  internal_port = 4000 
+  force_https = true
+  # auto_stop_machines = true
+  # auto_start_machines = true
+  min_machines_running = 0

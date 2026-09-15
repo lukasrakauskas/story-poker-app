@@ -77,7 +77,7 @@ test("shows a checking state before an inspection responds", async ({
   });
   await page.goto("/retro/loading-room");
   await expect(
-    page.getByText("Checking room availability…", { exact: true })
+    page.locator("output").filter({ hasText: "Checking room availability…" })
   ).toBeVisible();
   await expect(page.getByLabel("Your name")).toHaveCount(0);
 });
@@ -116,6 +116,15 @@ test("keeps protected room inspection metadata opaque", async ({ page }) => {
 test("shows an unavailable state when a room expires after inspection", async ({
   page,
 }) => {
+  await page.route("**/retro/session", (route) =>
+    route.fulfill({
+      status: 410,
+      json: {
+        code: "room-expired",
+        message: "This room has expired. Create a new retrospective.",
+      },
+    })
+  );
   await page.routeWebSocket("**/retro", (socket) => {
     socket.onMessage((message) => {
       const request = JSON.parse(
@@ -130,17 +139,6 @@ test("shows an unavailable state when a room expires after inspection", async ({
               code: command.code,
               available: true,
               requiresPassword: false,
-              requestId: command.requestId,
-            },
-          })
-        );
-      } else if (command?.type === "join") {
-        socket.send(
-          JSON.stringify({
-            event: "retro-error",
-            data: {
-              code: "room-expired",
-              message: "This room has expired. Create a new retrospective.",
               requestId: command.requestId,
             },
           })

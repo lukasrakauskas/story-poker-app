@@ -30,7 +30,7 @@ import { useRetro } from "./retro-provider";
 
 const validCode = (value: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(value);
 const INVALID_ROOM_CODE_MESSAGE =
-  "Room codes use 1–64 letters, numbers, hyphens, or underscores.";
+  "That room link is invalid. Room codes use 1–64 letters, numbers, hyphens, or underscores.";
 
 export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
   const {
@@ -148,9 +148,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
       await send({ type: "inspect", code: codeValue });
       return;
     }
-    if (!joinable || !nameError) {
-      if (!joinable) return;
-    }
+    if (!joinable) return;
     if (rememberedStatus !== "invalid" && rememberedStatus !== "forgotten") {
       const inspected = await inspectRemembered(codeValue);
       if (inspected === "valid") return;
