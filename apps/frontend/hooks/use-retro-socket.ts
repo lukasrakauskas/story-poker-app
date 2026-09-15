@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  RetroCommand,
-  RetroRoom,
-  RetroServerEvent,
+import {
+  isValidRetroCode,
+  type RetroCommand,
+  type RetroRoom,
+  type RetroRoomInfo,
+  type RetroServerEvent,
 } from "shared/retrospective";
 
 import {
@@ -22,17 +24,33 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+const INVALID_ROOM_CODE_MESSAGE =
+  "That room link is invalid. Room codes use 1–64 letters, numbers, hyphens, or underscores.";
+
+function pathRoomCode(): string | null {
+  if (typeof window === "undefined") return null;
+  const match = window.location.pathname.match(/^\/retro\/([^/]+)\/?$/);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 /** A private socket with a room-scoped cookie identity. Never replay mutations. */
-export function useRetroSocket() {
+export function useRetroSocket(initialCode?: string) {
   const socket = useRef<WebSocket | null>(null);
   const credentials = useRef<{ code: string; token: string } | null>(null);
   const inFlight = useRef<Pending | null>(null);
   const nextRequestId = useRef(0);
   const ready = useRef(false);
   const latestRoom = useRef<RetroRoom | null>(null);
+  const inspectedCode = useRef<string | null>(null);
   const terminal = useRef(false);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [room, setRoom] = useState<RetroRoom | null>(null);
+  const [roomInfo, setRoomInfo] = useState<RetroRoomInfo | null>(null);
   const [selfId, setSelfId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Failure | null>(null);
@@ -52,13 +70,31 @@ export function useRetroSocket() {
   useEffect(() => {
     let active = true;
     let client: WebSocket;
+    const routeCode = initialCode ?? pathRoomCode();
     ready.current = false;
+    if (routeCode && !isValidRetroCode(routeCode)) {
+      // Do not open a socket for a malformed dynamic route. Apart from avoiding
+      // a pointless connection, this prevents an invalid code from becoming a
+      // server command through a programmatically supplied URL.
+      terminal.current = true;
+      // oxlint-disable-next-line react/set-state-in-effect
+      setConnection("disconnected");
+      setError({
+        code: "invalid-room-code",
+        message: INVALID_ROOM_CODE_MESSAGE,
+      });
+      setRoomInfo({
+        code: routeCode,
+        available: false,
+        requiresPassword: false,
+      });
+      settle(false);
+      return;
+    }
+    terminal.current = false;
     if (!credentials.current && !terminal.current) {
-      const code = window.location.pathname.match(
-        /^\/retro\/([a-zA-Z0-9_-]{1,64})\/?$/
-      )?.[1];
-      const token = code ? readRetroToken(code) : null;
-      if (code && token) credentials.current = { code, token };
+      const token = routeCode ? readRetroToken(routeCode) : null;
+      if (routeCode && token) credentials.current = { code: routeCode, token };
     }
     try {
       const url = new URL(process.env.NEXT_PUBLIC_WS_URL ?? "");
@@ -100,20 +136,40 @@ export function useRetroSocket() {
       () => fail("Connection timed out. Retry to resume this session."),
       15000
     );
+    const requestInspection = (code: string) => {
+      inspectedCode.current = code;
+      const requestId = String(++nextRequestId.current);
+      setPending(true);
+      inFlight.current = { id: requestId, resolve: () => {}, timer };
+      try {
+        client.send(
+          JSON.stringify({
+            event: "retro-command",
+            data: { type: "inspect", code, requestId },
+          })
+        );
+      } catch {
+        fail("Could not check this room. Retry the connection.");
+      }
+    };
     client.onopen = () => {
       if (!active) return;
       if (credentials.current) {
+        const requestId = String(++nextRequestId.current);
         setPending(true);
+        inFlight.current = { id: requestId, resolve: () => {}, timer };
         try {
           client.send(
             JSON.stringify({
               event: "retro-command",
-              data: { type: "resume", ...credentials.current },
+              data: { type: "resume", ...credentials.current, requestId },
             })
           );
         } catch {
           fail("Could not restore your session. Retry the connection.");
         }
+      } else if (routeCode) {
+        requestInspection(routeCode);
       } else {
         clearTimeout(timer);
         ready.current = true;
@@ -125,7 +181,33 @@ export function useRetroSocket() {
       let event: RetroServerEvent;
       try {
         event = JSON.parse(message.data);
-        if (event.event === "retro-state") {
+        if (event.event === "retro-room-info") {
+          if (
+            typeof event.data?.code !== "string" ||
+            !isValidRetroCode(event.data.code) ||
+            typeof event.data.available !== "boolean" ||
+            typeof event.data.requiresPassword !== "boolean" ||
+            (inspectedCode.current && event.data.code !== inspectedCode.current)
+          ) {
+            throw new Error("Invalid room info");
+          }
+          setRoomInfo({
+            code: event.data.code,
+            available: event.data.available,
+            requiresPassword: event.data.requiresPassword,
+          });
+          ready.current = true;
+          setConnection("connected");
+          setError(null);
+          clearTimeout(timer);
+          if (
+            !inFlight.current ||
+            !event.data.requestId ||
+            event.data.requestId === inFlight.current.id
+          ) {
+            settle(true);
+          }
+        } else if (event.event === "retro-state") {
           if (
             !event.data?.self?.id ||
             !event.data.self.token ||
@@ -139,6 +221,8 @@ export function useRetroSocket() {
             throw new Error("Invalid snapshot");
           }
           const { room: snapshot, self } = event.data;
+          inspectedCode.current = null;
+          setRoomInfo(null);
           credentials.current = { code: snapshot.code, token: self.token };
           setCookieSaved(
             saveRetroToken(snapshot.code, self.token, snapshot.expiresAt)
@@ -233,12 +317,28 @@ export function useRetroSocket() {
       ready.current = false;
       settle(false);
     };
-  }, [attempt, settle]);
+  }, [attempt, initialCode, settle]);
 
   const send = useCallback(
     (command: RetroCommand): Promise<boolean> => {
+      if (
+        (command.type === "inspect" ||
+          command.type === "join" ||
+          command.type === "resume") &&
+        !isValidRetroCode(command.code)
+      ) {
+        setError({
+          code: "invalid-room-code",
+          message: INVALID_ROOM_CODE_MESSAGE,
+        });
+        return Promise.resolve(false);
+      }
       const client = socket.current;
       const snapshot = latestRoom.current;
+      if (command.type === "inspect") {
+        inspectedCode.current = command.code;
+        setRoomInfo(null);
+      }
       if (
         !ready.current ||
         terminal.current ||
@@ -308,6 +408,7 @@ export function useRetroSocket() {
 
   return {
     room,
+    roomInfo,
     selfId,
     connection,
     pending,

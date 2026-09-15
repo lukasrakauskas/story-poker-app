@@ -1,3 +1,9 @@
+export const RETRO_CODE_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+
+export function isValidRetroCode(value: unknown): value is string {
+  return typeof value === "string" && RETRO_CODE_PATTERN.test(value);
+}
+
 export type RetroColumn = "went-well" | "improve" | "ideas";
 export type RetroPhase = "write" | "group" | "vote" | "discuss" | "closed";
 export interface RetroMember {
@@ -65,6 +71,8 @@ export interface RetroRoom {
 export type RetroCommand =
   | { type: "create"; name: string; title: string }
   | { type: "join"; name: string; code: string }
+  /** Safe, unauthenticated room availability lookup; never includes room content. */
+  | { type: "inspect"; code: string }
   | { type: "resume"; code: string; token: string }
   | { type: "add-note"; column: RetroColumn; text: string }
   | { type: "edit-note"; id: string; text: string }
@@ -87,7 +95,18 @@ export type RetroCommand =
     }
   | { type: "toggle-action"; id: string }
   | { type: "delete-action"; id: string };
+export interface RetroRoomInfo {
+  code: string;
+  available: boolean;
+  /** Kept in the contract for protected-room access without exposing any content. */
+  requiresPassword: boolean;
+}
+
 export type RetroServerEvent =
+  | {
+      event: "retro-room-info";
+      data: RetroRoomInfo & { requestId?: string };
+    }
   | {
       event: "retro-state";
       data: {

@@ -146,6 +146,35 @@ describe('retrospective WebSocket route', () => {
     );
     expect(created.room.phase).toBe('write');
     expect(JSON.stringify(created.room)).not.toContain('token');
+    expect(
+      await command(outsider, {
+        type: 'inspect',
+        code: created.room.code,
+      }),
+    ).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: created.room.code,
+        available: true,
+        requiresPassword: false,
+      },
+    });
+    expect(
+      await command(outsider, { type: 'inspect', code: 'missing-room' }),
+    ).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: 'missing-room',
+        available: false,
+        requiresPassword: false,
+      },
+    });
+    expect(
+      await command(outsider, { type: 'inspect', code: 'bad code' }),
+    ).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-command' },
+    });
     const ownerJoin = next(owner);
     const joined = state(
       await command(guest, {

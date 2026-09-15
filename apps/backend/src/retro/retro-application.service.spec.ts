@@ -41,6 +41,66 @@ function state(
 }
 
 describe('RetroApplicationService', () => {
+  it('answers anonymous inspections with only availability metadata', () => {
+    const created = state(
+      application.execute('owner', {
+        type: 'create',
+        name: 'Alice',
+        title: 'Private room title',
+      }),
+      'owner',
+    );
+
+    expect(
+      event(
+        application.execute(
+          'visitor',
+          { type: 'inspect', code: created.room.code },
+          'inspect-1',
+        ),
+        'visitor',
+      ),
+    ).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: created.room.code,
+        available: true,
+        requiresPassword: false,
+        requestId: 'inspect-1',
+      },
+    });
+    expect(
+      event(
+        application.execute('unknown', {
+          type: 'inspect',
+          code: 'missing-room',
+        }),
+        'unknown',
+      ),
+    ).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: 'missing-room',
+        available: false,
+        requiresPassword: false,
+      },
+    });
+    expect(
+      JSON.stringify(
+        application.execute('visitor', {
+          type: 'inspect',
+          code: created.room.code,
+        }),
+      ),
+    ).not.toContain('Private room title');
+    expect(
+      event(application.execute('visitor', { type: 'advance' }), 'visitor'),
+    ).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+  });
+
   it('owns session routing, recipient privacy, and synchronized reveal', () => {
     const created = state(
       application.execute('owner-connection', {

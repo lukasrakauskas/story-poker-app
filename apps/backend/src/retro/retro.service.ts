@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
+import { isValidRetroCode } from 'shared/retrospective';
 import type {
   RetroCommand,
   RetroActionAssignment,
@@ -7,6 +8,7 @@ import type {
   RetroGroup,
   RetroNote,
   RetroRoom,
+  RetroRoomInfo,
 } from 'shared/retrospective';
 import {
   ParticipantService,
@@ -55,7 +57,10 @@ type StoredRoom = Omit<RetroRoom, 'members' | 'notes' | 'groups'> & {
   /** Internal current-phase readiness, kept separate from participant identity. */
   readyMemberIds: Set<string>;
 };
-type Mutation = Exclude<RetroCommand, { type: 'create' | 'join' | 'resume' }>;
+type Mutation = Exclude<
+  RetroCommand,
+  { type: 'create' | 'join' | 'resume' | 'inspect' }
+>;
 
 const ROOM_NAMESPACE = 'retro';
 
@@ -129,6 +134,16 @@ export class RetroService {
     const member = this.participants.create(normalizedName);
     room.members.push(member);
     return { code, id: member.id, token: member.token };
+  }
+
+  /** Return only room-entry metadata; callers without a session never see a snapshot. */
+  inspect(code: string): RetroRoomInfo {
+    if (!isValidRetroCode(code))
+      return { code, available: false, requiresPassword: false };
+    const room = this.registry.get<StoredRoom>(ROOM_NAMESPACE, code);
+    if (!room || room.expiresAt <= Date.now())
+      return { code, available: false, requiresPassword: false };
+    return { code, available: true, requiresPassword: false };
   }
 
   resume(code: string, token: string): RetroSession {

@@ -99,6 +99,38 @@ describe('room lifecycle and privacy', () => {
       'no longer available',
     );
   });
+  it('inspects room availability without exposing a snapshot', () => {
+    expect(service.inspect(owner.code)).toEqual({
+      code: owner.code,
+      available: true,
+      requiresPassword: false,
+    });
+    expect(service.inspect('missing-room')).toEqual({
+      code: 'missing-room',
+      available: false,
+      requiresPassword: false,
+    });
+    expect(service.inspect('not a room')).toEqual({
+      code: 'not a room',
+      available: false,
+      requiresPassword: false,
+    });
+    for (let i = 0; i < 4; i++) service.mutate(owner, { type: 'advance' });
+    expect(service.inspect(owner.code)).toEqual({
+      code: owner.code,
+      available: true,
+      requiresPassword: false,
+    });
+    expect(() => service.join(owner.code, 'Carol')).toThrow('New participants');
+
+    vi.advanceTimersByTime(RETRO_LIFETIME_MS);
+    expect(service.inspect(owner.code)).toEqual({
+      code: owner.code,
+      available: false,
+      requiresPassword: false,
+    });
+  });
+
   it('keeps rooms isolated, credentials private and snapshots detached', () => {
     add();
     const other = service.create('Carol', 'Other room');
@@ -792,6 +824,8 @@ it.each([
     owner: { kind: 'external', name: 'x'.repeat(61) },
   },
   { type: 'resume', code: 'room', token: '' },
+  { type: 'inspect', code: 'not a room' },
+  { type: 'inspect', code: 'x'.repeat(65) },
 ])('rejects malformed and oversized commands: %j', (command) => {
   expect(retroCommandSchema.safeParse(command).success).toBe(false);
 });

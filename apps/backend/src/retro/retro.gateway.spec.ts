@@ -55,6 +55,39 @@ afterEach(() => {
 });
 
 describe('RetroGateway', () => {
+  it('validates room codes and serves anonymous inspection metadata', () => {
+    const owner = socket();
+    const visitor = socket();
+    gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Private',
+    });
+    const code = latest(owner).data.room.code;
+
+    gateway.onCommand(visitor, {
+      type: 'inspect',
+      code,
+      requestId: 'inspect-1',
+    });
+    expect(latest(visitor)).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code,
+        available: true,
+        requiresPassword: false,
+        requestId: 'inspect-1',
+      },
+    });
+    expect(JSON.stringify(latest(visitor))).not.toContain('Private');
+
+    gateway.onCommand(visitor, { type: 'inspect', code: 'bad code' });
+    expect(latest(visitor)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-command' },
+    });
+  });
+
   it('keeps closed broadcasts identical when sockets disconnect, resume or join late', () => {
     const owner = socket();
     const guest = socket();

@@ -1,6 +1,6 @@
 # Short-lived retrospectives
 
-Visit `/retro` to create a room, or share `/retro/<code>` to invite participants. This is independent of the planning-poker routes and uses a separate WebSocket endpoint at `/retro` on the backend origin configured by `NEXT_PUBLIC_WS_URL`.
+Visit `/retro` to create a room, or share `/retro/<code>` to invite participants. Room codes are 1–64 ASCII letters, numbers, hyphens, or underscores; malformed links are rejected in the browser before a WebSocket is opened. This is independent of the planning-poker routes and uses a separate WebSocket endpoint at `/retro` on the backend origin configured by `NEXT_PUBLIC_WS_URL`.
 
 ## Flow
 
@@ -13,6 +13,7 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 
 ## Room status and supporting information
 
+- A valid room link first sends an unauthenticated `inspect` command after the WebSocket is ready when no saved credential can resume the room. The `retro-room-info` response contains only the requested code, join availability, and a password-required flag. Unknown, expired, and closed rooms remain opaque and do not render participant fields; the lobby offers a link to create or join another room. A saved credential skips inspection and uses the normal resume path.
 - Readiness is scoped to the active write or vote phase and resets for everyone on every phase change. New participants start not ready. A disconnected participant is excluded from the moderator's `ready / active participants` count; reconnecting during the same phase restores their prior ready/not-ready choice and returns them to the active count.
 - The moderator's advance confirmation names every connected participant who is not ready, but readiness is advisory so offline participants cannot block progress. A moderator with an unsent local note draft also receives a destructive-impact warning, and participants cannot mark writing done until their local drafts are submitted or cleared.
 - In a live room, connection/retry, expiry, rejoin-cookie, and browser-history state share one compact status card. It sits in the right sidebar on desktop and immediately before the board on mobile, rather than stacking banners above the workflow.
@@ -39,7 +40,7 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 - `packages/shared/retrospective.ts`: client/server protocol types.
 - `apps/backend/src/collaboration`: domain-neutral participant identity, normalized-name validation, roles, presence, reconnect tokens, connection replacement/audience lookup, room registration, and configurable retention scheduling.
 - `apps/backend/src/retro/retro.service.ts`: retrospective notes/phases/actions and fixed two-hour expiry policy.
-- `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, sessions, recipient-specific snapshots, replacement, and expiry orchestration. It returns explicit addressed events and close effects.
+- `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, anonymous room inspection, sessions, recipient-specific snapshots, replacement, and expiry orchestration. It returns explicit addressed events and close effects.
 - `apps/backend/src/retro/retro.gateway.ts`: the transport-only Nest controller for runtime DTO validation, rate-limit delegation, heartbeat registration, application delegation, and response dispatch.
 - `apps/backend/src/transport`: shared WebSocket serialization/connection adapters, configurable heartbeat handling, application event dispatch, and keyed throttling. `RetroModule` imports both this module and `CollaborationModule`.
 - `apps/frontend/app/retro`: retrospective routes and UI, including the responsive room status card.
@@ -66,10 +67,11 @@ bun run --cwd apps/backend test:e2e
 bun run build
 bun run lint
 
-# Browser regression (starts backend :4000 and frontend :3001)
+# Browser regression (defaults to backend :4000 and frontend :3001)
+# Use PLAYWRIGHT_BACKEND_PORT/PLAYWRIGHT_FRONTEND_PORT for isolated runs.
 cd apps/frontend
 bunx playwright install chromium
-bun run test:e2e
+PLAYWRIGHT_BACKEND_PORT=44093 PLAYWRIGHT_FRONTEND_PORT=43093 bun run test:e2e
 ```
 
 The WebSocket end-to-end tests exercise real clients, room broadcasts, private credentials, permissions, shared reconnect replacement, and coexistence with the original poker endpoint. Cross-domain contract tests prove that Poker and Retro receive the same normalized-name, unique-name, role, token, disconnect, and resume guarantees. Application-service tests cover session orchestration, recipient privacy, audience events, and replacement without constructing sockets. Small gateway/transport contract tests cover DTO validation, serialization, rate limiting, heartbeat cleanup, and protocol wiring; domain service tests cover phase transitions, voting budgets, resource limits, and domain-specific retention/expiry. Bun frontend unit tests cover history updates, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, connected/disconnected/expiring/storage-failure status, responsive status placement, and dark mode.

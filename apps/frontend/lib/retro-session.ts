@@ -1,5 +1,7 @@
+import { isValidRetroCode } from "shared/retrospective";
+
 const PREFIX = "retro-session-";
-const validCode = (code: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(code);
+const validCode = isValidRetroCode;
 
 /** Cookies are JS-readable because the WebSocket protocol explicitly sends the token.
  * Host-only, SameSite=Lax, Secure on HTTPS, and never outlive the live room. */

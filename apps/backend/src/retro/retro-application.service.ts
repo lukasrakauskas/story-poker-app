@@ -45,6 +45,21 @@ export class RetroApplicationService implements OnModuleDestroy {
     try {
       const current = this.sessions.get(connectionId);
       let session: RetroSession;
+      if (command.type === 'inspect') {
+        const inspection = this.retros.inspect(command.code);
+        return this.merge(
+          expired,
+          result(undefined, [
+            {
+              connectionId,
+              event: {
+                event: 'retro-room-info',
+                data: { ...inspection, ...(requestId ? { requestId } : {}) },
+              },
+            },
+          ]),
+        );
+      }
       if (
         command.type === 'create' ||
         command.type === 'join' ||
