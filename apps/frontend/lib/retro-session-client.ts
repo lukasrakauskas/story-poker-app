@@ -157,6 +157,7 @@ export class RetroSessionClient {
   private activeCode: string | null = null;
   private resumeRequired = false;
   private resumePrepared = false;
+  private identityInspection = 0;
 
   constructor(private readonly options: RetroSessionClientOptions) {
     this.connectionTimeoutMs = options.connectionTimeoutMs ?? 15_000;
@@ -198,6 +199,7 @@ export class RetroSessionClient {
   dispose = (): void => {
     this.started = false;
     this.notificationGeneration++;
+    this.identityInspection++;
     this.scheduledNotificationGeneration = undefined;
     this.clearConnectionTimer();
     this.finishPending(false);
@@ -252,14 +254,21 @@ export class RetroSessionClient {
       this.setRememberedStatus("invalid");
       return "invalid";
     }
+    const inspection = ++this.identityInspection;
     this.transition({ type: "remembered-status", status: "checking" });
     try {
       const identity = await this.options.sessions.inspect(code);
-      if (!this.started || identity.code !== code) return "invalid";
+      if (
+        !this.started ||
+        inspection !== this.identityInspection ||
+        identity.code !== code
+      )
+        return "invalid";
       this.transition({ type: "remembered-identity", identity });
       return "valid";
     } catch (cause) {
-      if (!this.started) return "invalid";
+      if (!this.started || inspection !== this.identityInspection)
+        return "invalid";
       const failure = failureFrom(cause, CONNECTION_FAILURE);
       if (failure.code === "session-required") {
         this.transition({ type: "remembered-cleared", status: "idle" });
@@ -444,7 +453,7 @@ export class RetroSessionClient {
     void this.options.sessions
       .establish(command)
       .then((view) => {
-        if (!this.started) return;
+        if (!this.started || this.pendingRequest?.id !== pending.id) return;
         this.activeCode = view.room.code;
         this.resumeRequired = true;
         // The cookie was freshly installed by HTTP. It can be attached to the
@@ -458,9 +467,10 @@ export class RetroSessionClient {
           : this.options.transport.connect();
         if (!connected) this.failPending(CONNECTION_FAILURE);
       })
-      .catch((cause) =>
-        this.failEstablishment(failureFrom(cause, CONNECTION_FAILURE))
-      );
+      .catch((cause) => {
+        if (this.started && this.pendingRequest?.id === pending.id)
+          this.failEstablishment(failureFrom(cause, CONNECTION_FAILURE));
+      });
     return pending.promise;
   }
 
@@ -474,7 +484,12 @@ export class RetroSessionClient {
     void this.options.sessions
       .resume(code)
       .then((view) => {
-        if (!this.started || view.room.code !== code) return;
+        if (
+          !this.started ||
+          this.pendingRequest?.id !== pending.id ||
+          view.room.code !== code
+        )
+          return;
         this.resumePrepared = true;
         // Rotation changes the HttpOnly cookie, so an existing WebSocket must
         // be replaced before the resume command can be authenticated.
@@ -484,6 +499,7 @@ export class RetroSessionClient {
         if (!connected) this.failPending(CONNECTION_FAILURE);
       })
       .catch((cause) => {
+        if (!this.started || this.pendingRequest?.id !== pending.id) return;
         const failure = failureFrom(cause, CONNECTION_FAILURE);
         if (failure.code === "invalid-session")
           this.transition({ type: "remembered-cleared", status: "invalid" });
