@@ -473,6 +473,10 @@ export class RetroService {
     }
   }
 
+  roomCount(): number {
+    return this.registry.size(ROOM_NAMESPACE);
+  }
+
   isExpired(code: string): boolean {
     return (
       (this.registry.get<StoredRoom>(ROOM_NAMESPACE, code)?.expiresAt ?? 0) <=

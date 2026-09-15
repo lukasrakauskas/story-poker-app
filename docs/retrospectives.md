@@ -34,14 +34,75 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 - Limits: 100 rooms per process, 30 participants per room, 300 notes and 100 actions per room. Names: 3–30 characters; titles: 100; note/action text: 1,000; action owner: 60. Commands are limited to 30 per second per connection; WebSocket payloads to 16 KiB.
 - Run one backend instance, or use sticky routing to the same process for all members of a room. Replicas do not share room state. This is intentionally not a durable collaboration service.
 
+## Admission, proxy, and origin policy
+
+The retrospective endpoint applies controls before room-domain code runs. They are
+intended to bound unauthenticated socket churn and full-state fan-out without
+making a normal team sharing a NAT compete on one command bucket:
+
+- At most 500 active retrospective sockets and 64 sockets from one source are
+  admitted by default. At most 250 sockets remain unauthenticated globally, or
+  64 from one source. A successful create, join, or resume leaves the
+  unauthenticated pool while its socket remains subject to the active-socket
+  bound. A source may make 10 creates, 60 joins, or 30 resumes per minute;
+  password-bearing create/join attempts are additionally limited to 5 per
+  minute. The join allowance is deliberately above the 30-member room limit
+  for teams behind one NAT. The current base has no protected-retro command
+  yet; the gateway recognizes password-bearing create/join attempts so the
+  stricter source budget is already in place when #84's access fields land.
+- Room creation has a process-wide 20-attempt/minute circuit. Full-state
+  broadcasts consume a process-wide 5,000-recipient budget per second and
+  briefly back off when it is exceeded. Backoff returns the stable `rate-limit`
+  error and does not change a room. Capacity returns the stable `capacity`
+  error. Existing room mutation remains governed by the per-connection command
+  limit and is not keyed to the source IP.
+- Source identity starts with the TCP peer address from the upgrade request.
+  `X-Forwarded-For` and `X-Real-IP` are ignored unless
+  `WS_TRUST_PROXY=true`. Set `WS_TRUSTED_PROXY_IPS` to a comma-separated list
+  of the proxy peer addresses when possible; otherwise only enable the flag
+  when the service is reachable exclusively through a trusted proxy. Invalid
+  or missing addresses share an `unknown` bucket rather than creating an
+  unbounded limiter key. Never enable this setting when clients can reach the
+  backend directly.
+- In production set `NODE_ENV=production` and
+  `WS_ALLOWED_ORIGINS=https://retro.example.com` (comma-separated exact HTTP(S)
+  origins, with no paths, credentials, or wildcard). The WebSocket upgrade is
+  rejected when the origin is not on that list; with no list production fails
+  closed. Non-browser clients without an origin require the explicit
+  `WS_ALLOW_NO_ORIGIN=true` exception. Development permits local clients when
+  no list is configured. The same policy is applied to the planning WebSocket.
+- `TransportMetricsService` records bounded, low-cardinality counters for
+  rejected connections, throttled operations/broadcasts, and capacity
+  exhaustion, plus gauges for active sockets, unauthenticated sockets, rooms,
+  and sessions. The in-memory fixed-window store retains at most 10,000 keys
+  and never evicts a live key to admit a new source. Admission warnings contain
+  only a fixed namespace, operation,
+  or reason. Room content, names, cookies, tokens, passwords, forwarded IPs,
+  and request IDs are never logged or used as metric labels. The current
+  metrics and limiter are process-local. When shared storage from #88 lands,
+  the admission service should receive a shared counter/window implementation
+  (and a pub/sub broadcast budget); otherwise each replica has an independent
+  limit and clients must remain on the same routing policy.
+
+Environment overrides for capacity and windows are `WS_MAX_ACTIVE_SOCKETS`,
+`WS_MAX_ACTIVE_SOCKETS_PER_SOURCE`, `WS_MAX_UNAUTHENTICATED_SOCKETS`,
+`WS_MAX_UNAUTHENTICATED_PER_SOURCE`, `WS_ADMISSION_WINDOW_MS`,
+`WS_CREATE_ATTEMPTS_PER_SOURCE`, `WS_JOIN_ATTEMPTS_PER_SOURCE`,
+`WS_RESUME_ATTEMPTS_PER_SOURCE`, `WS_PASSWORD_ATTEMPTS_PER_SOURCE`,
+`WS_GLOBAL_CREATE_LIMIT`, `WS_GLOBAL_CREATE_WINDOW_MS`,
+`WS_CREATE_CIRCUIT_COOLDOWN_MS`, `WS_BROADCAST_BUDGET`,
+`WS_BROADCAST_WINDOW_MS`, and `WS_BROADCAST_CIRCUIT_COOLDOWN_MS`. Keep the
+values within the capacity of the instance and account for the expected number
+of participants behind each proxy/NAT.
+
 ## Implementation
 
 - `packages/shared/retrospective.ts`: client/server protocol types.
 - `apps/backend/src/collaboration`: domain-neutral participant identity, normalized-name validation, roles, presence, reconnect tokens, connection replacement/audience lookup, room registration, and configurable retention scheduling.
 - `apps/backend/src/retro/retro.service.ts`: retrospective notes/phases/actions and fixed two-hour expiry policy.
 - `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, sessions, recipient-specific snapshots, replacement, and expiry orchestration. It returns explicit addressed events and close effects.
-- `apps/backend/src/retro/retro.gateway.ts`: the transport-only Nest controller for runtime DTO validation, rate-limit delegation, heartbeat registration, application delegation, and response dispatch.
-- `apps/backend/src/transport`: shared WebSocket serialization/connection adapters, configurable heartbeat handling, application event dispatch, and keyed throttling. `RetroModule` imports both this module and `CollaborationModule`.
+- `apps/backend/src/retro/retro.gateway.ts`: the transport-only Nest controller for runtime DTO validation, upgrade-source/admission delegation, heartbeat registration, application delegation, and response dispatch.
+- `apps/backend/src/transport`: shared WebSocket serialization/connection adapters, configurable heartbeat handling, application event dispatch, bounded keyed throttling, source/connection admission, origin verification, and sanitized metrics. `RetroModule` imports both this module and `CollaborationModule`.
 - `apps/frontend/app/retro`: retrospective routes and UI, including the responsive room status card.
 - `apps/frontend/hooks/use-retro-socket.ts`: isolated connection, cookie resume lifecycle, and snapshot persistence.
 - `apps/frontend/lib/retro-session.ts`: expiring cookie helpers.
@@ -62,6 +123,8 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 ```sh
 bun run --cwd apps/frontend test:unit
 bun run --cwd apps/backend test
+bun run --cwd apps/backend test -- src/transport/websocket-admission.service.spec.ts
+bun run --cwd apps/backend test:e2e -- test/retro-admission.e2e-spec.ts
 bun run --cwd apps/backend test:e2e
 bun run build
 bun run lint

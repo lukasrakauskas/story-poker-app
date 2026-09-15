@@ -1,5 +1,7 @@
-import { Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Optional, type OnModuleDestroy } from '@nestjs/common';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
+import { WebSocketAdmissionService } from '../transport/websocket-admission.service.js';
+import { TransportMetricsService } from '../transport/transport-metrics.service.js';
 import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import {
@@ -24,11 +26,42 @@ export class RetroApplicationService implements OnModuleDestroy {
     private readonly retros: RetroService,
     private readonly connections: ConnectionRegistryService,
     events: ApplicationEventBus,
+    @Optional() private readonly admission?: WebSocketAdmissionService,
+    @Optional() private readonly metrics?: TransportMetricsService,
   ) {
     this.unsubscribeMemberExpired = retros.onMemberExpired((code, id) => {
-      this.connections.revoke(RETRO_APPLICATION_NAMESPACE, code, id);
-      events.emit(RETRO_APPLICATION_NAMESPACE, this.broadcast(code));
+      const connectionId = this.connections.revoke<string>(
+        RETRO_APPLICATION_NAMESPACE,
+        code,
+        id,
+      );
+      if (connectionId) {
+        this.sessions.delete(connectionId);
+        this.admission?.release(connectionId);
+      }
+      this.refreshMetrics();
+      const broadcast = this.broadcast(code);
+      events.emit(
+        RETRO_APPLICATION_NAMESPACE,
+        connectionId
+          ? this.merge(
+              broadcast,
+              result(
+                undefined,
+                [],
+                [
+                  {
+                    connectionId,
+                    code: 4003,
+                    reason: 'Membership expired',
+                  },
+                ],
+              ),
+            )
+          : broadcast,
+      );
     });
+    this.refreshMetrics();
   }
 
   onModuleDestroy() {
@@ -55,11 +88,27 @@ export class RetroApplicationService implements OnModuleDestroy {
             'already-joined',
             'You are already in a retrospective. Open a new tab to join another.',
           );
-        if (command.type === 'create')
+        if (command.type === 'create') {
+          if (
+            this.admission &&
+            !this.admission.allowRoomCreation(RETRO_APPLICATION_NAMESPACE)
+          )
+            throw new RetroError(
+              'capacity',
+              'Room creation is temporarily unavailable. Try again later.',
+            );
+          this.requireBroadcastCapacity('', 1);
           session = this.retros.create(command.name, command.title);
-        else if (command.type === 'join')
+        } else if (command.type === 'join') {
+          this.requireBroadcastCapacity(
+            command.code,
+            this.roomAudienceSize(command.code) > 0 ? 1 : 0,
+          );
           session = this.retros.join(command.code, command.name);
-        else session = this.retros.resume(command.code, command.token);
+        } else {
+          this.requireBroadcastCapacity(command.code);
+          session = this.retros.resume(command.code, command.token);
+        }
 
         const previous = this.connections.replace(
           RETRO_APPLICATION_NAMESPACE,
@@ -72,7 +121,7 @@ export class RetroApplicationService implements OnModuleDestroy {
         return this.merge(
           expired,
           replaced,
-          this.broadcast(session.code, connectionId, requestId),
+          this.broadcast(session.code, connectionId, requestId, true),
         );
       }
 
@@ -82,6 +131,7 @@ export class RetroApplicationService implements OnModuleDestroy {
           'Join a room before making changes.',
         );
       session = current;
+      this.requireBroadcastCapacity(session.code);
       const mutation = this.retros.mutate(session, command);
       const removed = mutation?.removedMemberId
         ? this.removeMember(session.code, mutation.removedMemberId)
@@ -89,17 +139,25 @@ export class RetroApplicationService implements OnModuleDestroy {
       return this.merge(
         expired,
         removed,
-        this.broadcast(session.code, connectionId, requestId),
+        this.broadcast(session.code, connectionId, requestId, true),
       );
     } catch (error) {
       if (!(error instanceof RetroError)) throw error;
+      if (error.code === 'capacity')
+        this.metrics?.recordCapacityExhausted(
+          RETRO_APPLICATION_NAMESPACE,
+          command.type,
+        );
       return this.merge(expired, this.reject(connectionId, error, requestId));
+    } finally {
+      this.refreshMetrics();
     }
   }
 
   disconnect(connectionId: string): ApplicationResult {
     const session = this.sessions.get(connectionId);
     this.sessions.delete(connectionId);
+    this.admission?.release(connectionId);
     if (!session) return result();
     this.connections.release(
       RETRO_APPLICATION_NAMESPACE,
@@ -107,16 +165,30 @@ export class RetroApplicationService implements OnModuleDestroy {
       session.id,
       connectionId,
     );
+    const broadcastAllowed = this.reserveBroadcast(session.code);
     this.retros.disconnect(session);
-    return this.broadcast(session.code);
+    if (!broadcastAllowed) {
+      this.refreshMetrics();
+      return result();
+    }
+    const disconnected = this.broadcast(
+      session.code,
+      undefined,
+      undefined,
+      true,
+    );
+    this.refreshMetrics();
+    return disconnected;
   }
 
   expireRooms(): ApplicationResult {
     this.retros.sweep();
     const messages: OutboundMessage[] = [];
+    const closes: { connectionId: string; code: number; reason: string }[] = [];
     for (const [connectionId, session] of this.sessions) {
       if (!this.retros.isExpired(session.code)) continue;
       this.sessions.delete(connectionId);
+      this.admission?.release(connectionId);
       this.connections.release(
         RETRO_APPLICATION_NAMESPACE,
         session.code,
@@ -132,8 +204,14 @@ export class RetroApplicationService implements OnModuleDestroy {
           ),
         ),
       });
+      closes.push({
+        connectionId,
+        code: 4004,
+        reason: 'Room expired',
+      });
     }
-    return result(undefined, messages);
+    this.refreshMetrics();
+    return result(undefined, messages, closes);
   }
 
   reject(
@@ -154,6 +232,7 @@ export class RetroApplicationService implements OnModuleDestroy {
     );
     if (!connectionId) return result();
     this.sessions.delete(connectionId);
+    this.admission?.release(connectionId);
     return result(
       undefined,
       [
@@ -173,6 +252,7 @@ export class RetroApplicationService implements OnModuleDestroy {
 
   private replace(previousConnectionId: string): ApplicationResult {
     this.sessions.delete(previousConnectionId);
+    this.admission?.release(previousConnectionId);
     return result(
       undefined,
       [
@@ -200,8 +280,11 @@ export class RetroApplicationService implements OnModuleDestroy {
     code: string,
     requester?: string,
     requestId?: string,
+    admissionReserved = false,
   ): ApplicationResult {
+    if (!admissionReserved && !this.reserveBroadcast(code)) return result();
     const messages: OutboundMessage[] = [];
+    const closes: { connectionId: string; code: number; reason: string }[] = [];
     const roomSessions = [...this.sessions].filter(
       ([, session]) => session.code === code,
     );
@@ -227,6 +310,7 @@ export class RetroApplicationService implements OnModuleDestroy {
       } catch (error) {
         if (!(error instanceof RetroError)) throw error;
         this.sessions.delete(connectionId);
+        this.admission?.release(connectionId);
         this.connections.release(
           RETRO_APPLICATION_NAMESPACE,
           session.code,
@@ -237,9 +321,48 @@ export class RetroApplicationService implements OnModuleDestroy {
           connectionId,
           event: this.errorEvent(error),
         });
+        closes.push({
+          connectionId,
+          code: error.code === 'room-expired' ? 4004 : 4002,
+          reason:
+            error.code === 'room-expired' ? 'Room expired' : 'Session invalid',
+        });
       }
     }
-    return result(undefined, messages);
+    return result(undefined, messages, closes);
+  }
+
+  private requireBroadcastCapacity(code: string, additional = 0) {
+    if (this.reserveBroadcast(code, additional)) return;
+    throw new RetroError(
+      'rate-limit',
+      'This retrospective is busy. Try again in a moment.',
+    );
+  }
+
+  private reserveBroadcast(code: string, additional = 0): boolean {
+    return (
+      !this.admission ||
+      this.admission.allowBroadcast(
+        RETRO_APPLICATION_NAMESPACE,
+        Math.max(1, this.roomAudienceSize(code) + additional),
+      )
+    );
+  }
+
+  private roomAudienceSize(code: string): number {
+    let size = 0;
+    for (const [, session] of this.sessions) if (session.code === code) size++;
+    return size;
+  }
+
+  private refreshMetrics() {
+    this.metrics?.setGauge('retro.active_rooms', this.retros.roomCount(), {
+      namespace: RETRO_APPLICATION_NAMESPACE,
+    });
+    this.metrics?.setGauge('retro.active_sessions', this.sessions.size, {
+      namespace: RETRO_APPLICATION_NAMESPACE,
+    });
   }
 
   private errorEvent(error: RetroError, requestId?: string): RetroServerEvent {

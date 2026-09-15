@@ -1,19 +1,37 @@
 import { Module } from '@nestjs/common';
 import { ApplicationEventBus } from './application-event-bus.service.js';
-import { RateLimitService } from './rate-limit.service.js';
+import { RATE_LIMIT_OPTIONS, RateLimitService } from './rate-limit.service.js';
+import {
+  loadWebSocketAdmissionPolicy,
+  WebSocketAdmissionService,
+  WEBSOCKET_ADMISSION_POLICY,
+} from './websocket-admission.service.js';
 import { WebSocketHeartbeatService } from './websocket-heartbeat.service.js';
 import { WebSocketTransportService } from './websocket-transport.service.js';
+import { TransportMetricsService } from './transport-metrics.service.js';
 
 @Module({
   providers: [
     ApplicationEventBus,
+    {
+      provide: RATE_LIMIT_OPTIONS,
+      useValue: {},
+    },
     RateLimitService,
+    {
+      provide: WEBSOCKET_ADMISSION_POLICY,
+      useFactory: () => loadWebSocketAdmissionPolicy(),
+    },
+    WebSocketAdmissionService,
+    TransportMetricsService,
     WebSocketHeartbeatService,
     WebSocketTransportService,
   ],
   exports: [
     ApplicationEventBus,
     RateLimitService,
+    WebSocketAdmissionService,
+    TransportMetricsService,
     WebSocketHeartbeatService,
     WebSocketTransportService,
   ],

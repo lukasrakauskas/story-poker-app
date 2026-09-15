@@ -166,6 +166,21 @@ describe('RetroGateway', () => {
     expect(() => gateway.handleDisconnect(guest)).not.toThrow();
   });
 
+  it('shares the strict password-attempt budget across fresh sockets', () => {
+    const clients = Array.from({ length: 6 }, () => socket());
+    for (const client of clients)
+      gateway.onCommand(client, {
+        type: 'join',
+        name: 'Bobby',
+        code: 'missing-room',
+        password: 'guess',
+      });
+    expect(latest(clients.at(-1)!)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'rate-limit' },
+    });
+  });
+
   it('limits command floods and recovers after the rate window', () => {
     const owner = socket();
     for (let i = 0; i < 31; i++) gateway.onCommand(owner, null);
