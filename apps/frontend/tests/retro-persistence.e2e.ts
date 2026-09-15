@@ -43,7 +43,10 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   await page.close();
   await reopened.reload();
   await expect(
-    reopened.getByRole("button", { name: "Start voting", exact: true })
+    reopened.getByRole("button", {
+      name: "Reveal and group notes",
+      exact: true,
+    })
   ).toBeEnabled();
   const second = await createRoom(reopened, "Second retrospective");
   expect(second).not.toBe(first);
@@ -110,7 +113,10 @@ test("rejects and clears stale credentials, then allows joining again", async ({
     .click();
   await expect(page.getByText("Bobby (you)", { exact: true })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Start voting", exact: true })
+    page.getByRole("button", {
+      name: "Reveal and group notes",
+      exact: true,
+    })
   ).toHaveCount(0);
 });
 

@@ -2,7 +2,9 @@ import { Test } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { WebSocket } from 'ws';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RetentionService } from '../src/collaboration/retention.service.js';
+import { RETRO_OFFLINE_RETENTION_MS } from '../src/retro/retro.service.js';
 import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
 import { AppModule } from '../src/app.module.js';
 
@@ -58,9 +60,79 @@ beforeEach(async () => {
 afterEach(async () => {
   sockets.forEach((socket) => socket.terminate());
   await app.close();
+  vi.restoreAllMocks();
 });
 
 describe('retrospective WebSocket route', () => {
+  it('broadcasts offline membership expiry and rejects its stale credential', async () => {
+    const retention = app.get(RetentionService);
+    const schedule = retention.schedule.bind(retention);
+    const scheduled = vi
+      .spyOn(retention, 'schedule')
+      .mockImplementation((namespace, key, delay, expire) =>
+        schedule(namespace, key, namespace === 'retro' ? 50 : delay, expire),
+      );
+    const owner = await connect();
+    const guest = await connect();
+    const created = state(
+      await command(owner, {
+        type: 'create',
+        name: 'Alice',
+        title: 'Retention',
+      }),
+    );
+    const joined = state(
+      await command(guest, {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+      }),
+    );
+    await command(guest, {
+      type: 'add-note',
+      column: 'ideas',
+      text: 'Keep attribution',
+    });
+    await command(owner, { type: 'advance' });
+    const offline = next(owner);
+    guest.close();
+    expect(
+      state(await offline).room.members.find(
+        (member) => member.id === joined.self.id,
+      )?.connected,
+    ).toBe(false);
+    const expired = state(await next(owner));
+    expect(scheduled).toHaveBeenCalledWith(
+      'retro',
+      expect.any(String),
+      RETRO_OFFLINE_RETENTION_MS,
+      expect.any(Function),
+    );
+    expect(expired.room.members).toHaveLength(1);
+    expect(expired.room.notes[0]).toMatchObject({
+      text: 'Keep attribution',
+      authorName: 'Bobby',
+    });
+    const returning = await connect();
+    expect(
+      await command(returning, {
+        type: 'resume',
+        code: created.room.code,
+        token: joined.self.token,
+      }),
+    ).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-session' },
+    });
+    const replacement = state(
+      await command(returning, {
+        type: 'join',
+        code: created.room.code,
+        name: 'Bobby',
+      }),
+    );
+    expect(replacement.self.id).not.toBe(joined.self.id);
+  });
   it('runs a shared retrospective without leaking credentials or affecting poker', async () => {
     const owner = await connect();
     const guest = await connect();
@@ -127,20 +199,53 @@ describe('retrospective WebSocket route', () => {
       'Fewer handoffs',
     ]);
     expect(state(await guestReveal).room.notes).toEqual(revealed.room.notes);
+    expect(revealed.room.phase).toBe('group');
+    const guestGroupedUpdate = next(guest);
+    const grouped = state(
+      await command(owner, {
+        type: 'group-notes',
+        title: 'Team flow',
+        noteIds: revealed.room.notes.map((note) => note.id),
+      }),
+    );
+    await guestGroupedUpdate;
+    const groupId = grouped.room.groups[0].id;
+    expect(grouped.room.notes.every((note) => note.groupId === groupId)).toBe(
+      true,
+    );
+    const guestVotingUpdate = next(guest);
+    expect(state(await command(owner, { type: 'advance' })).room.phase).toBe(
+      'vote',
+    );
+    await guestVotingUpdate;
     const voteReceived = next(owner);
-    await command(guest, {
-      type: 'toggle-vote',
-      id: withOwnerNote.room.notes[0].id,
+    const guestVote = state(
+      await command(guest, {
+        type: 'toggle-vote',
+        id: groupId,
+      }),
+    );
+    const ownerVote = state(await voteReceived);
+    expect(ownerVote.room.groups[0]).toMatchObject({
+      voteCount: null,
+      votedBySelf: false,
     });
-    expect(state(await voteReceived).room.notes[0].voterIds).toEqual([
-      joined.self.id,
-    ]);
-    await command(owner, { type: 'advance' });
+    expect(guestVote.room.groups[0]).toMatchObject({
+      voteCount: null,
+      votedBySelf: true,
+    });
+    expect(JSON.stringify(ownerVote.room)).not.toContain('voterIds');
+    expect(JSON.stringify(guestVote.room)).not.toContain('voterIds');
+    const discussing = state(await command(owner, { type: 'advance' }));
+    expect(discussing.room.groups[0]).toMatchObject({
+      voteCount: 1,
+      votedBySelf: false,
+    });
     const actions = state(
       await command(owner, {
         type: 'add-action',
         text: 'Pair more',
-        owner: 'Bobby',
+        owner: { kind: 'participant', participantId: joined.self.id },
       }),
     );
     expect(actions.room.actions[0].text).toBe('Pair more');
@@ -204,6 +309,34 @@ describe('retrospective WebSocket route', () => {
         title: 'Another',
       }),
     ).toMatchObject({ event: 'retro-error', data: { code: 'already-joined' } });
+
+    const target = await connect();
+    const ownerJoinedUpdate = next(replacement);
+    const targetSession = state(
+      await command(target, {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+      }),
+    );
+    await ownerJoinedUpdate;
+    const removalNotice = next(target);
+    const targetClosed = new Promise<number>((resolve) =>
+      target.once('close', resolve),
+    );
+    const afterRemoval = state(
+      await command(replacement, {
+        type: 'remove-member',
+        memberId: targetSession.self.id,
+      }),
+    );
+    expect(await removalNotice).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'removed' },
+    });
+    expect(await targetClosed).toBe(4003);
+    expect(afterRemoval.room.members).toHaveLength(1);
+
     expect(
       state(await command(replacement, { type: 'advance' })).room.members[0]
         .connected,

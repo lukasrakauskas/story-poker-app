@@ -4,6 +4,12 @@ import { type Server, WebSocket } from 'ws';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
+import { RetentionService } from '../collaboration/retention.service.js';
+import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
+import { RateLimitService } from '../transport/rate-limit.service.js';
+import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
+import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
+import { RetroApplicationService } from './retro-application.service.js';
 import { RetroGateway } from './retro.gateway.js';
 import { RetroModule } from './retro.module.js';
 import { RETRO_LIFETIME_MS, RetroService } from './retro.service.js';
@@ -15,6 +21,7 @@ function socket() {
     readyState: WebSocket.OPEN,
     send: vi.fn(),
     on: vi.fn(),
+    off: vi.fn(),
     close: vi.fn(),
     terminate: vi.fn(),
     ping: vi.fn(),
@@ -30,8 +37,17 @@ beforeEach(() => {
   service = new RetroService(
     new ParticipantService(),
     new RoomRegistryService(),
+    new RetentionService(),
   );
-  gateway = new RetroGateway(service, new ConnectionRegistryService());
+  const events = new ApplicationEventBus();
+  const connections = new ConnectionRegistryService();
+  gateway = new RetroGateway(
+    new RetroApplicationService(service, connections, events),
+    new WebSocketTransportService(),
+    new WebSocketHeartbeatService(),
+    new RateLimitService(),
+    events,
+  );
 });
 afterEach(() => {
   gateway.onModuleDestroy();
@@ -39,12 +55,39 @@ afterEach(() => {
 });
 
 describe('RetroGateway', () => {
+  it('keeps closed broadcasts identical when sockets disconnect, resume or join late', () => {
+    const owner = socket();
+    const guest = socket();
+    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Final' });
+    const code = latest(owner).data.room.code;
+    gateway.onCommand(guest, { type: 'join', name: 'Bobby', code });
+    const token = latest(guest).data.self.token;
+    for (let i = 0; i < 4; i++) gateway.onCommand(owner, { type: 'advance' });
+    const final = latest(owner).data.room;
+    expect(final.closedAt).toBe(Date.now());
+    gateway.handleDisconnect(guest);
+    expect(latest(owner).data.room).toEqual(final);
+    const returning = socket();
+    gateway.onCommand(returning, { type: 'resume', code, token });
+    expect(latest(returning).data.room).toEqual(final);
+    expect(latest(owner).data.room).toEqual(final);
+    const late = socket();
+    gateway.onCommand(late, { type: 'join', code, name: 'Carol' });
+    expect(latest(late)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'room-closed' },
+    });
+    expect(latest(owner).data.room).toEqual(final);
+  });
   it('uses collaboration services through RetroModule dependency injection', async () => {
     const testingModule = await Test.createTestingModule({
       imports: [RetroModule],
     }).compile();
     expect(testingModule.get(RetroGateway)).toBeInstanceOf(RetroGateway);
     expect(testingModule.get(RetroService)).toBeInstanceOf(RetroService);
+    expect(testingModule.get(RetroApplicationService)).toBeInstanceOf(
+      RetroApplicationService,
+    );
     expect(testingModule.get(ParticipantService)).toBeInstanceOf(
       ParticipantService,
     );
@@ -78,46 +121,6 @@ describe('RetroGateway', () => {
       data: { code: 'forbidden', requestId: 'advance-1' },
     });
   });
-  it('broadcasts participant-specific private writing then reveals one board', () => {
-    const owner = socket();
-    const guest = socket();
-    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
-    const code = latest(owner).data.room.code;
-    gateway.onCommand(guest, { type: 'join', name: 'Bobby', code });
-
-    gateway.onCommand(owner, {
-      type: 'add-note',
-      column: 'went-well',
-      text: 'Owner thought',
-    });
-    expect(
-      latest(owner).data.room.notes.map(({ text }: { text: string }) => text),
-    ).toEqual(['Owner thought']);
-    expect(latest(guest).data.room.notes).toEqual([]);
-
-    gateway.onCommand(guest, {
-      type: 'add-note',
-      column: 'ideas',
-      text: 'Guest thought',
-    });
-    expect(
-      latest(owner).data.room.notes.map(({ text }: { text: string }) => text),
-    ).toEqual(['Owner thought']);
-    expect(
-      latest(guest).data.room.notes.map(({ text }: { text: string }) => text),
-    ).toEqual(['Guest thought']);
-
-    gateway.onCommand(owner, { type: 'advance' });
-    for (const client of [owner, guest]) {
-      expect(latest(client).data.room.phase).toBe('vote');
-      expect(
-        latest(client).data.room.notes.map(
-          ({ text }: { text: string }) => text,
-        ),
-      ).toEqual(['Owner thought', 'Guest thought']);
-    }
-  });
-
   it('expires attached rooms and cleans timers even without incoming messages', () => {
     const owner = socket();
     gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
@@ -125,7 +128,13 @@ describe('RetroGateway', () => {
     gateway.afterInit({ clients: new Set() } as Server);
     gateway.afterInit({ clients: new Set() } as Server);
     expect(vi.getTimerCount()).toBe(1);
-    vi.advanceTimersByTime(RETRO_LIFETIME_MS);
+    const pong = vi
+      .mocked(owner.on)
+      .mock.calls.find(([event]) => event === 'pong')![1];
+    for (let elapsed = 0; elapsed < RETRO_LIFETIME_MS; elapsed += 30_000) {
+      pong.call(owner);
+      vi.advanceTimersByTime(30_000);
+    }
     expect(latest(owner)).toMatchObject({
       event: 'retro-error',
       data: { code: 'room-expired' },
