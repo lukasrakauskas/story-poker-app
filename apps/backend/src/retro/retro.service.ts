@@ -94,6 +94,7 @@ export class RetroService {
         title,
         phase: 'write',
         expiresAt: Date.now() + RETRO_LIFETIME_MS,
+        closedAt: null,
         members: [member],
         notes: [],
         groups: [],
@@ -111,6 +112,11 @@ export class RetroService {
 
   join(code: string, name: string): RetroSession {
     const room = this.room(code);
+    if (room.phase === 'closed')
+      throw new RetroError(
+        'room-closed',
+        'This retrospective is complete. New participants cannot join; ask a participant for an export.',
+      );
     if (room.members.length >= MAX_MEMBERS)
       throw new RetroError('capacity', 'This room is full (30 people).');
     const normalizedName = this.validName(name);
@@ -134,7 +140,7 @@ export class RetroService {
         'This session is no longer available. Join again.',
       );
     this.retention.cancel(ROOM_NAMESPACE, `participant:${code}:${member.id}`);
-    this.participants.reconnect(member);
+    if (room.phase !== 'closed') this.participants.reconnect(member);
     return { code, id: member.id, token };
   }
 
@@ -143,7 +149,13 @@ export class RetroService {
     const member = room?.members.find(
       (member) => member.id === session.id && member.token === session.token,
     );
-    if (!room || !member || !this.participants.disconnect(member)) return;
+    if (
+      !room ||
+      room.phase === 'closed' ||
+      !member ||
+      !this.participants.disconnect(member)
+    )
+      return;
     this.retention.schedule(
       ROOM_NAMESPACE,
       `participant:${room.code}:${member.id}`,
@@ -282,6 +294,14 @@ export class RetroService {
           discuss: 'closed',
         } as const;
         room.phase = next[room.phase];
+        if (room.phase === 'closed') {
+          room.closedAt = Date.now();
+          for (const participant of room.members)
+            this.retention.cancel(
+              ROOM_NAMESPACE,
+              `participant:${room.code}:${participant.id}`,
+            );
+        }
         room.readyMemberIds.clear();
         return;
       }

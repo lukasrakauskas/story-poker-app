@@ -25,6 +25,7 @@ const room: RetroRoom = {
   code: "room",
   title: "Ties",
   phase: "closed",
+  closedAt: 500,
   expiresAt: 1000,
   members: [],
   actions: [],

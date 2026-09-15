@@ -46,6 +46,13 @@ const roomBaseSchema = z.object({
   title: z.string().max(100),
   phase: z.enum(["write", "group", "vote", "discuss", "closed"]),
   expiresAt: z.number().int().nonnegative().max(8.64e15),
+  closedAt: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(8.64e15)
+    .nullable()
+    .default(null),
   members: z
     .array(
       z.object({
@@ -197,10 +204,7 @@ export function saveRetroHistory(
     if (previous) {
       try {
         const parsed = parseArchive(JSON.parse(previous));
-        if (
-          parsed.entry.room.phase === "closed" &&
-          snapshot.phase !== "closed"
-        ) {
+        if (parsed.entry.room.phase === "closed") {
           if (parsed.migrated) {
             try {
               localStorage.setItem(

@@ -58,6 +58,7 @@ const room: RetroRoom = {
   code: "room-123",
   title: "Sprint retro",
   phase: "discuss",
+  closedAt: null,
   expiresAt: 1800000000000,
   members: [
     {
@@ -204,6 +205,27 @@ test("migrates free-text owners without guessing identities and exports removed 
   assert.match(roomAsMarkdown(saved), /Owner: Alice/);
   assert.match(roomAsText(saved), /Fix flaky tests — Alice/);
   assert.deepEqual(publicRetro(saved).actions[0].owner, room.actions[0].owner);
+});
+
+test("completed history keeps its first content and saved time across repeated closed snapshots", () => {
+  const closed: RetroRoom = { ...room, phase: "closed", closedAt: 500 };
+  assert.equal(saveRetroHistory(closed), true);
+  const original = storage.getItem(retroHistoryKey(closed));
+  assert.equal(
+    saveRetroHistory({
+      ...closed,
+      title: "Changed after closing",
+      members: [],
+      closedAt: 999,
+    }),
+    true
+  );
+  assert.equal(saveRetroHistory(room), true);
+  assert.equal(storage.getItem(retroHistoryKey(closed)), original);
+  assert.deepEqual(readRetroHistory().entries[0].room, closed);
+  assert.equal(storage.getItem(retroHistoryKey(closed)), original);
+  assert.match(roomAsMarkdown(closed), /Completed: 1970-01-01T00:00:00.500Z/);
+  assert.match(roomAsText(closed), /Completed: 1970-01-01T00:00:00.500Z/);
 });
 
 test("preserves grouped themes in history and exports", () => {

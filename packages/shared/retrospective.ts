@@ -54,6 +54,8 @@ export interface RetroRoom {
   title: string;
   phase: RetroPhase;
   expiresAt: number;
+  /** Server completion time; null until closed (or in legacy archives). */
+  closedAt: number | null;
   members: RetroMember[];
   /** Server creation order; retained through grouping, snapshots and archives. */
   notes: RetroNote[];

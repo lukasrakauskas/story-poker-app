@@ -79,38 +79,48 @@ export function RoomDetails({
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle>Invite your team</CardTitle>
+          <CardTitle>
+            {room.phase === "closed"
+              ? "Final participant record"
+              : "Invite your team"}
+          </CardTitle>
           <CardDescription>
-            Anyone with the link can join. Notes stay visible only to their
-            author while the team writes, then everyone sees the complete,
-            attributed board when grouping starts.
+            {room.phase === "closed"
+              ? "This retrospective no longer accepts new participants. Returning participants can reopen it until expiry; share an export with anyone else. Presence below is recorded at closure, not live."
+              : "Anyone with the link can join. Notes stay visible only to their author while the team writes, then everyone sees the complete, attributed board when grouping starts."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="retro-invite">Room link</Label>
-            <div className="flex gap-2">
-              <Input
-                id="retro-invite"
-                readOnly
-                value={link}
-                onFocus={(event) => event.target.select()}
-              />
-              <Button
-                variant="secondary"
-                onClick={() => void copyLink()}
-                disabled={!origin}
-              >
-                Copy
-              </Button>
+          {room.phase !== "closed" && (
+            <div className="space-y-2">
+              <Label htmlFor="retro-invite">Room link</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="retro-invite"
+                  readOnly
+                  value={link}
+                  onFocus={(event) => event.target.select()}
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => void copyLink()}
+                  disabled={!origin}
+                >
+                  Copy
+                </Button>
+              </div>
+              <output className="block text-xs text-muted-foreground">
+                {copyStatus}
+              </output>
             </div>
-            <output className="block text-xs text-muted-foreground">
-              {copyStatus}
-            </output>
-          </div>
+          )}
           <div className="space-y-2 border-t pt-4">
             <h2 className="text-sm font-semibold">Facilitation</h2>
-            {connectedModerator ? (
+            {room.phase === "closed" ? (
+              <p className="text-xs text-muted-foreground">
+                Facilitation is complete. The final record is read-only.
+              </p>
+            ) : connectedModerator ? (
               <p className="text-xs text-muted-foreground">
                 {connectedModerator.id === selfId
                   ? "You are the moderator. You can hand off facilitation to another connected participant."
@@ -122,7 +132,7 @@ export function RoomDetails({
                   No moderator is online. A connected participant can claim the
                   role; the first accepted claim wins.
                 </p>
-                {self?.connected && room.phase !== "closed" && (
+                {self?.connected && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -137,9 +147,9 @@ export function RoomDetails({
           </div>
           <div className="space-y-3 border-t pt-4">
             <h2 className="text-sm font-semibold">
-              People ·{" "}
-              {room.members.filter((member) => member.connected).length} online
-              / {room.members.length}
+              {room.phase === "closed"
+                ? `Participants at closure · ${room.members.length}`
+                : `People · ${room.members.filter((member) => member.connected).length} online / ${room.members.length}`}
             </h2>
             <ul className="space-y-3">
               {room.members.map((member) => (
@@ -158,12 +168,16 @@ export function RoomDetails({
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <span className="text-xs text-muted-foreground">
-                      {!member.connected
-                        ? "Offline"
-                        : (room.phase === "write" || room.phase === "vote") &&
-                            member.ready
-                          ? "Ready"
-                          : "Online"}
+                      {room.phase === "closed"
+                        ? member.connected
+                          ? "Present at closure"
+                          : "Offline at closure"
+                        : !member.connected
+                          ? "Offline"
+                          : (room.phase === "write" || room.phase === "vote") &&
+                              member.ready
+                            ? "Ready"
+                            : "Online"}
                     </span>
                     {self?.moderator &&
                       member.id !== self.id &&

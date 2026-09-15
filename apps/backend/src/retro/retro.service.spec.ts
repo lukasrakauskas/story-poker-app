@@ -682,6 +682,29 @@ describe('retrospective workflow', () => {
     expect(() => service.mutate(owner, edit)).toThrow('read-only');
   });
 
+  it('freezes completion time and membership across disconnect, resume and offline cleanup', () => {
+    add('Final note');
+    for (let i = 0; i < 3; i++) service.mutate(owner, { type: 'advance' });
+    service.mutate(owner, {
+      type: 'add-action',
+      text: 'Final action',
+      owner: { kind: 'participant', participantId: guest.id },
+    });
+    service.disconnect(guest);
+    service.mutate(owner, { type: 'advance' });
+    const final = service.snapshot(owner);
+    expect(final.closedAt).toBe(Date.now());
+    expect(final.members[1].connected).toBe(false);
+    service.disconnect(owner);
+    service.resume(guest.code, guest.token);
+    vi.advanceTimersByTime(RETRO_OFFLINE_RETENTION_MS + 1);
+    service.resume(owner.code, owner.token);
+    expect(service.snapshot(owner)).toEqual(final);
+    expect(service.snapshot(guest)).toEqual(final);
+    expect(() => service.join(owner.code, 'Carol')).toThrow('complete');
+    expect(service.snapshot(owner)).toEqual(final);
+  });
+
   it('captures moderator-owned actions and closes read-only', () => {
     expect(() =>
       service.mutate(owner, {
@@ -726,8 +749,8 @@ describe('retrospective workflow', () => {
         text: 'Late',
       }),
     ).toThrow('read-only');
-    expect(service.snapshot(service.join(owner.code, 'Carol')).phase).toBe(
-      'closed',
+    expect(() => service.join(owner.code, 'Carol')).toThrow(
+      'New participants cannot join',
     );
   });
 });

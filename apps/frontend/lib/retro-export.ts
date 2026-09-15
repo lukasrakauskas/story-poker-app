@@ -54,6 +54,9 @@ export function roomAsMarkdown(
     `- Room: ${escapeMarkdown(snapshot.code)}`,
     `- Phase: ${escapeMarkdown(snapshot.phase)}`,
     `- Expires: ${new Date(snapshot.expiresAt).toISOString()}`,
+    ...(snapshot.closedAt !== null
+      ? [`- Completed: ${new Date(snapshot.closedAt).toISOString()}`]
+      : []),
     "",
     "## Participants",
     ...snapshot.members.map(
@@ -111,6 +114,9 @@ export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
     snapshot.title,
     `Room: ${snapshot.code} | Phase: ${snapshot.phase}`,
     `Expires: ${new Date(snapshot.expiresAt).toISOString()}`,
+    ...(snapshot.closedAt !== null
+      ? [`Completed: ${new Date(snapshot.closedAt).toISOString()}`]
+      : []),
     "",
     "People",
     ...snapshot.members.map(

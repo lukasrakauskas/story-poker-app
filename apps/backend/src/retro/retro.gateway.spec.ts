@@ -55,6 +55,30 @@ afterEach(() => {
 });
 
 describe('RetroGateway', () => {
+  it('keeps closed broadcasts identical when sockets disconnect, resume or join late', () => {
+    const owner = socket();
+    const guest = socket();
+    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Final' });
+    const code = latest(owner).data.room.code;
+    gateway.onCommand(guest, { type: 'join', name: 'Bobby', code });
+    const token = latest(guest).data.self.token;
+    for (let i = 0; i < 4; i++) gateway.onCommand(owner, { type: 'advance' });
+    const final = latest(owner).data.room;
+    expect(final.closedAt).toBe(Date.now());
+    gateway.handleDisconnect(guest);
+    expect(latest(owner).data.room).toEqual(final);
+    const returning = socket();
+    gateway.onCommand(returning, { type: 'resume', code, token });
+    expect(latest(returning).data.room).toEqual(final);
+    expect(latest(owner).data.room).toEqual(final);
+    const late = socket();
+    gateway.onCommand(late, { type: 'join', code, name: 'Carol' });
+    expect(latest(late)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'room-closed' },
+    });
+    expect(latest(owner).data.room).toEqual(final);
+  });
   it('uses collaboration services through RetroModule dependency injection', async () => {
     const testingModule = await Test.createTestingModule({
       imports: [RetroModule],
