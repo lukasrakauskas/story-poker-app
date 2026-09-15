@@ -62,10 +62,20 @@ export interface RetroRoom {
   groups: RetroGroup[];
   actions: RetroAction[];
 }
+/** Minimum identity metadata shown before a remembered session is resumed. */
+export interface RetroRememberedIdentity {
+  code: string;
+  name: string;
+  moderator: boolean;
+}
 export type RetroCommand =
   | { type: "create"; name: string; title: string }
   | { type: "join"; name: string; code: string }
   | { type: "resume"; code: string; token: string }
+  /** Read-only credential inspection; never establishes or replaces a session. */
+  | { type: "inspect"; code: string; token: string }
+  /** Explicitly revoke this remembered credential while retaining its content. */
+  | { type: "forget"; code: string; token: string }
   | { type: "add-note"; column: RetroColumn; text: string }
   | { type: "edit-note"; id: string; text: string }
   | { type: "delete-note"; id: string }
@@ -95,6 +105,14 @@ export type RetroServerEvent =
         self: { id: string; token: string };
         requestId?: string;
       };
+    }
+  | {
+      event: "retro-identity";
+      data: RetroRememberedIdentity & { requestId?: string };
+    }
+  | {
+      event: "retro-forgotten";
+      data: { code: string; requestId?: string };
     }
   | {
       event: "retro-error";
