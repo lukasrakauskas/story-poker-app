@@ -64,13 +64,19 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .boundingBox())!;
   expect(desktopStatusBox.x).toBeGreaterThan(desktopBoardBox.x);
   const roomUrl = owner.url();
-  const cookies = await context.cookies(roomUrl);
-  const credential = cookies.find((cookie) =>
+  // The cookie belongs to the backend origin, not the frontend origin. It is
+  // visible to browser automation but intentionally not to page JavaScript.
+  const backendPort = process.env.PLAYWRIGHT_BACKEND_PORT ?? "4000";
+  const backendRoomUrl = `http://localhost:${backendPort}/retro/${owner.url().split("/").at(-1)}`;
+  const cookies = await context.cookies(backendRoomUrl);
+  let credential = cookies.find((cookie) =>
     cookie.name.startsWith("retro-session-")
   )!;
   expect(credential).toBeTruthy();
+  expect(credential.httpOnly).toBe(true);
+  expect(credential.secure).toBe(true);
   expect(credential.path).toBe("/retro");
-  expect(credential.sameSite).toBe("Lax");
+  expect(credential.sameSite).toBe("None");
   expect(credential.expires * 1000).toBeGreaterThan(Date.now());
   expect(credential.expires * 1000).toBeLessThanOrEqual(
     Date.now() + 2 * 60 * 60 * 1000
@@ -255,17 +261,23 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
 
   await owner.reload();
   await expect(
+    owner.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
+  await owner
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
+  await expect(
     owner.getByRole("complementary").getByText("Alice (you)", { exact: true })
   ).toBeVisible();
   await expect(noteActions).toBeVisible();
   await expect(
     owner.getByRole("button", { name: "Reveal and group notes", exact: true })
   ).toBeEnabled();
-  expect(
-    (await context.cookies(roomUrl)).find(
-      (cookie) => cookie.name === credential.name
-    )?.value
-  ).toBe(credential.value);
+  const rotatedCredential = (await context.cookies(backendRoomUrl)).find(
+    (cookie) => cookie.name === credential.name
+  )!;
+  expect(rotatedCredential.value).not.toBe(credential.value);
+  credential = rotatedCredential;
   await owner.evaluate(() => window.retroTestSocket.close());
   await expect(
     owner.getByText("Disconnected · changes are disabled", { exact: true })
@@ -481,6 +493,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
 
   await guest.reload();
   await expect(
+    guest.getByRole("button", { name: "Continue as Bobby", exact: true })
+  ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Continue as Bobby", exact: true })
+    .click();
+  await expect(
     guest.getByRole("button", {
       name: "Remove vote from theme: Delivery flow",
       exact: true,
@@ -562,7 +580,9 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await removedParticipant
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
-  await expect(owner.getByRole("paragraph").filter({ hasText: /^Charlie$/ })).toBeVisible();
+  await expect(
+    owner.getByRole("paragraph").filter({ hasText: /^Charlie$/ })
+  ).toBeVisible();
   await owner
     .getByRole("button", { name: "Remove participant Charlie", exact: true })
     .click();
@@ -579,11 +599,13 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
       { exact: true }
     )
   ).toBeVisible();
+  // Removal revokes the server-side member; the stale HttpOnly cookie remains
+  // unreadable and is replaced only if this browser joins again.
   expect(
-    (await removedContext.cookies(roomUrl)).some((cookie) =>
+    (await removedContext.cookies(backendRoomUrl)).some((cookie) =>
       cookie.name.startsWith("retro-session-")
     )
-  ).toBe(false);
+  ).toBe(true);
   await removedParticipant.reload();
   await expect(
     removedParticipant.getByRole("button", {
@@ -671,6 +693,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   expect(saved[0][1]).not.toContain("voterIds");
   expect(JSON.parse(saved[0][1]).room.phase).toBe("closed");
   await guest.reload();
+  await expect(
+    guest.getByRole("button", { name: "Continue as Bobby", exact: true })
+  ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Continue as Bobby", exact: true })
+    .click();
   await expect(
     guest.getByRole("complementary").getByText("Bobby (you)", { exact: true })
   ).toBeVisible();

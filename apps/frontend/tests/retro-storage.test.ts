@@ -78,6 +78,7 @@ const room: RetroRoom = {
   title: "Sprint retro",
   phase: "discuss",
   closedAt: null,
+  requiresPassword: false,
   expiresAt: 1800000000000,
   members: [
     {

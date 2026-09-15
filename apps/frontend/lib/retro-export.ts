@@ -1,4 +1,8 @@
-import { actionOwnerLabel, type RetroRoom } from "shared/retrospective";
+import {
+  actionOwnerLabel,
+  retroPublicRoomSchema,
+  type RetroRoom,
+} from "shared/retrospective";
 import { publicRetro } from "./retro-history";
 import { retroPriorities, priorityLabel } from "shared/retro-priorities";
 
@@ -47,7 +51,7 @@ export function roomAsMarkdown(
   room: RetroRoom,
   viewerId?: string | null
 ): string {
-  const snapshot = publicRetro(room, viewerId);
+  const snapshot = retroPublicRoomSchema.parse(publicRetro(room, viewerId));
   const lines = [
     `# ${escapeMarkdown(snapshot.title)}`,
     "",
@@ -109,7 +113,7 @@ export function roomAsMarkdown(
 }
 
 export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
-  const snapshot = publicRetro(room, viewerId);
+  const snapshot = retroPublicRoomSchema.parse(publicRetro(room, viewerId));
   const lines = [
     snapshot.title,
     `Room: ${snapshot.code} | Phase: ${snapshot.phase}`,

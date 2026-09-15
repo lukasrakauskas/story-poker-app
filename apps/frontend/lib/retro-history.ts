@@ -1,7 +1,15 @@
 import { z } from "zod";
-import type { RetroRoom } from "shared/retrospective";
+import {
+  migrateRetroArchive,
+  retroArchiveSchema,
+  retroPublicRoomSchema,
+  RETRO_ARCHIVE_VERSION,
+  RETRO_HISTORY_KEY_VERSION,
+  type RetroArchive,
+  type RetroRoom,
+} from "shared/retrospective";
 
-export const RETRO_HISTORY_PREFIX = "retro-history-v1:";
+export const RETRO_HISTORY_PREFIX = `retro-history-v${RETRO_HISTORY_KEY_VERSION}:`;
 export const RETRO_HISTORY_CHANGED = "retro-history-changed";
 export const RETRO_HISTORY_POLICY_CHANGED = "retro-history-policy-changed";
 export const RETRO_HISTORY_PREFERENCE_PREFIX = "retro-history-preference-v1:";
@@ -62,122 +70,88 @@ export interface RetroHistoryDependencies {
   scheduler?: RetroHistoryScheduler;
 }
 
-// Parse both server snapshots and local data with an allowlist. Private session
-// fields (including future additions) must never enter the archive or exports.
-const noteFields = {
-  id: z.string(),
-  authorId: z.string(),
-  // Older archives derive this stable display snapshot from their member list.
-  authorName: z.string().max(30).default("Former member"),
-  column: z.enum(["went-well", "improve", "ideas"]),
-  text: z.string().max(1000),
-  groupId: z.string().nullable().default(null),
-};
-const groupSchema = z.object({
-  id: z.string(),
-  title: z.string().max(100),
-  voteCount: z.number().int().min(0).max(30).nullable(),
-  votedBySelf: z.boolean(),
-});
-const actionOwnerSchema = z.union([
-  z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("unassigned") }),
-    z.object({
-      kind: z.literal("participant"),
-      participantId: z.string(),
-      name: z.string().max(30),
-    }),
-    z.object({ kind: z.literal("external"), name: z.string().max(60) }),
-  ]),
-  // Legacy free-text owners must not be guessed into participant identities.
-  z
-    .string()
-    .max(60)
-    .transform((name) =>
-      name.trim()
-        ? { kind: "external" as const, name: name.trim() }
-        : { kind: "unassigned" as const }
-    ),
-]);
-const roomBaseSchema = z.object({
-  code: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
-  title: z.string().max(100),
-  phase: z.enum(["write", "group", "vote", "discuss", "closed"]),
-  expiresAt: z.number().int().nonnegative().max(8.64e15),
-  closedAt: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(8.64e15)
-    .nullable()
-    .default(null),
-  members: z
-    .array(
-      z.object({
-        id: z.string(),
-        name: z.string().max(30),
-        moderator: z.boolean(),
-        connected: z.boolean(),
-        // Version 2 archives created before phase readiness omit this field.
-        ready: z.boolean().default(false),
-      })
-    )
-    .max(30),
-  groups: z.array(groupSchema).max(300).default([]),
-  actions: z
-    .array(
-      z.object({
-        id: z.string(),
-        text: z.string().max(1000),
-        owner: actionOwnerSchema,
-        done: z.boolean(),
-      })
-    )
-    .max(100),
-});
-const roomSchema = roomBaseSchema.extend({
-  notes: z
-    .array(
-      z.object({
-        ...noteFields,
-        voteCount: z.number().int().min(0).max(30).nullable(),
-        votedBySelf: z.boolean(),
-      })
-    )
-    .max(300),
-});
-const legacyRoomSchema = roomBaseSchema.extend({
-  notes: z
-    .array(
-      z.object({
-        ...noteFields,
-        voterIds: z.array(z.string()).max(30),
-      })
-    )
-    .max(300),
-});
-const archiveSchema = z.object({
-  version: z.literal(3),
-  savedAt: z.number().int().nonnegative().max(8.64e15),
-  // The deadline is part of the archive so cleanup remains deterministic even
-  // when a different preference is selected for a later room lifetime.
-  retentionUntil: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(8.64e15)
-    .nullable()
-    .optional(),
-  viewerId: z.string().optional(),
-  room: roomSchema,
-});
-const legacyArchiveSchema = z.object({
-  version: z.literal(1),
-  savedAt: z.number().int().nonnegative().max(8.64e15),
-  viewerId: z.string().optional(),
-  room: legacyRoomSchema,
-});
-export type SavedRetro = z.infer<typeof archiveSchema>;
+export type SavedRetro = RetroArchive;
+
+type UnknownRecord = Record<string, unknown>;
+
+function record(value: unknown): UnknownRecord | null {
+  return typeof value === "object" && value !== null
+    ? (value as UnknownRecord)
+    : null;
+}
+
+function pick(value: unknown, fields: readonly string[]): unknown {
+  const source = record(value);
+  if (!source) return value;
+  return Object.fromEntries(fields.map((field) => [field, source[field]]));
+}
+
+function projectActionOwner(value: unknown): unknown {
+  const source = record(value);
+  if (!source) return value;
+  if (source.kind === "unassigned") return { kind: "unassigned" };
+  if (source.kind === "participant")
+    return pick(source, ["kind", "participantId", "name"]);
+  if (source.kind === "external") return pick(source, ["kind", "name"]);
+  return value;
+}
+
+/**
+ * Archive/export sanitization is an allowlist projection, not network parsing.
+ * It deliberately drops credentials and future private fields before the
+ * strict public schema is applied. The socket uses the strict schema directly.
+ */
+function projectPublicRoom(value: unknown): unknown {
+  const source = record(value);
+  if (!source) return value;
+  return {
+    code: source.code,
+    title: source.title,
+    phase: source.phase,
+    expiresAt: source.expiresAt,
+    closedAt: source.closedAt,
+    requiresPassword: source.requiresPassword,
+    members: Array.isArray(source.members)
+      ? source.members.map((member) =>
+          pick(member, ["id", "name", "moderator", "connected", "ready"])
+        )
+      : source.members,
+    notes: Array.isArray(source.notes)
+      ? source.notes.map((note) =>
+          pick(note, [
+            "id",
+            "authorId",
+            "authorName",
+            "column",
+            "text",
+            "groupId",
+            "voteCount",
+            "votedBySelf",
+          ])
+        )
+      : source.notes,
+    groups: Array.isArray(source.groups)
+      ? source.groups.map((group) =>
+          pick(group, ["id", "title", "voteCount", "votedBySelf"])
+        )
+      : source.groups,
+    actions: Array.isArray(source.actions)
+      ? source.actions.map((action) => {
+          const projected = record(action);
+          if (!projected) return action;
+          return {
+            ...(record(pick(projected, ["id", "text", "done"])) ?? {}),
+            owner: projectActionOwner(projected.owner),
+          };
+        })
+      : source.actions,
+  };
+}
+
+/** Validate a public room after explicitly removing private/future fields. */
+export function sanitizePublicRetroRoom(value: unknown): RetroRoom {
+  return retroPublicRoomSchema.parse(projectPublicRoom(value));
+}
 
 const preferenceSchema = z.object({
   version: z.literal(1),
@@ -197,45 +171,17 @@ function parseArchive(value: unknown): {
   entry: SavedRetro;
   migrated: boolean;
 } {
-  const current = archiveSchema.safeParse(value);
-  if (current.success) return { entry: current.data, migrated: false };
-  const versionTwo = archiveSchema
-    .extend({ version: z.literal(2) })
-    .safeParse(value);
-  if (versionTwo.success)
-    return { entry: { ...versionTwo.data, version: 3 }, migrated: true };
-  const legacy = legacyArchiveSchema.parse(value);
-  const room = roomSchema.parse({
-    ...legacy.room,
-    notes: legacy.room.notes.map(({ voterIds, ...note }) => ({
-      ...note,
-      voteCount:
-        legacy.room.phase === "discuss" || legacy.room.phase === "closed"
-          ? voterIds.length
-          : null,
-      votedBySelf:
-        legacy.room.phase === "vote" &&
-        !!legacy.viewerId &&
-        voterIds.includes(legacy.viewerId),
-    })),
-  });
-  return {
-    entry: {
-      version: 3,
-      savedAt: legacy.savedAt,
-      ...(legacy.viewerId ? { viewerId: legacy.viewerId } : {}),
-      room,
-    },
-    migrated: true,
-  };
+  // The shared migrator owns the versioned v1/v2/v3 shapes and never returns
+  // voterIds. Public projection below still runs for defense in depth.
+  return migrateRetroArchive(value);
 }
 
 export function publicRetro(
   room: RetroRoom,
   viewerId?: string | null
 ): RetroRoom {
-  const snapshot = roomSchema.parse(room);
-  return {
+  const snapshot = sanitizePublicRetroRoom(room);
+  return retroPublicRoomSchema.parse({
     ...snapshot,
     groups: snapshot.groups.map((group) => ({
       ...group,
@@ -266,7 +212,7 @@ export function publicRetro(
             : null,
         votedBySelf: snapshot.phase === "vote" && note.votedBySelf,
       })),
-  };
+  });
 }
 
 export function retroHistoryKey(
@@ -537,8 +483,8 @@ export function createRetroHistoryPersistence(
         }
       }
 
-      const entry: SavedRetro = {
-        version: 3,
+      const entry: SavedRetro = retroArchiveSchema.parse({
+        version: RETRO_ARCHIVE_VERSION,
         savedAt:
           previous?.room.phase !== "closed" && snapshot.phase === "closed"
             ? (previous?.savedAt ?? now)
@@ -550,7 +496,7 @@ export function createRetroHistoryPersistence(
             : retentionDeadline(now, normalized.retention),
         ...(viewerId ? { viewerId } : {}),
         room: snapshot,
-      };
+      });
       source.setItem(key, JSON.stringify(entry));
       // Re-check after the write to close the common cross-tab race where a
       // delete marker was written while this tab was serializing the snapshot.

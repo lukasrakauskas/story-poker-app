@@ -5,6 +5,7 @@ import {
   actionOwnerLabel,
   type RetroAction,
   type RetroActionAssignment,
+  type RetroActionOwner,
   type RetroRoom,
 } from "shared/retrospective";
 import type { RetroSession } from "../../../hooks/use-retro-socket";
@@ -146,6 +147,12 @@ function focusEditor(element: HTMLTextAreaElement | null) {
   element?.focus();
 }
 
+function ownerAssignment(owner: RetroActionOwner): RetroActionAssignment {
+  if (owner.kind === "participant")
+    return { kind: "participant", participantId: owner.participantId };
+  return owner;
+}
+
 function ActionEditor({
   action,
   room,
@@ -154,8 +161,8 @@ function ActionEditor({
   onClose,
 }: Omit<Props, "moderator"> & { action?: RetroAction; onClose?: () => void }) {
   const [text, setText] = useState(action?.text ?? "");
-  const [owner, setOwner] = useState<RetroActionAssignment>(
-    action?.owner ?? { kind: "unassigned" }
+  const [owner, setOwner] = useState<RetroActionAssignment>(() =>
+    action ? ownerAssignment(action.owner) : { kind: "unassigned" }
   );
   const [externalName, setExternalName] = useState(
     action?.owner.kind === "external" ? action.owner.name : ""
