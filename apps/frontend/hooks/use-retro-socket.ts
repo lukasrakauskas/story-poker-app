@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  RetroCommand,
-  RetroRoom,
-  RetroServerEvent,
+import {
+  materializeRetroState,
+  retroVersionStatus,
+  type RetroCommand,
+  type RetroRoom,
+  type RetroServerEvent,
 } from "shared/retrospective";
 
 import {
@@ -12,7 +14,7 @@ import {
   readRetroToken,
   saveRetroToken,
 } from "../lib/retro-session";
-import { saveRetroHistory } from "../lib/retro-history";
+import { createRetroHistoryWriter } from "../lib/retro-history";
 
 type Connection = "connecting" | "connected" | "disconnected";
 type Failure = { code: string; message: string };
@@ -20,6 +22,11 @@ type Pending = {
   id: string;
   resolve: (success: boolean) => void;
   timer: ReturnType<typeof setTimeout>;
+};
+type Refresh = {
+  id: string;
+  timer: ReturnType<typeof setTimeout>;
+  uncertainCommand: boolean;
 };
 
 /** A private socket with a room-scoped cookie identity. Never replay mutations. */
@@ -30,6 +37,8 @@ export function useRetroSocket() {
   const nextRequestId = useRef(0);
   const ready = useRef(false);
   const latestRoom = useRef<RetroRoom | null>(null);
+  const latestVersion = useRef<number | null>(null);
+  const refresh = useRef<Refresh | null>(null);
   const terminal = useRef(false);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [room, setRoom] = useState<RetroRoom | null>(null);
@@ -52,6 +61,14 @@ export function useRetroSocket() {
   useEffect(() => {
     let active = true;
     let client: WebSocket;
+    const history = createRetroHistoryWriter({
+      onSaved: (success) => {
+        if (active) setHistorySaved(success);
+      },
+    });
+    const flushHistory = () => history.flush();
+    window.addEventListener("pagehide", flushHistory);
+    window.addEventListener("beforeunload", flushHistory);
     ready.current = false;
     if (!credentials.current && !terminal.current) {
       const code = window.location.pathname.match(
@@ -76,6 +93,9 @@ export function useRetroSocket() {
       client = new WebSocket(url.toString());
       socket.current = client;
     } catch {
+      window.removeEventListener("pagehide", flushHistory);
+      window.removeEventListener("beforeunload", flushHistory);
+      history.cancel();
       // Surface synchronous WebSocket construction/configuration failures to the UI.
       // oxlint-disable-next-line react/set-state-in-effect
       setConnection("disconnected");
@@ -90,6 +110,10 @@ export function useRetroSocket() {
     const fail = (message: string) => {
       if (!active) return;
       clearTimeout(timer);
+      if (refresh.current) {
+        clearTimeout(refresh.current.timer);
+        refresh.current = null;
+      }
       ready.current = false;
       setConnection("disconnected");
       setError({ code: "connection", message });
@@ -100,6 +124,56 @@ export function useRetroSocket() {
       () => fail("Connection timed out. Retry to resume this session."),
       15000
     );
+    const requestFullSnapshot = () => {
+      if (
+        !active ||
+        !ready.current ||
+        terminal.current ||
+        refresh.current ||
+        client.readyState !== WebSocket.OPEN
+      )
+        return;
+      const uncertainCommand = !!inFlight.current;
+      if (uncertainCommand) {
+        // A missing version means the command's outcome cannot be inferred.
+        // Settle it as unknown and never send it again.
+        settle(false);
+        setError({
+          code: "connection",
+          message:
+            "A room update was missed. Your last change is unconfirmed; verify the refreshed room before trying it again.",
+        });
+      }
+      const id = `refresh-${++nextRequestId.current}`;
+      const refreshTimer = setTimeout(() => {
+        if (refresh.current?.id !== id) return;
+        refresh.current = null;
+        ready.current = false;
+        setPending(false);
+        setConnection("disconnected");
+        setError({
+          code: "connection",
+          message:
+            "Could not refresh the room after a missed update. Retry the connection.",
+        });
+        client.close();
+      }, 15000);
+      refresh.current = { id, timer: refreshTimer, uncertainCommand };
+      setPending(true);
+      try {
+        client.send(
+          JSON.stringify({
+            event: "retro-command",
+            data: { type: "refresh", requestId: id },
+          })
+        );
+      } catch {
+        clearTimeout(refreshTimer);
+        refresh.current = null;
+        setPending(false);
+        fail("Could not refresh the room. Retry the connection.");
+      }
+    };
     client.onopen = () => {
       if (!active) return;
       if (credentials.current) {
@@ -126,24 +200,47 @@ export function useRetroSocket() {
       try {
         event = JSON.parse(message.data);
         if (event.event === "retro-state") {
+          const data = event.data;
           if (
-            !event.data?.self?.id ||
-            !event.data.self.token ||
-            !event.data.room?.code ||
-            !Array.isArray(event.data.room.notes) ||
-            !Array.isArray(event.data.room.groups) ||
-            !Array.isArray(event.data.room.members) ||
-            !Array.isArray(event.data.room.actions) ||
-            !Number.isFinite(event.data.room.expiresAt)
+            !data?.self?.id ||
+            !data.self.token ||
+            !data.room?.code ||
+            !Array.isArray(data.room.notes) ||
+            !Array.isArray(data.room.groups) ||
+            !Array.isArray(data.room.members) ||
+            !Array.isArray(data.room.actions) ||
+            !Number.isFinite(data.room.expiresAt) ||
+            !Number.isSafeInteger(data.version) ||
+            data.version < 1 ||
+            !data.recipient ||
+            !Array.isArray(data.recipient.notes) ||
+            !Array.isArray(data.recipient.votedNoteIds) ||
+            !Array.isArray(data.recipient.votedGroupIds)
           ) {
             throw new Error("Invalid snapshot");
           }
-          const { room: snapshot, self } = event.data;
+          const refreshResponse =
+            refresh.current?.id === data.requestId ? refresh.current : null;
+          // A resume response is authoritative even when the room advanced
+          // while this socket was offline; it is not a replayed mutation.
+          const versionStatus = retroVersionStatus(
+            latestVersion.current,
+            data.version,
+            !ready.current || !!refreshResponse
+          );
+          if (versionStatus === "stale") return;
+          if (versionStatus === "gap") {
+            requestFullSnapshot();
+            return;
+          }
+          const snapshot = materializeRetroState(data);
+          const { self } = data;
+          latestVersion.current = data.version;
           credentials.current = { code: snapshot.code, token: self.token };
           setCookieSaved(
             saveRetroToken(snapshot.code, self.token, snapshot.expiresAt)
           );
-          setHistorySaved(saveRetroHistory(snapshot, self.id));
+          history.enqueue(snapshot, self.id);
           latestRoom.current = snapshot;
           terminal.current = false;
           ready.current = true;
@@ -151,14 +248,20 @@ export function useRetroSocket() {
           setSelfId(self.id);
           setConnection("connected");
           clearTimeout(timer);
+          if (refreshResponse) {
+            clearTimeout(refreshResponse.timer);
+            refresh.current = null;
+            setPending(false);
+            if (!refreshResponse.uncertainCommand) setError(null);
+          }
           // Native history keeps the mounted provider (and its resume token) alive.
           const path = `/retro/${encodeURIComponent(snapshot.code)}`;
           if (window.location.pathname !== path)
             window.history.replaceState(null, "", path);
           // Other participants' broadcasts are updates, not acknowledgements.
           if (
-            !inFlight.current ||
-            event.data.requestId === inFlight.current.id
+            !refreshResponse?.uncertainCommand &&
+            (!inFlight.current || data.requestId === inFlight.current.id)
           ) {
             setError(null);
             settle(true);
@@ -170,6 +273,10 @@ export function useRetroSocket() {
           )
             throw new Error("Invalid error");
           clearTimeout(timer);
+          if (refresh.current) {
+            clearTimeout(refresh.current.timer);
+            refresh.current = null;
+          }
           setError(event.data);
           settle(false);
           if (
@@ -211,6 +318,10 @@ export function useRetroSocket() {
     client.onclose = () => {
       if (!active) return;
       clearTimeout(timer);
+      if (refresh.current) {
+        clearTimeout(refresh.current.timer);
+        refresh.current = null;
+      }
       ready.current = false;
       setConnection("disconnected");
       if (inFlight.current)
@@ -224,6 +335,16 @@ export function useRetroSocket() {
     return () => {
       active = false;
       clearTimeout(timer);
+      if (refresh.current) {
+        clearTimeout(refresh.current.timer);
+        refresh.current = null;
+      }
+      // Preserve the latest last-seen snapshot even if this effect is replaced;
+      // final closed snapshots were already flushed synchronously on receipt.
+      history.flush();
+      history.cancel();
+      window.removeEventListener("pagehide", flushHistory);
+      window.removeEventListener("beforeunload", flushHistory);
       client.onopen = null;
       client.onmessage = null;
       client.onerror = null;
@@ -243,6 +364,7 @@ export function useRetroSocket() {
         !ready.current ||
         terminal.current ||
         inFlight.current ||
+        refresh.current ||
         client?.readyState !== WebSocket.OPEN
       )
         return Promise.resolve(false);

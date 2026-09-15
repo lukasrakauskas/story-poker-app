@@ -3,6 +3,7 @@ import type { RetroRoom } from "shared/retrospective";
 
 export const RETRO_HISTORY_PREFIX = "retro-history-v1:";
 export const RETRO_HISTORY_CHANGED = "retro-history-changed";
+export const RETRO_HISTORY_DEBOUNCE_MS = 250;
 
 // Parse both server snapshots and local data with an allowlist. Private session
 // fields (including future additions) must never enter the archive or exports.
@@ -236,6 +237,67 @@ export function saveRetroHistory(
   } catch {
     return false;
   }
+}
+
+export interface RetroHistoryWriter {
+  /** Queue the latest non-final state for a coalesced browser-history write. */
+  enqueue(room: RetroRoom, viewerId?: string | null): void;
+  /** Flush pending work synchronously; null means there was nothing queued. */
+  flush(): boolean | null;
+  cancel(): void;
+}
+
+export function createRetroHistoryWriter(
+  options: {
+    debounceMs?: number;
+    save?: typeof saveRetroHistory;
+    onSaved?: (success: boolean) => void;
+  } = {}
+): RetroHistoryWriter {
+  const save = options.save ?? saveRetroHistory;
+  const debounceMs = options.debounceMs ?? RETRO_HISTORY_DEBOUNCE_MS;
+  let pending: { room: RetroRoom; viewerId?: string | null } | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let finalSaved = false;
+
+  const flush = (): boolean | null => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (!pending) return null;
+    const current = pending;
+    pending = null;
+    const success = save(current.room, current.viewerId);
+    if (current.room.phase === "closed" && success) finalSaved = true;
+    options.onSaved?.(success);
+    return success;
+  };
+
+  return {
+    enqueue(room, viewerId) {
+      if (room.phase === "closed" && finalSaved) return;
+      pending = { room, viewerId };
+      // Closing is a durability boundary: do not leave the final snapshot in
+      // a timer queue, and let saveRetroHistory's immutable-close guard decide
+      // whether an earlier final entry must be preserved.
+      if (room.phase === "closed") {
+        flush();
+        return;
+      }
+      if (timer === null)
+        timer = setTimeout(() => {
+          timer = null;
+          flush();
+        }, debounceMs);
+    },
+    flush,
+    cancel() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      pending = null;
+    },
+  };
 }
 
 export function readRetroHistory(): {

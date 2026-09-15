@@ -39,18 +39,62 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 - `packages/shared/retrospective.ts`: client/server protocol types.
 - `apps/backend/src/collaboration`: domain-neutral participant identity, normalized-name validation, roles, presence, reconnect tokens, connection replacement/audience lookup, room registration, and configurable retention scheduling.
 - `apps/backend/src/retro/retro.service.ts`: retrospective notes/phases/actions and fixed two-hour expiry policy.
-- `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, sessions, recipient-specific snapshots, replacement, and expiry orchestration. It returns explicit addressed events and close effects.
+- `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, sessions, versioned public projections, recipient envelopes, replacement, and expiry orchestration. It returns explicit addressed events and close effects.
+- `apps/backend/src/retro/retro.benchmark.ts`: reproducible representative/near-limit snapshot, update, and serialization measurements.
 - `apps/backend/src/retro/retro.gateway.ts`: the transport-only Nest controller for runtime DTO validation, rate-limit delegation, heartbeat registration, application delegation, and response dispatch.
-- `apps/backend/src/transport`: shared WebSocket serialization/connection adapters, configurable heartbeat handling, application event dispatch, and keyed throttling. `RetroModule` imports both this module and `CollaborationModule`.
+- `apps/backend/src/transport`: shared WebSocket serialization/connection adapters, including public-payload caching, configurable heartbeat handling, application event dispatch, and keyed throttling. `RetroModule` imports both this module and `CollaborationModule`.
 - `apps/frontend/app/retro`: retrospective routes and UI, including the responsive room status card.
-- `apps/frontend/hooks/use-retro-socket.ts`: isolated connection, cookie resume lifecycle, and snapshot persistence.
+- `apps/frontend/hooks/use-retro-socket.ts`: isolated connection, cookie resume lifecycle, version-gap recovery, and coalesced snapshot persistence.
 - `apps/frontend/lib/retro-session.ts`: expiring cookie helpers.
-- `apps/frontend/lib/retro-history.ts`: versioned, validated, token-free localStorage snapshots.
+- `apps/frontend/lib/retro-history.ts`: versioned, validated, token-free localStorage snapshots with a final-state durability boundary.
 - `apps/frontend/lib/retro-export.ts`: Markdown and plain-text serialization.
+
+## Snapshot/update performance
+
+Issue #89 started with a measurement rather than an assumed payload size. On
+2026-09-15, before the optimization, a one-off probe of the representative
+30-member/300-note discussion room (300 notes with 900-character bodies and no
+actions or themes) measured a 331,194-byte room, a 23.915 ms average (27.055 ms
+p95) for 30 independent `RetroService.snapshot` calls, and a 4.704 ms average
+(7.704 ms p95) to JSON-serialize the 30 resulting events. One update produced
+9,939,472 serialized bytes. The probe ran with `bun 1.4.0`/Node `v26.4.0` on an
+Intel i5-4570; it is retained as the pre-change baseline, not as a production
+SLO.
+
+The reproducible fixture and comparison are in
+`apps/backend/src/retro/retro.benchmark.ts` and run with:
+
+```sh
+bun run --cwd apps/backend benchmark
+```
+
+The recorded run used 10 warmups and 50 `toggle-action` updates after building
+15/120/20/30 and 30/300/150/100 member/note/theme/action rooms. Its baseline
+column deliberately repeats the compatibility `snapshot()` and per-recipient
+`JSON.stringify` work to model the old broadcast path. Sizes are UTF-8 bytes;
+timings are milliseconds, average/p95:
+
+| Fixture        | Materialized room | Baseline snapshots | Baseline JSON | Optimized application | Optimized transport | One recipient wire |
+| -------------- | ----------------: | -----------------: | ------------: | --------------------: | ------------------: | -----------------: |
+| Representative |           178,354 |        6.068/6.920 |   1.343/2.005 |           0.499/0.595 |         1.432/1.954 |            178,551 |
+| Near limit     |           494,019 |      38.457/45.423 |  7.919/10.777 |           1.776/1.958 |         5.588/7.067 |            494,216 |
+
+The application now caches one recipient-independent public projection per
+committed in-memory room version. Writing notes are kept in the recipient
+envelope; open-vote selections are target IDs in that envelope, and tokens are
+still only in `self`. `WebSocketTransportService` weakly caches the encoded
+public room and appends each small recipient envelope, so public serialization
+is not repeated for broadcasts or refreshes. The chosen protocol is a
+versioned authoritative full snapshot rather than a mutation/event delta:
+privacy rules stay easy to audit, reconnects have one source of truth, and a
+client that sees a version gap sends `refresh`. A refresh is requester-only and
+never retries the uncertain command. Full snapshots intentionally do not claim
+bandwidth reduction yet; a future delta can be added as another state kind
+without changing the envelope or version-gap contract.
 
 ## Browser history and privacy
 
-- Snapshots are updated on every received room state, including the closing broadcast. During writing, the server sends each browser only that participant's private notes, so in-progress history and exports cannot contain another participant's unrevealed writing. Write-phase archives record their audience so the frontend can filter defensively; older write-phase archives without that marker have their notes removed. History uses a separate `retro-history-v1:<code>:<expiresAt>` entry per room lifetime, so saving one room does not overwrite another. A completed snapshot cannot be replaced by any later snapshot, including another closed broadcast. Its original content and `savedAt` are preserved through reconnect, reload, and presence changes; `closedAt` records actual completion time independently of the browser save time.
+- Non-final snapshots are coalesced for 250 ms before validation and localStorage work, so bursts do not repeatedly parse or synchronously write identical history. `pagehide`/`beforeunload` flush the queued last-seen state during navigation. The closing snapshot bypasses that queue and is flushed synchronously; storage failures remain visible to the status card and the immutable closed-entry guard preserves an earlier final entry. During writing, the server sends each browser only that participant's private notes, so in-progress history and exports cannot contain another participant's unrevealed writing. Write-phase archives record their audience so the frontend can filter defensively; older write-phase archives without that marker have their notes removed. History uses a separate `retro-history-v1:<code>:<expiresAt>` entry per room lifetime, so saving one room does not overwrite another. A completed snapshot cannot be replaced by any later snapshot, including another closed broadcast. Its original content and `savedAt` are preserved through reconnect, reload, and presence changes; `closedAt` records actual completion time independently of the browser save time.
 - **Completed** entries contain final actions received while connected. Other entries are explicitly labeled as the **last seen** phase and may be incomplete: a disconnected browser cannot receive subsequent changes or the closing broadcast. History is a read-only record, not a second editable or synchronized board.
 - History remains after cookie/room expiry or server restart, until deleted or browser storage is cleared/evicted. `/retro/history` does not connect to the retrospective server. The frontend must still be reachable to load the page; this is not a service-worker/offline-app implementation.
 - Notes, participant names, anonymous vote totals (after discussion starts), and action owners are stored in this browser profile and visible to anyone using it. There is no login, cross-device sync, or automatic server backup. Use **Delete saved retro** to remove a saved copy; this does not delete the live room. An open live tab receiving further updates can save it again.
@@ -63,6 +107,7 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 bun run --cwd apps/frontend test:unit
 bun run --cwd apps/backend test
 bun run --cwd apps/backend test:e2e
+bun run --cwd apps/backend benchmark
 bun run build
 bun run lint
 
@@ -72,4 +117,4 @@ bunx playwright install chromium
 bun run test:e2e
 ```
 
-The WebSocket end-to-end tests exercise real clients, room broadcasts, private credentials, permissions, shared reconnect replacement, and coexistence with the original poker endpoint. Cross-domain contract tests prove that Poker and Retro receive the same normalized-name, unique-name, role, token, disconnect, and resume guarantees. Application-service tests cover session orchestration, recipient privacy, audience events, and replacement without constructing sockets. Small gateway/transport contract tests cover DTO validation, serialization, rate limiting, heartbeat cleanup, and protocol wiring; domain service tests cover phase transitions, voting budgets, resource limits, and domain-specific retention/expiry. Bun frontend unit tests cover history updates, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, connected/disconnected/expiring/storage-failure status, responsive status placement, and dark mode.
+The WebSocket end-to-end tests exercise real clients, room broadcasts, version convergence, private envelopes, credentials, permissions, shared reconnect replacement, and coexistence with the original poker endpoint. Cross-domain contract tests prove that Poker and Retro receive the same normalized-name, unique-name, role, token, disconnect, and resume guarantees. Application-service tests cover session orchestration, recipient privacy, versioned projection reuse, requester-only refresh, audience events, and replacement without constructing sockets. Small gateway/transport contract tests cover DTO validation, shared serialization caching, rate limiting, heartbeat cleanup, and protocol wiring; domain service tests cover phase transitions, voting budgets, resource limits, and domain-specific retention/expiry. The benchmark covers representative and near-limit rooms. Bun frontend unit tests cover normalized public/private state convergence, version-gap classification, coalesced history updates, final flush/failure handling, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, connected/disconnected/expiring/storage-failure status, responsive status placement, and dark mode.

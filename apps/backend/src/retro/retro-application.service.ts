@@ -1,11 +1,17 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
-import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
+import type {
+  RetroCommand,
+  RetroRecipientEnvelope,
+  RetroRoom,
+  RetroServerEvent,
+} from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import {
   result,
   type ApplicationResult,
   type OutboundMessage,
+  type OutboundSerialization,
 } from '../transport/application-result.js';
 import {
   RetroError,
@@ -15,10 +21,18 @@ import {
 
 export const RETRO_APPLICATION_NAMESPACE = 'retro';
 
+type CachedProjection = {
+  version: number;
+  room: RetroRoom;
+};
+
 @Injectable()
 export class RetroApplicationService implements OnModuleDestroy {
   private readonly unsubscribeMemberExpired: () => void;
   private readonly sessions = new Map<string, RetroSession>();
+  /** Monotonic versions are scoped to this in-memory application instance. */
+  private readonly versions = new Map<string, number>();
+  private readonly projections = new Map<string, CachedProjection>();
 
   constructor(
     private readonly retros: RetroService,
@@ -26,7 +40,13 @@ export class RetroApplicationService implements OnModuleDestroy {
     events: ApplicationEventBus,
   ) {
     this.unsubscribeMemberExpired = retros.onMemberExpired((code, id) => {
-      this.connections.revoke(RETRO_APPLICATION_NAMESPACE, code, id);
+      const connectionId = this.connections.revoke<string>(
+        RETRO_APPLICATION_NAMESPACE,
+        code,
+        id,
+      );
+      if (connectionId) this.sessions.delete(connectionId);
+      this.commit(code);
       events.emit(RETRO_APPLICATION_NAMESPACE, this.broadcast(code));
     });
   }
@@ -34,6 +54,8 @@ export class RetroApplicationService implements OnModuleDestroy {
   onModuleDestroy() {
     this.unsubscribeMemberExpired();
     this.sessions.clear();
+    this.versions.clear();
+    this.projections.clear();
   }
 
   execute(
@@ -69,6 +91,7 @@ export class RetroApplicationService implements OnModuleDestroy {
         );
         const replaced = previous ? this.replace(previous) : result();
         this.sessions.set(connectionId, session);
+        this.commit(session.code);
         return this.merge(
           expired,
           replaced,
@@ -82,10 +105,16 @@ export class RetroApplicationService implements OnModuleDestroy {
           'Join a room before making changes.',
         );
       session = current;
+      if (command.type === 'refresh')
+        return this.merge(
+          expired,
+          this.targetedSnapshot(connectionId, session, requestId),
+        );
       const mutation = this.retros.mutate(session, command);
       const removed = mutation?.removedMemberId
         ? this.removeMember(session.code, mutation.removedMemberId)
         : result();
+      this.commit(session.code);
       return this.merge(
         expired,
         removed,
@@ -98,21 +127,26 @@ export class RetroApplicationService implements OnModuleDestroy {
   }
 
   disconnect(connectionId: string): ApplicationResult {
+    const expired = this.expireRooms();
     const session = this.sessions.get(connectionId);
     this.sessions.delete(connectionId);
-    if (!session) return result();
+    if (!session) return expired;
     this.connections.release(
       RETRO_APPLICATION_NAMESPACE,
       session.code,
       session.id,
       connectionId,
     );
-    this.retros.disconnect(session);
-    return this.broadcast(session.code);
+    if (!this.retros.disconnect(session)) return expired;
+    this.commit(session.code);
+    return this.merge(expired, this.broadcast(session.code));
   }
 
   expireRooms(): ApplicationResult {
-    this.retros.sweep();
+    for (const code of this.retros.sweep()) {
+      this.versions.delete(code);
+      this.projections.delete(code);
+    }
     const messages: OutboundMessage[] = [];
     for (const [connectionId, session] of this.sessions) {
       if (!this.retros.isExpired(session.code)) continue;
@@ -200,10 +234,14 @@ export class RetroApplicationService implements OnModuleDestroy {
     code: string,
     requester?: string,
     requestId?: string,
+    targetConnectionId?: string,
   ): ApplicationResult {
     const messages: OutboundMessage[] = [];
     const roomSessions = [...this.sessions].filter(
-      ([, session]) => session.code === code,
+      ([connectionId, session]) =>
+        session.code === code &&
+        (targetConnectionId === undefined ||
+          connectionId === targetConnectionId),
     );
     const audience = new Set(
       this.connections.audience<string>(
@@ -212,18 +250,24 @@ export class RetroApplicationService implements OnModuleDestroy {
         roomSessions.map(([, session]) => session.id),
       ),
     );
-    for (const [connectionId, session] of roomSessions) {
-      if (!audience.has(connectionId)) continue;
+    const recipients = roomSessions.filter(([connectionId]) =>
+      audience.has(connectionId),
+    );
+    if (!recipients.length) return result(undefined, messages);
+
+    // The public projection is room/version scoped, not recipient scoped. All
+    // messages below retain the same object so the transport can encode it once.
+    const projection = this.projection(code, recipients[0][1]);
+    for (const [connectionId, session] of recipients) {
       try {
-        const event: RetroServerEvent = {
-          event: 'retro-state',
-          data: {
-            room: this.retros.snapshot(session),
-            self: { id: session.id, token: session.token },
-            ...(connectionId === requester && requestId ? { requestId } : {}),
-          },
-        };
-        messages.push({ connectionId, event });
+        messages.push(
+          this.stateMessage(
+            connectionId,
+            session,
+            projection,
+            connectionId === requester && requestId ? requestId : undefined,
+          ),
+        );
       } catch (error) {
         if (!(error instanceof RetroError)) throw error;
         this.sessions.delete(connectionId);
@@ -240,6 +284,64 @@ export class RetroApplicationService implements OnModuleDestroy {
       }
     }
     return result(undefined, messages);
+  }
+
+  private targetedSnapshot(
+    connectionId: string,
+    session: RetroSession,
+    requestId?: string,
+  ): ApplicationResult {
+    return this.broadcast(session.code, connectionId, requestId, connectionId);
+  }
+
+  private projection(code: string, session: RetroSession): CachedProjection {
+    const version = this.version(code);
+    const cached = this.projections.get(code);
+    if (cached?.version === version) return cached;
+    const projection = { version, room: this.retros.publicSnapshot(session) };
+    this.projections.set(code, projection);
+    return projection;
+  }
+
+  private stateMessage(
+    connectionId: string,
+    session: RetroSession,
+    projection: CachedProjection,
+    requestId?: string,
+  ): OutboundMessage {
+    const recipient: RetroRecipientEnvelope =
+      this.retros.recipientEnvelope(session);
+    const self = { id: session.id, token: session.token };
+    const data = {
+      room: projection.room,
+      self,
+      recipient,
+      version: projection.version,
+      ...(requestId ? { requestId } : {}),
+    };
+    const event: RetroServerEvent = { event: 'retro-state', data };
+    const serialization: OutboundSerialization = {
+      type: 'retro-state',
+      publicRoom: projection.room,
+      self,
+      recipient,
+      version: projection.version,
+      ...(requestId ? { requestId } : {}),
+    };
+    return { connectionId, event, serialization };
+  }
+
+  private commit(code: string) {
+    const current = this.versions.get(code) ?? 0;
+    this.versions.set(code, current + 1);
+    this.projections.delete(code);
+  }
+
+  private version(code: string) {
+    const current = this.versions.get(code);
+    if (current !== undefined) return current;
+    this.versions.set(code, 1);
+    return 1;
   }
 
   private errorEvent(error: RetroError, requestId?: string): RetroServerEvent {

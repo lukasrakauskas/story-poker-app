@@ -1,6 +1,21 @@
+/**
+ * Optional wire hint for events with a large recipient-independent payload.
+ * The transport owns encoding it; application services still return ordinary
+ * event objects for tests and non-WebSocket consumers.
+ */
+export type OutboundSerialization = {
+  type: 'retro-state';
+  publicRoom: object;
+  self: { id: string; token: string };
+  recipient: object;
+  version: number;
+  requestId?: string;
+};
+
 export type OutboundMessage = {
   connectionId: string;
   event: unknown;
+  serialization?: OutboundSerialization;
 };
 
 export type ConnectionClose = {

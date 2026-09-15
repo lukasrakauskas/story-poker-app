@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import type { RetroServerEvent } from 'shared/retrospective';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  materializeRetroState,
+  type RetroServerEvent,
+} from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
@@ -9,14 +12,16 @@ import { ApplicationEventBus } from '../transport/application-event-bus.service.
 import { RetroService } from './retro.service.js';
 
 let application: RetroApplicationService;
+let retro: RetroService;
 
 beforeEach(() => {
+  retro = new RetroService(
+    new ParticipantService(),
+    new RoomRegistryService(),
+    new RetentionService(),
+  );
   application = new RetroApplicationService(
-    new RetroService(
-      new ParticipantService(),
-      new RoomRegistryService(),
-      new RetentionService(),
-    ),
+    retro,
     new ConnectionRegistryService(),
     new ApplicationEventBus(),
   );
@@ -37,7 +42,7 @@ function state(
 ) {
   const message = event(applicationResult, connectionId);
   if (message.event !== 'retro-state') throw new Error(JSON.stringify(message));
-  return message.data;
+  return { ...message.data, room: materializeRetroState(message.data) };
 }
 
 describe('RetroApplicationService', () => {
@@ -287,5 +292,62 @@ describe('RetroApplicationService', () => {
         },
       },
     });
+  });
+
+  it('caches one public projection and recovers a missed version with one requester snapshot', () => {
+    const publicSnapshot = vi.spyOn(retro, 'publicSnapshot');
+    const created = application.execute('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    const code = state(created, 'owner').room.code;
+    application.execute('guest', { type: 'join', name: 'Bobby', code });
+    const update = application.execute('owner', {
+      type: 'add-note',
+      column: 'ideas',
+      text: 'Private note',
+    });
+    const stateMessages = update.messages.filter(
+      (message) => (message.event as RetroServerEvent).event === 'retro-state',
+    );
+    expect(stateMessages).toHaveLength(2);
+    const first = stateMessages[0].event as RetroServerEvent;
+    const second = stateMessages[1].event as RetroServerEvent;
+    if (first.event !== 'retro-state' || second.event !== 'retro-state')
+      throw new Error('Expected state messages');
+    expect(first.data.room).toBe(second.data.room);
+    expect(
+      update.messages.every(
+        (message) => message.serialization?.publicRoom === first.data.room,
+      ),
+    ).toBe(true);
+    expect(first.data.room.notes).toEqual([]);
+    expect(JSON.stringify(first.data.room)).not.toContain(
+      first.data.self.token,
+    );
+    expect(JSON.stringify(first.data.room)).not.toContain('voterIds');
+    expect(first.data.recipient.notes).toMatchObject([
+      { text: 'Private note', authorId: first.data.self.id },
+    ]);
+    expect(second.data.recipient.notes).toEqual([]);
+    expect(publicSnapshot).toHaveBeenCalledTimes(3);
+    expect(first.data.version).toBe(3);
+    expect(second.data.version).toBe(first.data.version);
+
+    const refreshed = application.execute(
+      'guest',
+      { type: 'refresh' },
+      'refresh-1',
+    );
+    expect(refreshed.messages.map((message) => message.connectionId)).toEqual([
+      'guest',
+    ]);
+    const refreshEvent = event(refreshed, 'guest');
+    expect(refreshEvent).toMatchObject({
+      event: 'retro-state',
+      data: { version: 3, requestId: 'refresh-1' },
+    });
+    expect(publicSnapshot).toHaveBeenCalledTimes(3);
   });
 });

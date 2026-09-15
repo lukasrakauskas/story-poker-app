@@ -5,7 +5,11 @@ import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RetentionService } from '../src/collaboration/retention.service.js';
 import { RETRO_OFFLINE_RETENTION_MS } from '../src/retro/retro.service.js';
-import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
+import {
+  materializeRetroState,
+  type RetroCommand,
+  type RetroServerEvent,
+} from 'shared/retrospective';
 import { AppModule } from '../src/app.module.js';
 
 let app: INestApplication;
@@ -44,7 +48,7 @@ async function command(socket: WebSocket, data: RetroCommand | unknown) {
 }
 function state(event: RetroServerEvent) {
   if (event.event !== 'retro-state') throw new Error(JSON.stringify(event));
-  return event.data;
+  return { ...event.data, room: materializeRetroState(event.data) };
 }
 
 beforeEach(async () => {

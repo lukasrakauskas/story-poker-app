@@ -6,6 +6,7 @@ import type {
   RetroActionOwner,
   RetroGroup,
   RetroNote,
+  RetroRecipientEnvelope,
   RetroRoom,
 } from 'shared/retrospective';
 import {
@@ -55,7 +56,10 @@ type StoredRoom = Omit<RetroRoom, 'members' | 'notes' | 'groups'> & {
   /** Internal current-phase readiness, kept separate from participant identity. */
   readyMemberIds: Set<string>;
 };
-type Mutation = Exclude<RetroCommand, { type: 'create' | 'join' | 'resume' }>;
+type Mutation = Exclude<
+  RetroCommand,
+  { type: 'create' | 'join' | 'resume' | 'refresh' }
+>;
 
 const ROOM_NAMESPACE = 'retro';
 
@@ -144,7 +148,7 @@ export class RetroService {
     return { code, id: member.id, token };
   }
 
-  disconnect(session: RetroSession) {
+  disconnect(session: RetroSession): boolean {
     const room = this.registry.get<StoredRoom>(ROOM_NAMESPACE, session.code);
     const member = room?.members.find(
       (member) => member.id === session.id && member.token === session.token,
@@ -155,7 +159,7 @@ export class RetroService {
       !member ||
       !this.participants.disconnect(member)
     )
-      return;
+      return false;
     this.retention.schedule(
       ROOM_NAMESPACE,
       `participant:${room.code}:${member.id}`,
@@ -179,49 +183,34 @@ export class RetroService {
           listener(room.code, member.id);
       },
     );
+    return true;
   }
 
+  /**
+   * Build the recipient-independent part of a state exactly once. Writing
+   * notes and open-vote selections are intentionally absent; callers attach
+   * those through recipientEnvelope().
+   */
+  publicSnapshot(session: RetroSession): RetroRoom {
+    const { room } = this.authorize(session);
+    return this.projectPublic(room);
+  }
+
+  /** Build only the privacy-sensitive fields for one participant. */
+  recipientEnvelope(session: RetroSession): RetroRecipientEnvelope {
+    const { room, member } = this.authorize(session);
+    return this.projectRecipient(room, member.id);
+  }
+
+  /**
+   * Compatibility/domain helper returning the materialized view used by the
+   * existing domain callers. The application layer uses publicSnapshot plus
+   * recipientEnvelope directly so it does not clone the public room per user.
+   */
   snapshot(session: RetroSession): RetroRoom {
     const { room, member } = this.authorize(session);
-    const { readyMemberIds, groups, ...publicRoom } = room;
-    // Writing is private even for moderators. Advancing to vote changes the
-    // phase before one broadcast reveals the complete board to everyone.
-    const notes =
-      room.phase === 'write'
-        ? room.notes.filter((note) => note.authorId === member.id)
-        : room.notes;
-    // Explicitly exclude credentials and voter identities, and never expose
-    // mutable internal state. Open voting contains only the recipient's own
-    // selections; aggregate totals become public in discuss/closed.
-    return structuredClone({
-      ...publicRoom,
-      members: room.members.map(({ id, name, role, connected }) => ({
-        id,
-        name,
-        moderator: role === 'moderator',
-        connected,
-        ready: readyMemberIds.has(id),
-      })),
-      notes: notes.map(({ voterIds, ...note }) => ({
-        ...note,
-        voteCount:
-          !note.groupId && (room.phase === 'discuss' || room.phase === 'closed')
-            ? voterIds.length
-            : null,
-        votedBySelf:
-          !note.groupId &&
-          room.phase === 'vote' &&
-          voterIds.includes(member.id),
-      })),
-      groups: groups.map(({ voterIds, ...group }) => ({
-        ...group,
-        voteCount:
-          room.phase === 'discuss' || room.phase === 'closed'
-            ? voterIds.length
-            : null,
-        votedBySelf: room.phase === 'vote' && voterIds.includes(member.id),
-      })),
-    });
+    const publicRoom = this.projectPublic(room);
+    return this.materialize(publicRoom, this.projectRecipient(room, member.id));
   }
 
   mutate(
@@ -485,6 +474,99 @@ export class RetroService {
       ROOM_NAMESPACE,
       (room) => room.expiresAt <= Date.now(),
     );
+  }
+
+  private projectPublic(room: StoredRoom): RetroRoom {
+    const { readyMemberIds, groups, ...publicRoom } = room;
+    // Writing is private even for moderators. An empty public notes array is
+    // safe to cache and serialize for every recipient in this phase.
+    return structuredClone({
+      ...publicRoom,
+      members: room.members.map(({ id, name, role, connected }) => ({
+        id,
+        name,
+        moderator: role === 'moderator',
+        connected,
+        ready: readyMemberIds.has(id),
+      })),
+      notes:
+        room.phase === 'write'
+          ? []
+          : room.notes.map(({ voterIds, ...note }) => ({
+              ...note,
+              voteCount:
+                !note.groupId &&
+                (room.phase === 'discuss' || room.phase === 'closed')
+                  ? voterIds.length
+                  : null,
+              votedBySelf: false,
+            })),
+      groups: groups.map(({ voterIds, ...group }) => ({
+        ...group,
+        voteCount:
+          room.phase === 'discuss' || room.phase === 'closed'
+            ? voterIds.length
+            : null,
+        votedBySelf: false,
+      })),
+    });
+  }
+
+  private projectRecipient(
+    room: StoredRoom,
+    memberId: string,
+  ): RetroRecipientEnvelope {
+    return {
+      notes:
+        room.phase === 'write'
+          ? room.notes
+              .filter((note) => note.authorId === memberId)
+              .map(({ voterIds: _voterIds, ...note }) => ({
+                ...note,
+                voteCount: null,
+                votedBySelf: false,
+              }))
+          : [],
+      votedNoteIds:
+        room.phase === 'vote'
+          ? room.notes
+              .filter(
+                (note) => !note.groupId && note.voterIds.includes(memberId),
+              )
+              .map((note) => note.id)
+          : [],
+      votedGroupIds:
+        room.phase === 'vote'
+          ? room.groups
+              .filter((group) => group.voterIds.includes(memberId))
+              .map((group) => group.id)
+          : [],
+    };
+  }
+
+  private materialize(
+    publicRoom: RetroRoom,
+    recipient: RetroRecipientEnvelope,
+  ): RetroRoom {
+    const noteVotes = new Set(recipient.votedNoteIds);
+    const groupVotes = new Set(recipient.votedGroupIds);
+    return {
+      ...publicRoom,
+      notes:
+        publicRoom.phase === 'write'
+          ? recipient.notes.map((note) => ({ ...note }))
+          : publicRoom.notes.map((note) => ({
+              ...note,
+              votedBySelf:
+                publicRoom.phase === 'vote' &&
+                !note.groupId &&
+                noteVotes.has(note.id),
+            })),
+      groups: publicRoom.groups.map((group) => ({
+        ...group,
+        votedBySelf: publicRoom.phase === 'vote' && groupVotes.has(group.id),
+      })),
+    };
   }
 
   private room(code: string): StoredRoom {

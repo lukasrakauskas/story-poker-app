@@ -18,7 +18,8 @@
     "test:watch": "vitest src",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism src",
-    "test:e2e": "vitest run test"
+    "test:e2e": "vitest run test",
+    "benchmark": "bun src/retro/retro.benchmark.ts"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

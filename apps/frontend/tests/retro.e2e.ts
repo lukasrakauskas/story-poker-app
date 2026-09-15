@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 declare global {
@@ -6,6 +6,27 @@ declare global {
     retroTestSocket: WebSocket;
     releaseRetroCommand: () => void;
   }
+}
+
+async function historySnapshot(page: Page) {
+  // Non-final history is intentionally debounced; allow the vote broadcast's
+  // queued write to settle before inspecting storage.
+  await page.waitForTimeout(300);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Object.entries(localStorage).some(([key]) =>
+          key.startsWith("retro-history-v1:")
+        )
+      )
+    )
+    .toBe(true);
+  return page.evaluate(() => {
+    const value = Object.entries(localStorage).find(([key]) =>
+      key.startsWith("retro-history-v1:")
+    )?.[1];
+    return value ? JSON.parse(value) : null;
+  });
 }
 
 test("collaborates, rejoins with cookies, and saves final retros with Markdown export", async ({
@@ -454,14 +475,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   ).toHaveText("Vote");
   await expect(owner.getByText("1 vote", { exact: true })).toHaveCount(0);
   const [ownerVoteSnapshot, guestVoteSnapshot] = await Promise.all(
-    [owner, guest].map((page) =>
-      page.evaluate(() => {
-        const value = Object.entries(localStorage).find(([key]) =>
-          key.startsWith("retro-history-v1:")
-        )?.[1];
-        return value ? JSON.parse(value) : null;
-      })
-    )
+    [owner, guest].map((page) => historySnapshot(page))
   );
   expect(ownerVoteSnapshot.room.groups[0]).toMatchObject({
     title: "Delivery flow",
@@ -559,7 +573,9 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await removedParticipant
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
-  await expect(owner.getByRole("paragraph").filter({ hasText: /^Charlie$/ })).toBeVisible();
+  await expect(
+    owner.getByRole("paragraph").filter({ hasText: /^Charlie$/ })
+  ).toBeVisible();
   await owner
     .getByRole("button", { name: "Remove participant Charlie", exact: true })
     .click();

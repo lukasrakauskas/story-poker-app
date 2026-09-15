@@ -2,6 +2,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import type { RetroRoom } from "shared/retrospective";
 import {
+  createRetroHistoryWriter,
   deleteRetroHistory,
   publicRetro,
   readRetroHistory,
@@ -345,6 +346,44 @@ test("ignores corrupt or unsupported entries without hiding valid history", () =
   assert.match(result.error!, /could not be read/);
   deleteRetroHistory(room);
   assert.equal(storage.getItem("unrelated"), "leave me alone");
+});
+
+test("coalesces intermediate history writes and flushes the final snapshot synchronously", () => {
+  const saved: RetroRoom[] = [];
+  const outcomes: boolean[] = [];
+  const writer = createRetroHistoryWriter({
+    debounceMs: 60_000,
+    save: (next) => {
+      saved.push(next);
+      return true;
+    },
+    onSaved: (success) => outcomes.push(success),
+  });
+  writer.enqueue({ ...room, title: "first" });
+  writer.enqueue({ ...room, title: "latest" });
+  assert.equal(saved.length, 0);
+  assert.equal(writer.flush(), true);
+  assert.deepEqual(
+    saved.map((item) => item.title),
+    ["latest"]
+  );
+  assert.deepEqual(outcomes, [true]);
+
+  writer.enqueue({ ...room, phase: "closed", closedAt: 700 });
+  writer.enqueue({ ...room, phase: "closed", closedAt: 701 });
+  assert.deepEqual(
+    saved.map((item) => item.phase),
+    ["discuss", "closed"]
+  );
+  assert.equal(writer.flush(), null);
+
+  const failed: boolean[] = [];
+  const failing = createRetroHistoryWriter({
+    save: () => false,
+    onSaved: (success) => failed.push(success),
+  });
+  failing.enqueue({ ...room, phase: "closed", closedAt: 701 });
+  assert.deepEqual(failed, [false]);
 });
 
 test("storage denial and quota exhaustion return failures without throwing or erasing older entries", () => {
