@@ -1,7 +1,13 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
-import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
+import {
+  RETRO_PROTOCOL_ERROR_CODE,
+  RETRO_PROTOCOL_ERROR_MESSAGE,
+  retroServerEventSchema,
+  type RetroCommand,
+  type RetroServerEvent,
+} from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import {
   result,
@@ -50,6 +56,31 @@ export class RetroApplicationService implements OnModuleDestroy {
       expired = await this.expireRooms();
       const current = this.sessions.get(connectionId);
       let session: RetroSession;
+      if (command.type === 'inspect') {
+        const inspection = await this.retros.inspect(command.code, context);
+        const event: RetroServerEvent = {
+          event: 'retro-room-info',
+          data: { ...inspection, ...(requestId ? { requestId } : {}) },
+        };
+        const validated = retroServerEventSchema.safeParse(event);
+        return this.merge(
+          expired,
+          result(undefined, [
+            {
+              connectionId,
+              event: validated.success
+                ? validated.data
+                : this.errorEvent(
+                    new RetroError(
+                      RETRO_PROTOCOL_ERROR_CODE,
+                      RETRO_PROTOCOL_ERROR_MESSAGE,
+                    ),
+                    requestId,
+                  ),
+            },
+          ]),
+        );
+      }
       if (
         command.type === 'create' ||
         command.type === 'join' ||
@@ -67,12 +98,14 @@ export class RetroApplicationService implements OnModuleDestroy {
           session = await this.retros.create(
             command.name,
             command.title,
+            command.password,
             connectionContext,
           );
         } else if (command.type === 'join') {
           session = await this.retros.join(
             command.code,
             command.name,
+            command.password,
             connectionContext,
           );
         } else {
@@ -365,12 +398,27 @@ export class RetroApplicationService implements OnModuleDestroy {
             ...(connectionId === requester && requestId ? { requestId } : {}),
           },
         };
-        messages.push({ connectionId, event });
+        const validated = retroServerEventSchema.safeParse(event);
+        messages.push({
+          connectionId,
+          event: validated.success
+            ? validated.data
+            : this.errorEvent(
+                new RetroError(
+                  RETRO_PROTOCOL_ERROR_CODE,
+                  RETRO_PROTOCOL_ERROR_MESSAGE,
+                ),
+                connectionId === requester ? requestId : undefined,
+              ),
+        });
       } catch (error) {
         if (!(error instanceof RetroError)) {
           messages.push({
             connectionId,
-            event: this.errorEvent(this.storageError()),
+            event: this.errorEvent(
+              this.storageError(),
+              connectionId === requester ? requestId : undefined,
+            ),
           });
           continue;
         }
@@ -383,7 +431,10 @@ export class RetroApplicationService implements OnModuleDestroy {
         );
         messages.push({
           connectionId,
-          event: this.errorEvent(error),
+          event: this.errorEvent(
+            error,
+            connectionId === requester ? requestId : undefined,
+          ),
         });
       }
     }

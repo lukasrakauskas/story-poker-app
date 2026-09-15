@@ -6,6 +6,7 @@ import {
 } from './room.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RetentionService } from '../collaboration/retention.service.js';
+import { RoomAccessService } from '../collaboration/room-access.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { UserService } from './user.service.js';
 import type { RoomResult } from './events.types.js';
@@ -24,6 +25,7 @@ beforeEach(() => {
     participants,
     new RoomRegistryService(),
     new RetentionService(),
+    new RoomAccessService(),
   );
 });
 afterEach(() => rooms.onModuleDestroy());
@@ -161,6 +163,8 @@ describe('RoomService', () => {
     const snapshot = rooms.toJoinedRoom(room, user);
     expect(snapshot.requiresPassword).toBe(true);
     expect(snapshot).not.toHaveProperty('password');
+    expect(room).not.toHaveProperty('password');
+    expect(JSON.stringify(room)).not.toContain('secret');
     expect(JSON.stringify(snapshot)).not.toContain('secret');
   });
 

@@ -1,12 +1,18 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type {
-  RetroCommand,
-  RetroActionAssignment,
-  RetroActionOwner,
-  RetroRoom,
+import {
+  retroPublicRoomSchema,
+  type RetroCommand,
+  type RetroActionAssignment,
+  type RetroActionOwner,
+  type RetroRoom,
 } from 'shared/retrospective';
+import {
+  createStoredRoomAccess,
+  validateRoomPassword,
+  verifyStoredRoomAccess,
+} from '../collaboration/room-access.service.js';
 import {
   ParticipantService,
   type CollaborationRole,
@@ -64,6 +70,17 @@ function tokenMatches(token: string, tokenHash: string): boolean {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+type PasswordOrContext = string | RetroRepositoryContext | undefined;
+
+function splitPasswordAndContext(
+  passwordOrContext: PasswordOrContext,
+  context?: RetroRepositoryContext,
+): { password: string | undefined; context: RetroRepositoryContext | undefined } {
+  if (typeof passwordOrContext === 'object' && passwordOrContext !== null)
+    return { password: undefined, context: passwordOrContext };
+  return { password: passwordOrContext, context };
+}
+
 @Injectable()
 export class RetroService {
   private readonly memberExpiredListeners = new Set<
@@ -77,6 +94,7 @@ export class RetroService {
     private readonly repository: RetroRoomRepository,
   ) {
     this.unsubscribeMemberChanges = repository.onChange((change) => {
+      if (change.kind !== 'member-expired') return;
       for (const id of change.memberIds ?? [])
         for (const listener of this.memberExpiredListeners)
           listener(change.code, id);
@@ -95,17 +113,23 @@ export class RetroService {
   async create(
     name: string,
     title: string,
+    passwordOrContext?: PasswordOrContext,
     context?: RetroRepositoryContext,
   ): Promise<RetroSession> {
-    await this.sweep(context);
+    const resolved = splitPasswordAndContext(passwordOrContext, context);
+    const passwordError = validateRoomPassword(resolved.password);
+    if (passwordError) throw new RetroError('invalid-command', passwordError);
+    await this.sweep(resolved.context);
     const created = this.createParticipant(name, 'moderator');
-    if (context?.connection) created.member.connection = context.connection;
+    if (resolved.context?.connection)
+      created.member.connection = resolved.context.connection;
     const room = await this.repository.create(
       {
         title,
         phase: 'write',
         expiresAt: Date.now() + RETRO_LIFETIME_MS,
         closedAt: null,
+        access: createStoredRoomAccess(resolved.password),
         members: [created.member],
         notes: [],
         groups: [],
@@ -113,7 +137,7 @@ export class RetroService {
         readyMemberIds: [],
       },
       { codeLength: 10, maxRooms: MAX_ROOMS },
-      context,
+      resolved.context,
     );
     if (!room)
       throw new RetroError(
@@ -126,13 +150,18 @@ export class RetroService {
   async join(
     code: string,
     name: string,
+    passwordOrContext?: PasswordOrContext,
     context?: RetroRepositoryContext,
   ): Promise<RetroSession> {
-    const normalizedName = this.validName(name);
-    const created = this.createParticipant(normalizedName, 'participant');
+    const resolved = splitPasswordAndContext(passwordOrContext, context);
     return this.transact(
       code,
       (room) => {
+        // Password verification is inside the repository transaction. Redis
+        // therefore admits a join only against the same room revision that is
+        // subsequently updated, and no verifier state is process-local.
+        if (!verifyStoredRoomAccess(room.access, resolved.password))
+          throw new RetroError('wrong-room-password', 'Incorrect room password.');
         if (room.phase === 'closed')
           throw new RetroError(
             'room-closed',
@@ -140,20 +169,34 @@ export class RetroService {
           );
         if (room.members.length >= MAX_MEMBERS)
           throw new RetroError('capacity', 'This room is full (30 people).');
+        const normalizedName = this.validName(name);
         if (this.participants.isNameTaken(room.members, normalizedName)) {
           throw new RetroError(
             'name-taken',
             'That name is already in use. Choose another name.',
           );
         }
-        if (context?.connection) created.member.connection = context.connection;
+        const created = this.createParticipant(normalizedName, 'participant');
+        if (resolved.context?.connection)
+          created.member.connection = resolved.context.connection;
         room.members.push(created.member);
         return {
           result: { code, id: created.member.id, token: created.token },
         };
       },
-      context,
+      resolved.context,
     );
+  }
+
+  async inspect(code: string, context?: RetroRepositoryContext) {
+    const room = await this.repository.get(code, context);
+    if (!room || room.expiresAt <= Date.now())
+      return { code, available: false, requiresPassword: false };
+    return {
+      code,
+      available: true,
+      requiresPassword: room.access?.requiresPassword ?? false,
+    };
   }
 
   async resume(
@@ -308,50 +351,62 @@ export class RetroService {
   ): Promise<RetroRoom> {
     const room = await this.room(session.code, context);
     const member = this.authorizeInRoom(room, session);
-    const { readyMemberIds, groups, version: _version, ...publicRoom } = room;
+    const { readyMemberIds, groups } = room;
     // Writing is private even for moderators. Advancing to vote changes the
     // phase before one broadcast reveals the complete board to everyone.
     const notes =
       room.phase === 'write'
         ? room.notes.filter((note) => note.authorId === member.id)
         : room.notes;
-    // Explicitly exclude credentials and voter identities, and never expose
-    // mutable internal state. Open voting contains only the recipient's own
-    // selections; aggregate totals become public in discuss/closed.
-    return structuredClone({
-      ...publicRoom,
-      members: room.members.map(({ id, name, role, connected }) => ({
-        id,
-        name,
-        moderator: role === 'moderator',
-        connected,
-        ready: readyMemberIds.includes(id),
-      })),
-      notes: notes.map(({ voterIds, ...note }) => ({
-        ...note,
-        voteCount:
-          !note.groupId && (room.phase === 'discuss' || room.phase === 'closed')
-            ? voterIds.length
-            : null,
-        votedBySelf:
-          !note.groupId &&
-          room.phase === 'vote' &&
-          voterIds.includes(member.id),
-      })),
-      groups: groups.map(({ voterIds, ...group }) => ({
-        ...group,
-        voteCount:
-          room.phase === 'discuss' || room.phase === 'closed'
-            ? voterIds.length
-            : null,
-        votedBySelf: room.phase === 'vote' && voterIds.includes(member.id),
-      })),
-    });
+    // Keep the public shape explicit. Internal access verifiers, participant
+    // token digests, connection ownership, readiness storage, and voter
+    // identities must never be spread into a network snapshot.
+    return retroPublicRoomSchema.parse(
+      structuredClone({
+        code: room.code,
+        title: room.title,
+        phase: room.phase,
+        expiresAt: room.expiresAt,
+        closedAt: room.closedAt,
+        actions: room.actions,
+        requiresPassword: room.access?.requiresPassword ?? false,
+        members: room.members.map(({ id, name, role, connected }) => ({
+          id,
+          name,
+          moderator: role === 'moderator',
+          connected,
+          ready: readyMemberIds.includes(id),
+        })),
+        notes: notes.map(({ voterIds, ...note }) => ({
+          ...note,
+          voteCount:
+            !note.groupId &&
+            (room.phase === 'discuss' || room.phase === 'closed')
+              ? voterIds.length
+              : null,
+          votedBySelf:
+            !note.groupId &&
+            room.phase === 'vote' &&
+            voterIds.includes(member.id),
+        })),
+        groups: groups.map(({ voterIds, ...group }) => ({
+          ...group,
+          voteCount:
+            room.phase === 'discuss' || room.phase === 'closed'
+              ? voterIds.length
+              : null,
+          votedBySelf: room.phase === 'vote' && voterIds.includes(member.id),
+        })),
+      }),
+    );
   }
 
   async mutate(
     session: RetroSession,
-    command: Exclude<RetroCommand, { type: 'create' | 'join' | 'resume' }>,
+    command: Exclude<
+      RetroCommand,
+      { type: 'create' | 'join' | 'resume' | 'inspect' }
+    >,
     context?: RetroRepositoryContext,
   ): Promise<RetroMutationResult | undefined> {
     return this.transact(
@@ -616,6 +671,7 @@ export class RetroService {
             return { result: undefined };
           }
         }
+        throw new RetroError('invalid-command', 'Unsupported retrospective command.');
       },
       context,
     );

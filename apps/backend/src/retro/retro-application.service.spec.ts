@@ -132,6 +132,78 @@ describe('RetroApplicationService', () => {
     expect(joined.self.token).not.toBe(created.self.token);
   });
 
+  it('protects entry with a repository-backed verifier and exposes inspection only', async () => {
+    const created = state(
+      await application.execute('owner', {
+        type: 'create',
+        name: 'Alice',
+        title: 'Sensitive retrospective',
+        password: 'secret',
+      }),
+      'owner',
+    );
+    expect(created.room.requiresPassword).toBe(true);
+    expect(JSON.stringify(created)).not.toContain('secret');
+
+    const inspection = await application.execute(
+      'visitor',
+      { type: 'inspect', code: created.room.code },
+      'inspect-1',
+    );
+    expect(event(inspection, 'visitor')).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: created.room.code,
+        available: true,
+        requiresPassword: true,
+        requestId: 'inspect-1',
+      },
+    });
+    expect(JSON.stringify(inspection)).not.toContain('Sensitive retrospective');
+    expect(JSON.stringify(inspection)).not.toContain('secret');
+
+    const rejected = await application.execute(
+      'guest',
+      {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+        password: 'wrong',
+      },
+      'join-wrong',
+    );
+    expect(event(rejected, 'guest')).toEqual({
+      event: 'retro-error',
+      data: {
+        code: 'wrong-room-password',
+        message: 'Incorrect room password.',
+        requestId: 'join-wrong',
+      },
+    });
+
+    const joined = state(
+      await application.execute('guest', {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+        password: 'secret',
+      }),
+      'guest',
+    );
+    expect(joined.room.members).toHaveLength(2);
+    await application.disconnect('guest');
+    expect(
+      state(
+        await application.execute('replacement', {
+          type: 'resume',
+          code: created.room.code,
+          token: joined.self.token,
+        }),
+        'replacement',
+      ).self,
+    ).toEqual(joined.self);
+  });
+
   it('revokes and closes a participant removed by a moderator', async () => {
     const created = state(
       await application.execute('owner', {

@@ -6,6 +6,7 @@ import type {
   RetroColumn,
   RetroPhase,
 } from 'shared/retrospective';
+import type { StoredRoomAccess } from '../collaboration/room-access.service.js';
 
 export interface RetroConnectionOwner {
   instanceId: string;
@@ -49,6 +50,8 @@ export interface StoredRetroRoom {
   phase: RetroPhase;
   expiresAt: number;
   closedAt: number | null;
+  /** Salted password verifier; clear-text credentials are never persisted. */
+  access: StoredRoomAccess;
   members: StoredRetroParticipant[];
   notes: StoredRetroNote[];
   groups: StoredRetroGroup[];
@@ -385,7 +388,14 @@ export class RedisRetroRoomRepository
             activeKeys.push(candidateKey);
           else stale.push(candidate);
         }
-        await this.client.watch([...activeKeys, key, tombstone]);
+        // WATCH replaces the previous watch set, so keep the index watched
+        // while validating the room keys and committing the capacity decision.
+        await this.client.watch([
+          this.indexKey,
+          ...activeKeys,
+          key,
+          tombstone,
+        ]);
 
         if (activeKeys.length >= options.maxRooms) {
           const transaction = this.client.multi();

@@ -125,6 +125,79 @@ describe('RetroGateway', () => {
       data: { code: 'forbidden', requestId: 'advance-1' },
     });
   });
+  it('keeps protected rooms opaque and bounds password attempts', async () => {
+    const owner = socket();
+    const visitor = socket();
+    await gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Sensitive retro',
+      password: 'secret',
+    });
+    const created = latest(owner).data;
+    expect(created.room.requiresPassword).toBe(true);
+    expect(JSON.stringify(created)).not.toContain('secret');
+
+    await gateway.onCommand(visitor, {
+      type: 'inspect',
+      code: created.room.code,
+    });
+    expect(latest(visitor)).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: created.room.code,
+        available: true,
+        requiresPassword: true,
+      },
+    });
+    expect(JSON.stringify(latest(visitor))).not.toContain('Sensitive retro');
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await gateway.onCommand(visitor, {
+        type: 'join',
+        code: created.room.code,
+        name: `Guest ${attempt}`,
+        password: 'wrong',
+      });
+      expect(latest(visitor)).toMatchObject({
+        event: 'retro-error',
+        data: { code: 'wrong-room-password' },
+      });
+    }
+    await gateway.onCommand(visitor, {
+      type: 'join',
+      code: created.room.code,
+      name: 'Bobby',
+      password: 'wrong',
+    });
+    expect(latest(visitor)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'rate-limit' },
+    });
+    expect(await service.inspect(created.room.code)).toMatchObject({
+      available: true,
+      requiresPassword: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await gateway.onCommand(visitor, {
+      type: 'join',
+      code: created.room.code,
+      name: 'Bobby',
+      password: 'secret',
+    });
+    expect(latest(visitor)).toMatchObject({
+      event: 'retro-state',
+      data: {
+        room: {
+          members: expect.arrayContaining([
+            expect.objectContaining({ name: 'Bobby' }),
+          ]),
+        },
+      },
+    });
+  });
+
   it('expires attached rooms and cleans timers even without incoming messages', async () => {
     const owner = socket();
     await gateway.onCommand(owner, {

@@ -100,6 +100,52 @@ describe('room lifecycle and privacy', () => {
       'no longer available',
     );
   });
+  it('persists protected-room verification across service instances without exposing verifiers', async () => {
+    const repository = new InMemoryRetroRoomRepository();
+    const creator = new RetroService(new ParticipantService(), repository);
+    const restarted = new RetroService(new ParticipantService(), repository);
+    const protectedOwner = await creator.create(
+      'Alice',
+      'Private retro',
+      'correct horse battery staple',
+    );
+
+    expect(await creator.inspect(protectedOwner.code)).toEqual({
+      code: protectedOwner.code,
+      available: true,
+      requiresPassword: true,
+    });
+    const stored = await repository.get(protectedOwner.code);
+    expect(stored?.access.requiresPassword).toBe(true);
+    expect(stored?.access.digest).toEqual(expect.any(String));
+    expect(JSON.stringify(stored)).not.toContain('correct horse battery staple');
+    expect(await restarted.snapshot(protectedOwner)).toMatchObject({
+      title: 'Private retro',
+      requiresPassword: true,
+    });
+    await expect(
+      restarted.join(protectedOwner.code, 'Bobby', 'wrong'),
+    ).rejects.toThrow('password');
+    const guest = await restarted.join(
+      protectedOwner.code,
+      'Bobby',
+      'correct horse battery staple',
+    );
+    expect((await restarted.snapshot(guest)).members).toHaveLength(2);
+    expect(await restarted.inspect('missing')).toEqual({
+      code: 'missing',
+      available: false,
+      requiresPassword: false,
+    });
+    expect(await restarted.snapshot(protectedOwner)).not.toHaveProperty('access');
+    expect(JSON.stringify(await restarted.snapshot(protectedOwner))).not.toContain(
+      'correct horse battery staple',
+    );
+    creator.onModuleDestroy();
+    restarted.onModuleDestroy();
+    repository.onModuleDestroy();
+  });
+
   it('keeps rooms isolated, credentials private and snapshots detached', async () => {
     await add();
     const other = await service.create('Carol', 'Other room');
@@ -831,13 +877,20 @@ it.each([
   expect(retroCommandSchema.safeParse(command).success).toBe(false);
 });
 
-it('trims input and ignores untrusted identity fields', async () => {
+it('trims input and rejects untrusted identity fields', () => {
+  expect(
+    retroCommandSchema.safeParse({
+      type: 'join',
+      name: ' Alice ',
+      code: 'room',
+      moderator: true,
+    }).success,
+  ).toBe(false);
   expect(
     retroCommandSchema.parse({
       type: 'join',
       name: ' Alice ',
       code: 'room',
-      moderator: true,
     }),
   ).toEqual({ type: 'join', name: 'Alice', code: 'room' });
 });

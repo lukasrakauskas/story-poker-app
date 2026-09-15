@@ -1,6 +1,6 @@
 # Short-lived retrospectives
 
-Visit `/retro` to create a room, or share `/retro/<code>` to invite participants. This is independent of the planning-poker routes and uses a separate WebSocket endpoint at `/retro` on the backend origin configured by `NEXT_PUBLIC_WS_URL`.
+Visit `/retro` to create a room, or share `/retro/<code>` to invite participants. This is independent of the planning-poker routes and uses a separate WebSocket endpoint at `/retro` on the backend origin configured by `NEXT_PUBLIC_WS_URL`. A creator may add an optional room password; share that password through a separate channel rather than the invitation link.
 
 ## Flow
 
@@ -35,13 +35,15 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 - Run local development with `RETRO_STORAGE=memory` (the default), or start the optional Redis service with `docker compose --profile shared-storage up --build` after setting `RETRO_STORAGE=redis` and `RETRO_REDIS_URL=redis://redis:6379`. Do not commit `.env` files or credentials.
 - Redis commands use optimistic `WATCH`/`MULTI` transactions and retry on version conflicts; domain services never mutate repository-owned objects. Change envelopes use Redis pub/sub so replicas broadcast the committed state to their local sockets. A replica that misses an envelope can recover the current room on reconnect; pub/sub is not a history queue.
 - Redis unavailability is a hard storage error for live-room commands rather than permission to fall back to process-local state. Operators should alert on Redis connectivity and inspect Redis health before restarting a replica. Room keys and expiry tombstones are cleaned by Redis TTL; the index is repaired during create/sweep. There is no permanent server-side room archive.
+- Retrospectives may be protected with an optional room password. Inspection reveals only availability and the password requirement; it does not reveal title, phase, members, notes, or actions. Password verification is performed inside the repository admission transaction before allocating a participant. Passwords are bounded to 100 characters, stored only as salted digests, and never included in snapshots, reconnect cookies, browser history, logs, or exports. Join/password attempts are limited to five per connection per minute in addition to the normal command limit.
 
 ## Implementation
 
 - `packages/shared/retrospective.ts`: client/server protocol types.
 - `apps/backend/src/collaboration`: domain-neutral participant identity, normalized-name validation, roles, presence, reconnect tokens, connection replacement/audience lookup, room registration, and configurable retention scheduling.
 - `apps/backend/src/retro/retro-room.repository.ts`: versioned repository boundary, in-memory local/test storage, Redis TTL storage, optimistic atomic updates, expiry cleanup, and pub/sub change envelopes. Reconnect tokens are stored as SHA-256 digests and never included in repository change payloads.
-- `apps/backend/src/retro/retro.service.ts`: retrospective notes/phases/actions, authorization, hashed credential verification, and fixed two-hour/five-minute expiry policy. It contains no room map or gateway concerns.
+- `apps/backend/src/retro/retro.service.ts`: retrospective notes/phases/actions, authorization, repository-backed password verification, and fixed two-hour/five-minute expiry policy. It contains no room map or gateway concerns.
+- `apps/backend/src/collaboration/room-access.service.ts`: password bounds and salted verifier helpers shared by protected room admission; public access projections contain only `requiresPassword`.
 - `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, local sessions/connections, cross-replica change handling, recipient-specific snapshots, replacement, revocation, and expiry orchestration. It returns explicit addressed events and close effects.
 - `apps/backend/src/retro/retro.gateway.ts`: the transport-only Nest controller for runtime DTO validation, rate-limit delegation, heartbeat registration, application delegation, and response dispatch.
 - `apps/backend/src/transport`: shared WebSocket serialization/connection adapters, configurable heartbeat handling, application event dispatch, and keyed throttling. `RetroModule` imports both this module and `CollaborationModule`.
