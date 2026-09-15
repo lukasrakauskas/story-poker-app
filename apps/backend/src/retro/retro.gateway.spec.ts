@@ -57,6 +57,22 @@ afterEach(() => {
 });
 
 describe('RetroGateway', () => {
+  it('rejects unknown nested command fields without crashing the connection', () => {
+    const owner = socket();
+    gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+      identity: { moderator: true },
+    });
+    expect(latest(owner)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'invalid-command' },
+    });
+    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
+    expect(latest(owner).event).toBe('retro-state');
+  });
+
   it('keeps closed broadcasts identical when sockets disconnect, resume or join late', () => {
     const owner = socket();
     const guest = socket();

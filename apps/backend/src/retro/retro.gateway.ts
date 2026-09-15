@@ -17,7 +17,7 @@ import {
   RETRO_APPLICATION_NAMESPACE,
   RetroApplicationService,
 } from './retro-application.service.js';
-import { retroCommandSchema } from './retro.schema.js';
+import { retroCommandMessageSchema } from './retro.schema.js';
 import { RetroError } from './retro.service.js';
 
 const PASSWORD_RATE_NAMESPACE = 'retro-password';
@@ -110,7 +110,7 @@ export class RetroGateway
         ),
       );
     }
-    const command = retroCommandSchema.safeParse(data);
+    const command = retroCommandMessageSchema.safeParse(data);
     if (!command.success) {
       return this.transport.dispatch(
         this.application.reject(
@@ -141,8 +141,13 @@ export class RetroGateway
         ),
       );
     }
+    const { requestId: parsedRequestId, ...commandData } = command.data;
     return this.transport.dispatch(
-      this.application.execute(connectionId, command.data, requestId),
+      this.application.execute(
+        connectionId,
+        commandData,
+        parsedRequestId ?? requestId,
+      ),
     );
   }
 }

@@ -1,12 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import type {
-  RetroCommand,
-  RetroActionAssignment,
-  RetroActionOwner,
-  RetroGroup,
-  RetroNote,
-  RetroRoom,
+import {
+  RETRO_MAX_ACTIONS,
+  RETRO_MAX_MEMBERS,
+  RETRO_MAX_ROOMS,
+  RETRO_MAX_NOTES,
+  RETRO_MAX_VOTES_PER_MEMBER,
+  retroPublicRoomSchema,
+  type RetroCommand,
+  type RetroActionAssignment,
+  type RetroActionOwner,
+  type RetroInternalGroup,
+  type RetroInternalNote,
+  type RetroInternalRoom,
+  type RetroRoom,
+  type RetroSession as SharedRetroSession,
 } from 'shared/retrospective';
 import {
   ParticipantService,
@@ -22,11 +30,11 @@ import { RetentionService } from '../collaboration/retention.service.js';
 
 export const RETRO_LIFETIME_MS = 2 * 60 * 60 * 1000;
 export const RETRO_OFFLINE_RETENTION_MS = 5 * 60 * 1000;
-const MAX_ROOMS = 100;
-const MAX_MEMBERS = 30;
-const MAX_NOTES = 300;
-const MAX_ACTIONS = 100;
-const VOTES_PER_MEMBER = 3;
+const MAX_ROOMS = RETRO_MAX_ROOMS;
+const MAX_MEMBERS = RETRO_MAX_MEMBERS;
+const MAX_NOTES = RETRO_MAX_NOTES;
+const MAX_ACTIONS = RETRO_MAX_ACTIONS;
+const VOTES_PER_MEMBER = RETRO_MAX_VOTES_PER_MEMBER;
 
 export class RetroError extends Error {
   constructor(
@@ -36,32 +44,14 @@ export class RetroError extends Error {
     super(message);
   }
 }
-export interface RetroSession {
-  code: string;
-  id: string;
-  token: string;
-}
+export type RetroSession = SharedRetroSession;
 export interface RetroMutationResult {
   removedMemberId?: string;
 }
-type StoredNote = Omit<RetroNote, 'voteCount' | 'votedBySelf'> & {
-  /** Server-only voter identities used for authorization and vote budgets. */
-  voterIds: string[];
-};
-type StoredGroup = Omit<RetroGroup, 'voteCount' | 'votedBySelf'> & {
-  /** Server-only voter identities used for authorization and vote budgets. */
-  voterIds: string[];
-};
-type StoredRoom = Omit<
-  RetroRoom,
-  'members' | 'notes' | 'groups' | 'requiresPassword'
-> & {
+type StoredNote = RetroInternalNote;
+type StoredGroup = RetroInternalGroup;
+type StoredRoom = Omit<RetroInternalRoom, 'requiresPassword'> & {
   access: RoomAccess;
-  members: CollaborationParticipant[];
-  notes: StoredNote[];
-  groups: StoredGroup[];
-  /** Internal current-phase readiness, kept separate from participant identity. */
-  readyMemberIds: Set<string>;
 };
 type Mutation = Exclude<
   RetroCommand,
@@ -233,35 +223,38 @@ export class RetroService {
     // Explicitly exclude credentials and voter identities, and never expose
     // mutable internal state. Open voting contains only the recipient's own
     // selections; aggregate totals become public in discuss/closed.
-    return structuredClone({
-      ...publicRoom,
-      members: room.members.map(({ id, name, role, connected }) => ({
-        id,
-        name,
-        moderator: role === 'moderator',
-        connected,
-        ready: readyMemberIds.has(id),
-      })),
-      notes: notes.map(({ voterIds, ...note }) => ({
-        ...note,
-        voteCount:
-          !note.groupId && (room.phase === 'discuss' || room.phase === 'closed')
-            ? voterIds.length
-            : null,
-        votedBySelf:
-          !note.groupId &&
-          room.phase === 'vote' &&
-          voterIds.includes(member.id),
-      })),
-      groups: groups.map(({ voterIds, ...group }) => ({
-        ...group,
-        voteCount:
-          room.phase === 'discuss' || room.phase === 'closed'
-            ? voterIds.length
-            : null,
-        votedBySelf: room.phase === 'vote' && voterIds.includes(member.id),
-      })),
-    });
+    return retroPublicRoomSchema.parse(
+      structuredClone({
+        ...publicRoom,
+        members: room.members.map(({ id, name, role, connected }) => ({
+          id,
+          name,
+          moderator: role === 'moderator',
+          connected,
+          ready: readyMemberIds.has(id),
+        })),
+        notes: notes.map(({ voterIds, ...note }) => ({
+          ...note,
+          voteCount:
+            !note.groupId &&
+            (room.phase === 'discuss' || room.phase === 'closed')
+              ? voterIds.length
+              : null,
+          votedBySelf:
+            !note.groupId &&
+            room.phase === 'vote' &&
+            voterIds.includes(member.id),
+        })),
+        groups: groups.map(({ voterIds, ...group }) => ({
+          ...group,
+          voteCount:
+            room.phase === 'discuss' || room.phase === 'closed'
+              ? voterIds.length
+              : null,
+          votedBySelf: room.phase === 'vote' && voterIds.includes(member.id),
+        })),
+      }),
+    );
   }
 
   mutate(

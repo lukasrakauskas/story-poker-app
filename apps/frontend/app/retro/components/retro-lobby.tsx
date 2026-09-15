@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  normalizeParticipantName,
+  participantNameError,
+} from "shared/participant";
 import { Button } from "ui/components/button";
 import {
   Card,
@@ -19,6 +23,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
     initialCode ? "join" : "create"
   );
   const [name, setName] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
   const [title, setTitle] = useState("");
   const [code, setCode] = useState(initialCode);
   const [password, setPassword] = useState("");
@@ -33,6 +38,13 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
     pending ||
     error?.code === "room-expired" ||
     error?.code === "invalid-session";
+  const normalizedName = normalizeParticipantName(name);
+  const nameError = participantNameError(normalizedName);
+  const visibleNameError = nameTouched ? nameError : null;
+  const canSubmit =
+    !disabled &&
+    nameError === null &&
+    !!(mode === "create" ? title.trim() : code.trim());
 
   useEffect(() => {
     if (
@@ -141,13 +153,17 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
           </div>
           <form
             className="space-y-4"
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
-              if (disabled || !name.trim()) return;
+              if (!canSubmit) {
+                setNameTouched(true);
+                return;
+              }
               if (mode === "create" && title.trim()) {
                 void send({
                   type: "create",
-                  name: name.trim(),
+                  name: normalizedName,
                   title: title.trim(),
                   ...(password ? { password } : {}),
                 });
@@ -159,7 +175,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
                 }
                 void send({
                   type: "join",
-                  name: name.trim(),
+                  name: normalizedName,
                   code: codeValue,
                   ...(password ? { password } : {}),
                 });
@@ -170,15 +186,30 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
               <Label htmlFor="retro-name">Your name</Label>
               <Input
                 id="retro-name"
-                minLength={3}
-                maxLength={30}
                 value={name}
-                onChange={(event) => setName(event.target.value)}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  setNameTouched(true);
+                }}
+                onBlur={() => setNameTouched(true)}
                 autoComplete="off"
                 placeholder="How should the team know you?"
                 required
+                aria-invalid={visibleNameError ? true : undefined}
+                aria-describedby={
+                  visibleNameError ? "retro-name-error" : undefined
+                }
                 disabled={pending || connection !== "connected"}
               />
+              {visibleNameError && (
+                <p
+                  id="retro-name-error"
+                  role="alert"
+                  className="text-sm text-destructive"
+                >
+                  {visibleNameError}
+                </p>
+              )}
             </div>
             {mode === "create" ? (
               <>
@@ -258,15 +289,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
                 )}
               </>
             )}
-            <Button
-              className="w-full"
-              type="submit"
-              disabled={
-                disabled ||
-                !name.trim() ||
-                !(mode === "create" ? title.trim() : code.trim())
-              }
-            >
+            <Button className="w-full" type="submit" disabled={!canSubmit}>
               {pending
                 ? "Waiting for the room…"
                 : mode === "create"

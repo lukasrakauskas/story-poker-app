@@ -38,7 +38,8 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 
 ## Implementation
 
-- `packages/shared/retrospective.ts`: client/server protocol types.
+- `packages/shared/retrospective.ts`: strict v1 client/server Zod contracts, inferred types, public/archive projections, private state schemas, centralized limits and access metadata, and the explicit v1/v2-to-v3 archive migration.
+- `packages/shared/participant.ts`: the canonical domain-neutral participant-name normalization and validation contract (trimmed 3–30 characters), composed by the browser lobby, backend collaboration service, and retrospective command schema. Future runtime contracts should reuse this helper rather than duplicate its rules.
 - `apps/backend/src/collaboration`: domain-neutral participant identity, normalized-name validation, roles, presence, reconnect tokens, connection replacement/audience lookup, room registration/access capability, and configurable retention scheduling.
 - `apps/backend/src/retro/retro.service.ts`: retrospective notes/phases/actions and fixed two-hour expiry policy.
 - `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, sessions, recipient-specific snapshots, replacement, and expiry orchestration. It returns explicit addressed events and close effects.
@@ -47,8 +48,9 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 - `apps/frontend/app/retro`: retrospective routes and UI, including the responsive room status card.
 - `apps/frontend/hooks/use-retro-socket.ts`: isolated connection, cookie resume lifecycle, and snapshot persistence.
 - `apps/frontend/lib/retro-session.ts`: expiring cookie helpers.
-- `apps/frontend/lib/retro-history.ts`: versioned, validated, token-free localStorage snapshots.
-- `apps/frontend/lib/retro-export.ts`: Markdown and plain-text serialization.
+- `apps/frontend/lib/retro-history.ts`: versioned, validated, token-free localStorage snapshots. The `retro-history-v1` key format is retained; entries with archive version 1 voter IDs are migrated once into recipient-safe selections or anonymous discussion counts, then rewritten as archive v3.
+- `apps/frontend/lib/retro-protocol.ts`: complete nested server-event validation before React state or history updates.
+- `apps/frontend/lib/retro-export.ts`: Markdown and plain-text serialization. Exports use the same deliberate secret-free public-room allowlist as history; strict socket validation and archive sanitization remain separate responsibilities.
 
 ## Browser history and privacy
 
@@ -68,10 +70,11 @@ bun run --cwd apps/backend test:e2e
 bun run build
 bun run lint
 
-# Browser regression (starts backend :4000 and frontend :3001)
+# Browser regression (defaults to backend :4000 and frontend :3001)
+# Set PLAYWRIGHT_BACKEND_PORT and PLAYWRIGHT_FRONTEND_PORT for isolated runs.
 cd apps/frontend
 bunx playwright install chromium
-bun run test:e2e
+PLAYWRIGHT_BACKEND_PORT=45292 PLAYWRIGHT_FRONTEND_PORT=45293 bun run test:e2e
 ```
 
 The WebSocket end-to-end tests exercise real clients, room broadcasts, private credentials, permissions, shared reconnect replacement, and coexistence with the original poker endpoint. Cross-domain contract tests prove that Poker and Retro receive the same normalized-name, unique-name, role, token, disconnect, and resume guarantees. Application-service tests cover session orchestration, recipient privacy, audience events, and replacement without constructing sockets. Small gateway/transport contract tests cover DTO validation, serialization, rate limiting, heartbeat cleanup, and protocol wiring; domain service tests cover phase transitions, voting budgets, resource limits, and domain-specific retention/expiry. Bun frontend unit tests cover history updates, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, connected/disconnected/expiring/storage-failure status, responsive status placement, and dark mode.

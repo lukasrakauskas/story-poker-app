@@ -837,13 +837,20 @@ it.each([
   expect(retroCommandSchema.safeParse(command).success).toBe(false);
 });
 
-it('trims input and ignores untrusted identity fields', () => {
+it('trims input and rejects untrusted identity fields', () => {
   expect(
     retroCommandSchema.parse({
       type: 'join',
       name: ' Alice ',
       code: 'room',
-      moderator: true,
     }),
   ).toEqual({ type: 'join', name: 'Alice', code: 'room' });
+  expect(
+    retroCommandSchema.safeParse({
+      type: 'join',
+      name: ' Alice ',
+      code: 'room',
+      moderator: true,
+    }).success,
+  ).toBe(false);
 });

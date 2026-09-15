@@ -1,6 +1,12 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
-import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
+import {
+  RETRO_PROTOCOL_ERROR_CODE,
+  RETRO_PROTOCOL_ERROR_MESSAGE,
+  retroServerEventSchema,
+  type RetroCommand,
+  type RetroServerEvent,
+} from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import {
   result,
@@ -47,15 +53,25 @@ export class RetroApplicationService implements OnModuleDestroy {
       let session: RetroSession;
       if (command.type === 'inspect') {
         const inspection = this.retros.inspect(command.code);
+        const event: RetroServerEvent = {
+          event: 'retro-room-info',
+          data: { ...inspection, ...(requestId ? { requestId } : {}) },
+        };
+        const validated = retroServerEventSchema.safeParse(event);
         return this.merge(
           expired,
           result(undefined, [
             {
               connectionId,
-              event: {
-                event: 'retro-room-info',
-                data: { ...inspection, ...(requestId ? { requestId } : {}) },
-              },
+              event: validated.success
+                ? validated.data
+                : this.errorEvent(
+                    new RetroError(
+                      RETRO_PROTOCOL_ERROR_CODE,
+                      RETRO_PROTOCOL_ERROR_MESSAGE,
+                    ),
+                    requestId,
+                  ),
             },
           ]),
         );
@@ -247,9 +263,27 @@ export class RetroApplicationService implements OnModuleDestroy {
             ...(connectionId === requester && requestId ? { requestId } : {}),
           },
         };
-        messages.push({ connectionId, event });
+        const validated = retroServerEventSchema.safeParse(event);
+        messages.push({
+          connectionId,
+          event: validated.success
+            ? validated.data
+            : this.errorEvent(
+                new RetroError(
+                  RETRO_PROTOCOL_ERROR_CODE,
+                  RETRO_PROTOCOL_ERROR_MESSAGE,
+                ),
+                requestId,
+              ),
+        });
       } catch (error) {
-        if (!(error instanceof RetroError)) throw error;
+        const protocolError =
+          error instanceof RetroError
+            ? error
+            : new RetroError(
+                RETRO_PROTOCOL_ERROR_CODE,
+                RETRO_PROTOCOL_ERROR_MESSAGE,
+              );
         this.sessions.delete(connectionId);
         this.connections.release(
           RETRO_APPLICATION_NAMESPACE,
@@ -259,7 +293,10 @@ export class RetroApplicationService implements OnModuleDestroy {
         );
         messages.push({
           connectionId,
-          event: this.errorEvent(error),
+          event: this.errorEvent(
+            protocolError,
+            connectionId === requester ? requestId : undefined,
+          ),
         });
       }
     }

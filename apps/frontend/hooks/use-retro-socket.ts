@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  RetroCommand,
-  RetroRoom,
-  RetroRoomInfo,
-  RetroServerEvent,
+import {
+  RETRO_PROTOCOL_ERROR_CODE,
+  RETRO_PROTOCOL_ERROR_MESSAGE,
+  type RetroCommand,
+  type RetroRoom,
+  type RetroRoomInfo,
 } from "shared/retrospective";
 
 import {
@@ -14,6 +15,7 @@ import {
   saveRetroToken,
 } from "../lib/retro-session";
 import { saveRetroHistory } from "../lib/retro-history";
+import { parseRetroServerEvent } from "../lib/retro-protocol";
 
 type Connection = "connecting" | "connected" | "disconnected";
 type Failure = { code: string; message: string };
@@ -89,15 +91,17 @@ export function useRetroSocket() {
       return;
     }
 
-    const fail = (message: string) => {
+    const fail = (message: string, code = "connection") => {
       if (!active) return;
       clearTimeout(timer);
       ready.current = false;
       setConnection("disconnected");
-      setError({ code: "connection", message });
+      setError({ code, message });
       settle(false);
       client.close();
     };
+    const failProtocol = () =>
+      fail(RETRO_PROTOCOL_ERROR_MESSAGE, RETRO_PROTOCOL_ERROR_CODE);
     const timer = setTimeout(
       () => fail("Connection timed out. Retry to resume this session."),
       15000
@@ -124,43 +128,29 @@ export function useRetroSocket() {
     };
     client.onmessage = (message) => {
       if (!active || client.readyState !== WebSocket.OPEN) return;
-      let event: RetroServerEvent;
+      let value: unknown;
       try {
-        event = JSON.parse(message.data);
+        value =
+          typeof message.data === "string" ? JSON.parse(message.data) : null;
+      } catch {
+        failProtocol();
+        return;
+      }
+      const event = parseRetroServerEvent(value);
+      if (!event) {
+        failProtocol();
+        return;
+      }
+      try {
         if (event.event === "retro-room-info") {
-          if (
-            typeof event.data?.code !== "string" ||
-            typeof event.data.available !== "boolean" ||
-            typeof event.data.requiresPassword !== "boolean"
-          ) {
-            throw new Error("Invalid room info");
-          }
-          setRoomInfo({
-            code: event.data.code,
-            available: event.data.available,
-            requiresPassword: event.data.requiresPassword,
-          });
+          const { requestId, ...info } = event.data;
+          setRoomInfo(info);
           setError(null);
           clearTimeout(timer);
-          if (
-            !inFlight.current ||
-            event.data.requestId === inFlight.current.id
-          ) {
+          if (!inFlight.current || requestId === inFlight.current.id) {
             settle(true);
           }
         } else if (event.event === "retro-state") {
-          if (
-            !event.data?.self?.id ||
-            !event.data.self.token ||
-            !event.data.room?.code ||
-            !Array.isArray(event.data.room.notes) ||
-            !Array.isArray(event.data.room.groups) ||
-            !Array.isArray(event.data.room.members) ||
-            !Array.isArray(event.data.room.actions) ||
-            !Number.isFinite(event.data.room.expiresAt)
-          ) {
-            throw new Error("Invalid snapshot");
-          }
           const { room: snapshot, self } = event.data;
           setRoomInfo(null);
           credentials.current = { code: snapshot.code, token: self.token };
@@ -187,12 +177,7 @@ export function useRetroSocket() {
             setError(null);
             settle(true);
           }
-        } else if (event.event === "retro-error") {
-          if (
-            typeof event.data?.code !== "string" ||
-            typeof event.data.message !== "string"
-          )
-            throw new Error("Invalid error");
+        } else {
           clearTimeout(timer);
           setError(event.data);
           settle(false);
@@ -223,9 +208,7 @@ export function useRetroSocket() {
           }
         }
       } catch {
-        fail(
-          "Received an invalid response. Retry to get a fresh room snapshot."
-        );
+        failProtocol();
       }
     };
     client.onerror = () =>
