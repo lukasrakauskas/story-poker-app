@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { chooseRecoveryHistory } from "./retro-history-test-helpers";
 
 declare global {
   interface Window {
@@ -43,6 +44,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     owner.getByRole("heading", { name: "Browser retrospective" })
   ).toBeVisible();
+  await chooseRecoveryHistory(owner);
   await expect(
     owner.getByText(/Only you can see your notes during this phase/)
   ).toBeVisible();
@@ -85,6 +87,7 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
   await expect(owner.getByText("Bobby", { exact: true })).toBeVisible();
+  await chooseRecoveryHistory(guest);
 
   // Hold one outgoing mutation while another member broadcasts. That broadcast
   // must not acknowledge our unsent command or erase its draft.

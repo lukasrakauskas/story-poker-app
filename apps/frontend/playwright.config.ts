@@ -17,6 +17,14 @@ export default defineConfig({
     {
       command: `bun run --cwd ../backend build && PORT=${backendPort} RETRO_ALLOWED_ORIGINS=http://localhost:${frontendPort} bun ../backend/dist/main.js`,
       url: `http://localhost:${backendPort}`,
+      // Browser scenarios create independent rooms rapidly behind one loopback
+      // source. Default admission budgets are exercised by backend abuse tests.
+      env: {
+        WS_CREATE_ATTEMPTS_PER_SOURCE: "1000",
+        WS_JOIN_ATTEMPTS_PER_SOURCE: "1000",
+        WS_RESUME_ATTEMPTS_PER_SOURCE: "2000",
+        WS_GLOBAL_CREATE_LIMIT: "1000",
+      },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

@@ -1,4 +1,5 @@
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { chooseRecoveryHistory } from "./retro-history-test-helpers";
 
 async function drag(page: Page, handle: Locator, target: Locator) {
   await handle.scrollIntoViewIfNeeded();
@@ -29,6 +30,7 @@ test("drag notes into live stacks, move and ungroup, cancel, and resume", async 
   await expect(
     page.getByRole("heading", { name: "Stacking", exact: true })
   ).toBeVisible();
+  await chooseRecoveryHistory(page);
   const guestContext = await browser.newContext();
   const guest = await guestContext.newPage();
   await guest.goto(page.url());
@@ -39,6 +41,7 @@ test("drag notes into live stacks, move and ungroup, cancel, and resume", async 
   await expect(
     guest.getByRole("heading", { name: "Stacking", exact: true })
   ).toBeVisible();
+  await chooseRecoveryHistory(guest);
   for (const text of ["First note", "Second note", "Third note"]) {
     await page.getByLabel("Add a note", { exact: true }).first().fill(text);
     await page

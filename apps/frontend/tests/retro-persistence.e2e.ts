@@ -1,4 +1,9 @@
 import { test, expect } from "@playwright/test";
+import {
+  chooseFinalOnlyHistory,
+  chooseNoHistory,
+  chooseRecoveryHistory,
+} from "./retro-history-test-helpers";
 
 function backendRoomUrl(room: string) {
   const backendPort = process.env.PLAYWRIGHT_BACKEND_PORT ?? "4000";
@@ -7,7 +12,8 @@ function backendRoomUrl(room: string) {
 
 async function createRoom(
   page: import("@playwright/test").Page,
-  title: string
+  title: string,
+  mode: "recovery" | "final-only" = "recovery"
 ) {
   await page.goto("/retro");
   await page.getByLabel("Your name").fill("Alice");
@@ -18,6 +24,8 @@ async function createRoom(
   await expect(
     page.getByRole("heading", { name: title, exact: true })
   ).toBeVisible();
+  if (mode === "recovery") await chooseRecoveryHistory(page);
+  else await chooseFinalOnlyHistory(page);
   return page.url();
 }
 
@@ -273,4 +281,228 @@ test("keeps lobby connection failures and retry next to the entry form", async (
     lobby.getByRole("button", { name: "Retry connection", exact: true })
   ).toBeVisible();
   await expect(page.getByText("Room status", { exact: true })).toHaveCount(0);
+});
+
+test("requires a choice before storing and saves only the final snapshot in final-only mode", async ({
+  page,
+}) => {
+  await page.goto("/retro");
+  await page.getByLabel("Your name").fill("Alice");
+  await page.getByLabel("Retrospective title").fill("Final-only choice");
+  await page
+    .getByRole("button", { name: "Create retrospective", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Final-only choice", exact: true })
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        Object.keys(localStorage).filter((key) =>
+          key.startsWith("retro-history-v1:")
+        ).length
+    )
+  ).toBe(0);
+  const choice = page.getByRole("region", {
+    name: "Choose browser history for this room",
+    exact: true,
+  });
+  await expect(choice.getByText(/browser profile/)).toBeVisible();
+  await expect(choice.getByText(/exported Markdown/)).toBeVisible();
+  await chooseFinalOnlyHistory(page);
+  expect(
+    await page.evaluate(
+      () =>
+        Object.keys(localStorage).filter((key) =>
+          key.startsWith("retro-history-v1:")
+        ).length
+    )
+  ).toBe(0);
+
+  for (const label of [
+    "Reveal and group notes",
+    "Start voting",
+    "Start discussion",
+    "Close retrospective",
+  ]) {
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await page
+      .getByRole("button", {
+        name: `Confirm ${label.toLowerCase()}`,
+        exact: true,
+      })
+      .click();
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Object.keys(localStorage).filter((key) =>
+            key.startsWith("retro-history-v1:")
+          ).length
+      )
+    )
+    .toBe(1);
+  const saved = await page.evaluate(
+    () =>
+      JSON.parse(
+        Object.entries(localStorage).find(([key]) =>
+          key.startsWith("retro-history-v1:")
+        )![1]
+      ).room
+  );
+  expect(saved.phase).toBe("closed");
+});
+
+test("an explicit opt-out keeps room content out of browser history", async ({
+  page,
+}) => {
+  await page.goto("/retro");
+  await page.getByLabel("Your name").fill("Alice");
+  await page.getByLabel("Retrospective title").fill("No history choice");
+  await page
+    .getByRole("button", { name: "Create retrospective", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "No history choice", exact: true })
+  ).toBeVisible();
+  await chooseNoHistory(page);
+  await page
+    .getByLabel("Add a note", { exact: true })
+    .first()
+    .fill("Never persist this");
+  await page
+    .getByRole("button", { name: "Add to went well", exact: true })
+    .click();
+  await expect(
+    page.getByText("Never persist this", { exact: true })
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        Object.keys(localStorage).filter((key) =>
+          key.startsWith("retro-history-v1:")
+        ).length
+    )
+  ).toBe(0);
+  await expect(
+    page.getByText("Browser history is disabled for this room", {
+      exact: false,
+    })
+  ).toBeVisible();
+});
+
+test("deleting a room history entry suppresses later writes from its live tab", async ({
+  page,
+  context,
+}) => {
+  await createRoom(page, "Delete while live");
+  await page
+    .getByLabel("Add a note", { exact: true })
+    .first()
+    .fill("Before deletion");
+  await page
+    .getByRole("button", { name: "Add to went well", exact: true })
+    .click();
+  const history = await context.newPage();
+  await history.goto("/retro/history");
+  await expect(
+    history.getByRole("heading", { name: "Delete while live", exact: true })
+  ).toBeVisible();
+  await history
+    .getByRole("button", { name: "Delete saved retro", exact: true })
+    .click();
+  await history
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Delete saved retro", exact: true })
+    .click();
+  await expect(history.getByText(/No saved retrospectives yet/)).toBeVisible();
+  await page
+    .getByLabel("Add a note", { exact: true })
+    .first()
+    .fill("After deletion");
+  await page
+    .getByRole("button", { name: "Add to went well", exact: true })
+    .click();
+  await expect(page.getByText("After deletion", { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Object.keys(localStorage).filter((key) =>
+            key.startsWith("retro-history-v1:")
+          ).length
+      )
+    )
+    .toBe(0);
+  await history.close();
+});
+
+test("Delete all history suppresses a live tab across the browser storage event", async ({
+  page,
+  context,
+}) => {
+  await createRoom(page, "Delete all while live");
+  const history = await context.newPage();
+  await history.goto("/retro/history");
+  await expect(
+    history.getByRole("heading", { name: "Delete all while live", exact: true })
+  ).toBeVisible();
+  await history
+    .getByRole("button", {
+      name: "Delete all retrospective history",
+      exact: true,
+    })
+    .click();
+  await history
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Delete all history", exact: true })
+    .click();
+  await expect(history.getByText(/No saved retrospectives yet/)).toBeVisible();
+  await page
+    .getByLabel("Add a note", { exact: true })
+    .first()
+    .fill("Suppressed update");
+  await page
+    .getByRole("button", { name: "Add to went well", exact: true })
+    .click();
+  await expect(
+    page.getByText("Suppressed update", { exact: true })
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Object.keys(localStorage).filter((key) =>
+            key.startsWith("retro-history-v1:")
+          ).length
+      )
+    )
+    .toBe(0);
+  await history.close();
+});
+
+test("removes an expired retained entry when the history page opens", async ({
+  page,
+}) => {
+  await createRoom(page, "Expired history");
+  await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((item) =>
+      item.startsWith("retro-history-v1:")
+    );
+    if (!key) throw new Error("Expected a recovery archive");
+    const archive = JSON.parse(localStorage.getItem(key)!);
+    archive.retentionUntil = Date.now() - 1;
+    localStorage.setItem(key, JSON.stringify(archive));
+  });
+  await page.goto("/retro/history");
+  await expect(page.getByText(/No saved retrospectives yet/)).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        Object.keys(localStorage).filter((key) =>
+          key.startsWith("retro-history-v1:")
+        ).length
+    )
+  ).toBe(0);
 });

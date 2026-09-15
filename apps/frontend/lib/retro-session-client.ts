@@ -38,7 +38,7 @@ export interface RetroSessionApi {
 }
 
 export interface RetroHistoryStorage {
-  save(room: RetroRoom, viewerId: string): boolean;
+  save(room: RetroRoom, viewerId: string): boolean | null;
 }
 
 export interface RetroClock {

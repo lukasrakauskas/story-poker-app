@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useSyncExternalStore } from "react";
-import type { RetroRoom } from "shared/retrospective";
 import {
   RetroSessionClient,
-  type RetroHistoryStorage,
   type RetroSessionApi,
   type RetroTimerStorage,
 } from "../lib/retro-session-client";
@@ -12,7 +10,11 @@ import {
   createBrowserRetroNavigation,
   parseRetroRoomCode,
 } from "../lib/retro-route";
-import { saveRetroHistory } from "../lib/retro-history";
+import { RetroHistorySession } from "../lib/retro-history-session";
+import {
+  isRetroHistoryPolicyKey,
+  RETRO_HISTORY_POLICY_CHANGED,
+} from "../lib/retro-history";
 import {
   establishRetroSession,
   forgetRetroSession,
@@ -26,9 +28,6 @@ const browserSessions: RetroSessionApi = {
   inspect: inspectRetroSession,
   resume: resumeRetroSession,
   forget: forgetRetroSession,
-};
-const browserHistory: RetroHistoryStorage = {
-  save: (room: RetroRoom, viewerId: string) => saveRetroHistory(room, viewerId),
 };
 const browserClock = { now: () => Date.now() };
 const browserTimers: RetroTimerStorage = {
@@ -75,19 +74,38 @@ export function useRetroSocket(initialCode?: string) {
     () => new WebSocketTransport({ url, queueWhileConnecting: false }),
     [url]
   );
+  const history = useMemo(() => new RetroHistorySession(), []);
+  const historyState = useSyncExternalStore(
+    history.subscribe,
+    history.getSnapshot,
+    history.getSnapshot
+  );
   const client = useMemo(
     () =>
       new RetroSessionClient({
         transport,
         initialCode: routeCode,
         sessions: browserSessions,
-        history: browserHistory,
+        history,
         clock: browserClock,
         timers: browserTimers,
         navigation: createBrowserRetroNavigation(),
       }),
-    [routeCode, transport]
+    [routeCode, transport, history]
   );
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (isRetroHistoryPolicyKey(event.key)) history.sync();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(RETRO_HISTORY_POLICY_CHANGED, history.sync);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(RETRO_HISTORY_POLICY_CHANGED, history.sync);
+      history.dispose();
+    };
+  }, [history]);
 
   useEffect(() => {
     client.start();
@@ -127,7 +145,11 @@ export function useRetroSocket(initialCode?: string) {
     send: client.send,
     retry: client.retry,
     cookieSaved: state.cookieSaved,
-    historySaved: state.historySaved,
+    historySaved: historyState.saved,
+    historyPreference: historyState.preference,
+    historyPreferenceSaved: historyState.preferenceSaved,
+    historyDisabled: historyState.disabled,
+    chooseHistoryPreference: history.choose,
     rememberedIdentity: state.rememberedIdentity,
     rememberedStatus: state.rememberedStatus,
     inspectRemembered: client.inspectRemembered,

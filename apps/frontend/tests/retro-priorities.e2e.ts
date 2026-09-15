@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { chooseFinalOnlyHistory } from "./retro-history-test-helpers";
 
 test("tied ranks keep creation order through reconnect, history and exports", async ({
   page,
@@ -13,6 +14,7 @@ test("tied ranks keep creation order through reconnect, history and exports", as
   await expect(
     page.getByRole("heading", { name: "Tied priorities", exact: true })
   ).toBeVisible();
+  await chooseFinalOnlyHistory(page);
   const notes = [
     "First created",
     "Second created",

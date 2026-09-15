@@ -504,6 +504,7 @@ export const retroArchiveSchema = z
   .object({
     version: retroArchiveVersionSchema,
     savedAt: retroTimestampSchema,
+    retentionUntil: retroTimestampSchema.nullable().optional(),
     viewerId: retroIdSchema.optional(),
     room: retroPublicRoomSchema,
   })
