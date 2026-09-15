@@ -63,6 +63,9 @@ test("tied ranks keep creation order through reconnect, history and exports", as
   }
   await assertRanks();
   await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Continue as Alice", exact: true })
     .click();

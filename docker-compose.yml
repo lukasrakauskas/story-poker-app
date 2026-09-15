@@ -7,5 +7,23 @@ services:
       context: .
       dockerfile: ./apps/backend/Dockerfile
     restart: always
+    environment:
+      RETRO_STORAGE: ${RETRO_STORAGE:-memory}
+      RETRO_REDIS_URL: ${RETRO_REDIS_URL:-redis://redis:6379}
     ports:
       - 4000:4000
+
+  # Opt-in shared retrospective storage for local replica/restart testing:
+  # RETRO_STORAGE=redis RETRO_REDIS_URL=redis://redis:6379 \
+  #   docker compose --profile shared-storage up --build
+  redis:
+    image: redis:7-alpine
+    profiles: [shared-storage]
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - 6379:6379
+    volumes:
+      - retro-redis-data:/data
+
+volumes:
+  retro-redis-data:

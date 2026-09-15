@@ -132,7 +132,7 @@ test("shows remembered moderator identity, then explicitly continues or forgets 
   ).toHaveCount(0);
   await expect(
     remembered.getByText(
-      "This session was forgotten. Join as someone else to enter this room.",
+      "This browser session was forgotten. Join again to reconnect.",
       { exact: true }
     )
   ).toBeVisible();
@@ -171,11 +171,16 @@ test("rejects one invalid room credential without affecting another room cookie"
   await expect(
     page.getByText("Continue as Alice", { exact: true })
   ).toHaveCount(0);
+  // Rejected HTTP requests must not clear a cookie: a delayed rejection could
+  // otherwise erase a newer credential installed by another tab.
   expect(
     (await context.cookies(first)).find(
       (cookie) => cookie.name === firstCookie.name
-    )
-  ).toBeUndefined();
+    )?.value
+  ).toBe("valid-shaped-but-rejected");
+  expect(await page.evaluate(() => document.cookie)).not.toContain(
+    firstCookie.name
+  );
   expect(
     (await context.cookies(second)).find(
       (cookie) => cookie.name === secondCookie.name

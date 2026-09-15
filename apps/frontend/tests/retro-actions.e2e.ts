@@ -110,7 +110,14 @@ test("edit, reassign, unassign and retain a removed action owner across reconnec
   await editor
     .getByRole("button", { name: "Save action", exact: true })
     .click();
+  await expect(page.getByText("Final step", { exact: true })).toBeVisible();
+  await expect
+    .poll(async () => (await snapshot(page)).actions[0].text)
+    .toBe("Final step");
   await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Continue as Alice", exact: true })
     .click();

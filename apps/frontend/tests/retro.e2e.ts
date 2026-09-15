@@ -62,13 +62,19 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
     .boundingBox())!;
   expect(desktopStatusBox.x).toBeGreaterThan(desktopBoardBox.x);
   const roomUrl = owner.url();
-  const cookies = await context.cookies(roomUrl);
-  const credential = cookies.find((cookie) =>
+  // The cookie belongs to the backend origin, not the frontend origin. It is
+  // visible to browser automation but intentionally not to page JavaScript.
+  const backendPort = process.env.PLAYWRIGHT_BACKEND_PORT ?? "4000";
+  const backendRoomUrl = `http://localhost:${backendPort}/retro/${owner.url().split("/").at(-1)}`;
+  const cookies = await context.cookies(backendRoomUrl);
+  let credential = cookies.find((cookie) =>
     cookie.name.startsWith("retro-session-")
   )!;
   expect(credential).toBeTruthy();
+  expect(credential.httpOnly).toBe(true);
+  expect(credential.secure).toBe(true);
   expect(credential.path).toBe("/retro");
-  expect(credential.sameSite).toBe("Lax");
+  expect(credential.sameSite).toBe("None");
   expect(credential.expires * 1000).toBeGreaterThan(Date.now());
   expect(credential.expires * 1000).toBeLessThanOrEqual(
     Date.now() + 2 * 60 * 60 * 1000
@@ -264,11 +270,11 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await expect(
     owner.getByRole("button", { name: "Reveal and group notes", exact: true })
   ).toBeEnabled();
-  expect(
-    (await context.cookies(roomUrl)).find(
-      (cookie) => cookie.name === credential.name
-    )?.value
-  ).toBe(credential.value);
+  const rotatedCredential = (await context.cookies(backendRoomUrl)).find(
+    (cookie) => cookie.name === credential.name
+  )!;
+  expect(rotatedCredential.value).not.toBe(credential.value);
+  credential = rotatedCredential;
   await owner.evaluate(() => window.retroTestSocket.close());
   await expect(
     owner.getByText("Disconnected · changes are disabled", { exact: true })
@@ -590,11 +596,13 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
       { exact: true }
     )
   ).toBeVisible();
+  // Removal revokes the server-side member; the stale HttpOnly cookie remains
+  // unreadable and is replaced only if this browser joins again.
   expect(
-    (await removedContext.cookies(roomUrl)).some((cookie) =>
+    (await removedContext.cookies(backendRoomUrl)).some((cookie) =>
       cookie.name.startsWith("retro-session-")
     )
-  ).toBe(false);
+  ).toBe(true);
   await removedParticipant.reload();
   await expect(
     removedParticipant.getByRole("button", {

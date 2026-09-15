@@ -88,6 +88,9 @@ test("drag notes into live stacks, move and ungroup, cancel, and resume", async 
   );
   await expect(stack.getByText("3 notes", { exact: true })).toBeVisible();
   await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
   await page
     .getByRole("button", { name: "Continue as Alice", exact: true })
     .click();

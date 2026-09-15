@@ -18,8 +18,8 @@ export function RetroStatus({
   pending,
   error,
   retry,
-  cookieSaved,
   historySaved,
+  forgetSession,
   expired,
   terminal,
   minutes,
@@ -31,8 +31,8 @@ export function RetroStatus({
   pending: boolean;
   error: Failure | null;
   retry: () => void;
-  cookieSaved: boolean | null;
   historySaved: boolean | null;
+  forgetSession: () => Promise<boolean>;
   expired: boolean;
   terminal: boolean;
   minutes: number | null;
@@ -106,12 +106,6 @@ export function RetroStatus({
             </p>
           )}
         </div>
-        {cookieSaved === false && (
-          <p className="text-destructive">
-            Could not save your rejoin cookie. Keep this tab open to retain your
-            identity and moderator access.
-          </p>
-        )}
         {historySaved === false && (
           <p className="text-destructive">
             Could not save this snapshot in browser history. Storage may be
@@ -132,12 +126,24 @@ export function RetroStatus({
             Privacy and browser storage
           </summary>
           <p className="mt-2">
-            No account is required. A room cookie restores your identity until
-            expiry. Notes, names, and actions are saved in this browser when
-            storage is available; they are not a backup or shared across
-            devices. Opening this room in another tab moves your live connection
-            there.
+            No account is required. The backend stores a room-scoped HttpOnly
+            cookie that restores your identity until expiry. JavaScript cannot
+            read the credential, and notes, names, and actions are saved in this
+            browser when storage is available; they are not a backup or shared
+            across devices. Opening this room in another tab moves your live
+            connection there.
           </p>
+          {!expired && (
+            <Button
+              className="mt-3"
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => void forgetSession()}
+            >
+              Forget this browser session
+            </Button>
+          )}
         </details>
       </CardContent>
     </Card>
