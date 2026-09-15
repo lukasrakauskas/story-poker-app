@@ -36,7 +36,8 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 
 ## Implementation
 
-- `packages/shared/retrospective.ts`: client/server protocol types.
+- `packages/shared/retrospective.ts`: strict v1 client/server Zod contracts, inferred types, public/archive projections, private state schemas, centralized limits, and the explicit v1/v2-to-v3 archive migration.
+- `packages/shared/participant.ts`: domain-neutral participant-name normalization and validation shared by Poker, Retro, and future collaboration domains.
 - `apps/backend/src/collaboration`: domain-neutral participant identity, normalized-name validation, roles, presence, reconnect tokens, connection replacement/audience lookup, room registration, and configurable retention scheduling.
 - `apps/backend/src/retro/retro.service.ts`: retrospective notes/phases/actions and fixed two-hour expiry policy.
 - `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, sessions, recipient-specific snapshots, replacement, and expiry orchestration. It returns explicit addressed events and close effects.
@@ -45,8 +46,9 @@ Visit `/retro` to create a room, or share `/retro/<code>` to invite participants
 - `apps/frontend/app/retro`: retrospective routes and UI, including the responsive room status card.
 - `apps/frontend/hooks/use-retro-socket.ts`: isolated connection, cookie resume lifecycle, and snapshot persistence.
 - `apps/frontend/lib/retro-session.ts`: expiring cookie helpers.
-- `apps/frontend/lib/retro-history.ts`: versioned, validated, token-free localStorage snapshots.
-- `apps/frontend/lib/retro-export.ts`: Markdown and plain-text serialization.
+- `apps/frontend/lib/retro-history.ts`: versioned, validated, token-free localStorage snapshots. The `retro-history-v1` key format is retained; entries with archive version 1 voter IDs are migrated once into recipient-safe selections or anonymous discussion counts, then rewritten as archive v3.
+- `apps/frontend/lib/retro-protocol.ts`: complete nested server-event validation before React state or history updates.
+- `apps/frontend/lib/retro-export.ts`: Markdown and plain-text serialization. Exports use the same deliberate secret-free public-room allowlist as history; strict socket validation and archive sanitization remain separate responsibilities.
 
 ## Browser history and privacy
 

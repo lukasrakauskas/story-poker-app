@@ -84,6 +84,9 @@
     "packages/shared": {
       "name": "shared",
       "version": "0.0.0",
+      "dependencies": {
+        "zod": "^4.6.1",
+      },
       "devDependencies": {
         "tsconfig": "workspace:*",
         "typescript": "^6.0.3",
