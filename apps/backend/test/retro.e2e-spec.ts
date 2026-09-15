@@ -3,8 +3,8 @@ import { type INestApplication } from '@nestjs/common';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RetentionService } from '../src/collaboration/retention.service.js';
 import { RETRO_OFFLINE_RETENTION_MS } from '../src/retro/retro.service.js';
+import { RetroApplicationService } from '../src/retro/retro-application.service.js';
 import type { RetroCommand, RetroServerEvent } from 'shared/retrospective';
 import { AppModule } from '../src/app.module.js';
 
@@ -65,13 +65,6 @@ afterEach(async () => {
 
 describe('retrospective WebSocket route', () => {
   it('broadcasts offline membership expiry and rejects its stale credential', async () => {
-    const retention = app.get(RetentionService);
-    const schedule = retention.schedule.bind(retention);
-    const scheduled = vi
-      .spyOn(retention, 'schedule')
-      .mockImplementation((namespace, key, delay, expire) =>
-        schedule(namespace, key, namespace === 'retro' ? 50 : delay, expire),
-      );
     const owner = await connect();
     const guest = await connect();
     const created = state(
@@ -101,13 +94,12 @@ describe('retrospective WebSocket route', () => {
         (member) => member.id === joined.self.id,
       )?.connected,
     ).toBe(false);
-    const expired = state(await next(owner));
-    expect(scheduled).toHaveBeenCalledWith(
-      'retro',
-      expect.any(String),
-      RETRO_OFFLINE_RETENTION_MS,
-      expect.any(Function),
-    );
+    const expiryTime = Date.now() + RETRO_OFFLINE_RETENTION_MS;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(expiryTime);
+    const expiredEvent = next(owner);
+    await app.get(RetroApplicationService).expireRooms();
+    const expired = state(await expiredEvent);
+    clock.mockRestore();
     expect(expired.room.members).toHaveLength(1);
     expect(expired.room.notes[0]).toMatchObject({
       text: 'Keep attribution',

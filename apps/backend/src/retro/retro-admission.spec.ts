@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
-import { RetentionService } from '../collaboration/retention.service.js';
-import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import { RateLimitService } from '../transport/rate-limit.service.js';
 import { TransportMetricsService } from '../transport/transport-metrics.service.js';
 import { WebSocketAdmissionService } from '../transport/websocket-admission.service.js';
+import { InMemoryRetroRoomRepository } from './retro-room.repository.js';
 import { RetroApplicationService } from './retro-application.service.js';
 import { RetroService } from './retro.service.js';
 
@@ -27,8 +26,7 @@ function setup(
   );
   const retros = new RetroService(
     new ParticipantService(),
-    new RoomRegistryService(),
-    new RetentionService(),
+    new InMemoryRetroRoomRepository(),
   );
   return {
     application: new RetroApplicationService(
@@ -52,20 +50,20 @@ afterEach(() => {
 });
 
 describe('retrospective admission integration', () => {
-  it('rejects room creation when the process circuit is open', () => {
+  it('rejects room creation when the process circuit is open', async () => {
     const { application, metrics } = setup({
       globalCreateLimit: 1,
       globalCreateWindowMs: 1_000,
       createCircuitCooldownMs: 100,
     });
-    const created = application.execute('owner', {
+    const created = await application.execute('owner', {
       type: 'create',
       name: 'Alice',
       title: 'Retro',
     });
     expect(created.messages[0].event).toMatchObject({ event: 'retro-state' });
 
-    const rejected = application.execute('new-connection', {
+    const rejected = await application.execute('new-connection', {
       type: 'create',
       name: 'Bobby',
       title: 'Another',
@@ -83,20 +81,20 @@ describe('retrospective admission integration', () => {
     expect(metrics.gauge('retro.active_rooms', { namespace: 'retro' })).toBe(1);
   });
 
-  it('backs off a mutation before changing the room when broadcast pressure trips', () => {
+  it('backs off a mutation before changing the room when broadcast pressure trips', async () => {
     const { application } = setup({
       broadcastBudget: 1,
       broadcastWindowMs: 1_000,
       broadcastCircuitCooldownMs: 100,
     });
-    const created = application.execute('owner', {
+    const created = await application.execute('owner', {
       type: 'create',
       name: 'Alice',
       title: 'Retro',
     });
     expect(created.messages[0].event).toMatchObject({ event: 'retro-state' });
 
-    const rejected = application.execute('owner', {
+    const rejected = await application.execute('owner', {
       type: 'add-note',
       column: 'ideas',
       text: 'Must not be applied while busy',
@@ -106,8 +104,8 @@ describe('retrospective admission integration', () => {
       data: { code: 'rate-limit' },
     });
 
-    vi.advanceTimersByTime(100);
-    const accepted = application.execute('owner', {
+    await vi.advanceTimersByTimeAsync(100);
+    const accepted = await application.execute('owner', {
       type: 'add-note',
       column: 'ideas',
       text: 'Accepted after backoff',

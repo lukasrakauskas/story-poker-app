@@ -1,6 +1,7 @@
 import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RetentionService } from '../collaboration/retention.service.js';
+import { RoomAccessService } from '../collaboration/room-access.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { UserService } from './user.service.js';
 import type { Room, RoomResult, User, ClientUser } from './events.types.js';
@@ -21,8 +22,6 @@ const DEFAULT_CARD_SET = [
 ];
 const MAX_CARD_COUNT = 30;
 const MAX_CARD_LENGTH = 20;
-const MAX_PASSWORD_LENGTH = 100;
-
 // Empty rooms remain available briefly so participants can recover from a
 // transient network outage.
 export const EMPTY_ROOM_RETENTION_MS = 15 * 60 * 1000;
@@ -43,6 +42,7 @@ export class RoomService implements OnModuleDestroy {
     private readonly participants: ParticipantService,
     private readonly registry: RoomRegistryService,
     private readonly retention: RetentionService,
+    private readonly access: RoomAccessService,
   ) {}
 
   get(code: string) {
@@ -75,13 +75,11 @@ export class RoomService implements OnModuleDestroy {
     if (!normalizedCards) {
       return { error: { event: 'invalid-card-set', data: null } };
     }
-    if (password !== undefined && typeof password !== 'string') {
-      return { error: { event: 'wrong-room-password', data: null } };
-    }
-    if ((password?.length ?? 0) > MAX_PASSWORD_LENGTH) {
+    if (this.access.validate(password)) {
       return { error: { event: 'wrong-room-password', data: null } };
     }
 
+    const access = this.access.create(password);
     const user = this.users.create(id, normalizedName, 'mod');
     const room = this.registry.register<Room>(
       ROOM_NAMESPACE,
@@ -92,7 +90,7 @@ export class RoomService implements OnModuleDestroy {
         state: 'voting',
         cardSet: normalizedCards,
         results: {},
-        password: password || null,
+        access,
       }),
     );
     if (!room) throw new Error('Poker room registry rejected creation');
@@ -107,7 +105,7 @@ export class RoomService implements OnModuleDestroy {
   ): RoomResult<Membership> {
     const room = this.get(code);
     if (!room) return { error: { event: 'room-not-found', data: null } };
-    if (room.password !== null && room.password !== password) {
+    if (!this.access.verify(room.access, password)) {
       return { error: { event: 'wrong-room-password', data: null } };
     }
     const normalizedName = this.users.normalizeName(name);
@@ -313,7 +311,7 @@ export class RoomService implements OnModuleDestroy {
       state: room.state,
       cardSet: room.cardSet,
       results: room.results,
-      requiresPassword: room.password !== null,
+      requiresPassword: room.access.requiresPassword,
     };
   }
 

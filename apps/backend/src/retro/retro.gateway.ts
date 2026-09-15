@@ -12,8 +12,6 @@ import {
 import { WebSocket, type Server } from 'ws';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import { RateLimitService } from '../transport/rate-limit.service.js';
-import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
-import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
 import {
   ADMISSION_CLOSE_CODE,
   ADMISSION_CLOSE_REASON,
@@ -21,12 +19,14 @@ import {
   WebSocketAdmissionService,
 } from '../transport/websocket-admission.service.js';
 import { TransportMetricsService } from '../transport/transport-metrics.service.js';
+import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
+import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
 import { verifyWebSocketClient } from '../transport/websocket-origin-policy.js';
 import {
   RETRO_APPLICATION_NAMESPACE,
   RetroApplicationService,
 } from './retro-application.service.js';
-import { retroCommandSchema } from './retro.schema.js';
+import { retroCommandMessageSchema } from './retro.schema.js';
 import { RetroError } from './retro.service.js';
 
 @WebSocketGateway({
@@ -68,8 +68,17 @@ export class RetroGateway
     this.heartbeat.start(RETRO_APPLICATION_NAMESPACE, {
       interval: 30_000,
       probe: { type: 'ping' },
-      onTimeout: (socket) => this.handleDisconnect(socket),
-      onTick: () => this.transport.dispatch(this.application.expireRooms()),
+      onTimeout: (socket) => {
+        void this.handleDisconnect(socket).catch(() => undefined);
+      },
+      onTick: () => {
+        void this.application
+          .expireRooms()
+          .then((applicationResult) =>
+            this.transport.dispatch(applicationResult),
+          )
+          .catch(() => undefined);
+      },
     });
   }
 
@@ -84,19 +93,19 @@ export class RetroGateway
     this.ensureConnection(socket, request);
   }
 
-  handleDisconnect(socket: WebSocket) {
+  async handleDisconnect(socket: WebSocket) {
     const connectionId = this.transport.id(socket);
     this.heartbeat.unregister(RETRO_APPLICATION_NAMESPACE, socket);
     if (connectionId) {
       this.rateLimits.release(RETRO_APPLICATION_NAMESPACE, connectionId);
       this.admission.release(connectionId);
-      this.transport.dispatch(this.application.disconnect(connectionId));
+      this.transport.dispatch(await this.application.disconnect(connectionId));
     }
     this.transport.unregister(socket);
   }
 
   @SubscribeMessage('retro-command')
-  onCommand(
+  async onCommand(
     @ConnectedSocket() socket: WebSocket,
     @MessageBody() data: unknown,
   ) {
@@ -127,9 +136,9 @@ export class RetroGateway
         ),
       );
     }
-    const passwordAttempt = isPasswordAttempt(data);
+
     if (
-      passwordAttempt &&
+      isPasswordAttempt(data) &&
       !this.admission.consumeOperation(
         RETRO_APPLICATION_NAMESPACE,
         connectionId,
@@ -147,7 +156,8 @@ export class RetroGateway
         ),
       );
     }
-    const command = retroCommandSchema.safeParse(data);
+
+    const command = retroCommandMessageSchema.safeParse(data);
     if (!command.success) {
       return this.transport.dispatch(
         this.application.reject(
@@ -160,6 +170,7 @@ export class RetroGateway
         ),
       );
     }
+
     const operation = entryOperation(command.data.type);
     if (
       operation &&
@@ -174,16 +185,18 @@ export class RetroGateway
           connectionId,
           new RetroError(
             'rate-limit',
-            'Too many attempts. Wait a moment and try again.',
+            'Too many attempts. Wait a moment before trying again.',
           ),
           requestId,
         ),
       );
     }
-    const applicationResult = this.application.execute(
+
+    const { requestId: parsedRequestId, ...commandData } = command.data;
+    const applicationResult = await this.application.execute(
       connectionId,
-      command.data,
-      requestId,
+      commandData,
+      parsedRequestId ?? requestId,
     );
     if (operation && hasStateFor(applicationResult, connectionId))
       this.admission.authenticate(connectionId);
@@ -223,8 +236,6 @@ function entryOperation(
   return;
 }
 
-// Keep this runtime check compatible with the protected-room command fields
-// introduced by #84, while the current base still has no password field.
 function isPasswordAttempt(data: unknown): boolean {
   if (typeof data !== 'object' || data === null) return false;
   if (!('type' in data) || (data.type !== 'create' && data.type !== 'join'))
@@ -233,7 +244,7 @@ function isPasswordAttempt(data: unknown): boolean {
 }
 
 function hasStateFor(
-  applicationResult: ReturnType<RetroApplicationService['execute']>,
+  applicationResult: Awaited<ReturnType<RetroApplicationService['execute']>>,
   connectionId: string,
 ): boolean {
   return applicationResult.messages.some((message) => {
