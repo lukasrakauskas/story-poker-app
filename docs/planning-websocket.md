@@ -45,3 +45,10 @@ retention scheduling come from the domain-neutral `CollaborationModule` also use
 by retrospectives. Poker supplies its own five-minute offline-participant and
 15-minute empty-room retention policies; votes, card sets, avatars, passwords,
 and wire response names remain Poker-specific.
+
+## Application and transport boundary
+
+- `apps/backend/src/poker/poker.gateway.ts` is the Nest/WebSocket controller. It validates command DTOs, delegates one application use case, and applies transport results; the old `events.gateway.ts` and `EventsModule` have been removed.
+- `PokerApplicationService` owns room/session orchestration and returns explicit requester responses, recipient-addressed events, and connection-close effects without importing `WebSocket`.
+- `apps/backend/src/transport` owns socket registration/serialization, heartbeat policy, and keyed rate limits. `ConnectionRegistryService` owns connection replacement and audience lookup by opaque connection ID.
+- Poker domain transitions remain in `RoomService`. Application-service tests exercise use cases without sockets, small gateway tests cover DTO/transport delegation, and transport adapter tests cover serialization, close effects, heartbeat, and throttling.

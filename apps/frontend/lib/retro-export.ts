@@ -1,5 +1,28 @@
-import type { RetroRoom } from "shared/retrospective";
+import { actionOwnerLabel, type RetroRoom } from "shared/retrospective";
 import { publicRetro } from "./retro-history";
+import { retroPriorities, priorityLabel } from "shared/retro-priorities";
+
+function rankedLines(room: RetroRoom, markdown: boolean): string[] {
+  const escape = markdown ? escapeMarkdown : (text: string) => text;
+  const lines = [
+    "",
+    markdown ? "## Discussion priorities" : "Discussion priorities",
+  ];
+  for (const target of retroPriorities(room)) {
+    lines.push(
+      "",
+      `${markdown ? "### " : ""}${"group" in target ? escape(target.group.title) : priorityLabel(target)} · ${target.voteCount ?? 0} votes`
+    );
+    if ("group" in target) lines.push(priorityLabel(target));
+    const notes =
+      "group" in target
+        ? room.notes.filter((note) => note.groupId === target.id)
+        : [target.note];
+    for (const note of notes)
+      lines.push(`- ${escape(note.text)} — ${escape(note.authorName)}`);
+  }
+  return lines;
+}
 
 const columns = [
   { id: "went-well", title: "Went well" },
@@ -31,6 +54,9 @@ export function roomAsMarkdown(
     `- Room: ${escapeMarkdown(snapshot.code)}`,
     `- Phase: ${escapeMarkdown(snapshot.phase)}`,
     `- Expires: ${new Date(snapshot.expiresAt).toISOString()}`,
+    ...(snapshot.closedAt !== null
+      ? [`- Completed: ${new Date(snapshot.closedAt).toISOString()}`]
+      : []),
     "",
     "## Participants",
     ...snapshot.members.map(
@@ -38,17 +64,37 @@ export function roomAsMarkdown(
         `- ${escapeMarkdown(member.name)}${member.moderator ? " (moderator)" : ""}`
     ),
   ];
-  for (const column of columns) {
-    lines.push("", `## ${column.title}`);
-    for (const note of snapshot.notes
-      .filter((item) => item.column === column.id)
-      .sort((a, b) => b.voterIds.length - a.voterIds.length)) {
-      const author =
-        snapshot.members.find((member) => member.id === note.authorId)?.name ??
-        "Former member";
-      lines.push(
-        `- **${note.voterIds.length} votes** · ${escapeMarkdown(note.text)} — ${escapeMarkdown(author)}`
-      );
+  if (snapshot.phase === "discuss" || snapshot.phase === "closed") {
+    lines.push(...rankedLines(snapshot, true));
+  } else {
+    if (snapshot.groups.length) {
+      lines.push("", "## Themes");
+      for (const group of [...snapshot.groups].sort(
+        (a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1)
+      )) {
+        const votes =
+          group.voteCount === null ? "" : ` · ${group.voteCount} votes`;
+        lines.push("", `### ${escapeMarkdown(group.title)}${votes}`);
+        for (const note of snapshot.notes.filter(
+          (item) => item.groupId === group.id
+        ))
+          lines.push(
+            `- ${escapeMarkdown(note.text)} — ${escapeMarkdown(note.authorName)}`
+          );
+      }
+    }
+    for (const column of columns) {
+      lines.push("", `## ${column.title}`);
+      for (const note of snapshot.notes
+        .filter((item) => !item.groupId && item.column === column.id)
+        .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))) {
+        const author = note.authorName;
+        const votes =
+          note.voteCount === null ? "" : `**${note.voteCount} votes** · `;
+        lines.push(
+          `- ${votes}${escapeMarkdown(note.text)} — ${escapeMarkdown(author)}`
+        );
+      }
     }
   }
   lines.push(
@@ -56,7 +102,7 @@ export function roomAsMarkdown(
     "## Action items",
     ...snapshot.actions.map(
       (action) =>
-        `- [${action.done ? "x" : " "}] ${escapeMarkdown(action.text)} — Owner: ${escapeMarkdown(action.owner || "Unassigned")}`
+        `- [${action.done ? "x" : " "}] ${escapeMarkdown(action.text)} — Owner: ${escapeMarkdown(actionOwnerLabel(action.owner))}`
     )
   );
   return `${lines.join("\n")}\n`;
@@ -68,21 +114,42 @@ export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
     snapshot.title,
     `Room: ${snapshot.code} | Phase: ${snapshot.phase}`,
     `Expires: ${new Date(snapshot.expiresAt).toISOString()}`,
+    ...(snapshot.closedAt !== null
+      ? [`Completed: ${new Date(snapshot.closedAt).toISOString()}`]
+      : []),
     "",
     "People",
     ...snapshot.members.map(
       (member) => `- ${member.name}${member.moderator ? " (moderator)" : ""}`
     ),
   ];
-  for (const column of columns) {
-    lines.push("", column.title);
-    for (const note of snapshot.notes
-      .filter((item) => item.column === column.id)
-      .sort((a, b) => b.voterIds.length - a.voterIds.length)) {
-      const author =
-        snapshot.members.find((member) => member.id === note.authorId)?.name ??
-        "Former member";
-      lines.push(`- [${note.voterIds.length} votes] ${note.text} — ${author}`);
+  if (snapshot.phase === "discuss" || snapshot.phase === "closed") {
+    lines.push(...rankedLines(snapshot, false));
+  } else {
+    if (snapshot.groups.length) {
+      lines.push("", "Themes");
+      for (const group of [...snapshot.groups].sort(
+        (a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1)
+      )) {
+        const votes =
+          group.voteCount === null ? "" : ` [${group.voteCount} votes]`;
+        lines.push("", `${group.title}${votes}`);
+        for (const note of snapshot.notes.filter(
+          (item) => item.groupId === group.id
+        ))
+          lines.push(`- ${note.text} — ${note.authorName}`);
+      }
+    }
+    for (const column of columns) {
+      lines.push("", column.title);
+      for (const note of snapshot.notes
+        .filter((item) => !item.groupId && item.column === column.id)
+        .sort((a, b) => (b.voteCount ?? -1) - (a.voteCount ?? -1))) {
+        const author = note.authorName;
+        const votes =
+          note.voteCount === null ? "" : `[${note.voteCount} votes] `;
+        lines.push(`- ${votes}${note.text} — ${author}`);
+      }
     }
   }
   lines.push(
@@ -90,7 +157,7 @@ export function roomAsText(room: RetroRoom, viewerId?: string | null): string {
     "Action items",
     ...snapshot.actions.map(
       (action) =>
-        `- [${action.done ? "x" : " "}] ${action.text} — ${action.owner || "Unassigned"}`
+        `- [${action.done ? "x" : " "}] ${action.text} — ${actionOwnerLabel(action.owner)}`
     )
   );
   return lines.join("\n");

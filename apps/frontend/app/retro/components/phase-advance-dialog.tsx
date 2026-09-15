@@ -20,9 +20,14 @@ const confirmationCopy: Record<
   { title: string; description: string }
 > = {
   write: {
+    title: "Reveal notes for grouping?",
+    description:
+      "Notes will be locked and revealed to everyone. The team cannot return to private writing.",
+  },
+  group: {
     title: "Start voting?",
     description:
-      "Notes will be locked for everyone. The team cannot return to writing.",
+      "Themes will be locked for everyone. The team cannot return to grouping.",
   },
   vote: {
     title: "Start discussion?",
@@ -40,11 +45,15 @@ export function PhaseAdvanceDialog({
   phase,
   label,
   disabled,
+  notReadyNames,
+  hasUnsentDraft,
   onConfirm,
 }: {
   phase: Exclude<RetroPhase, "closed">;
   label: string;
   disabled: boolean;
+  notReadyNames: string[];
+  hasUnsentDraft: boolean;
   onConfirm: () => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
@@ -60,6 +69,19 @@ export function PhaseAdvanceDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{copy.title}</AlertDialogTitle>
           <AlertDialogDescription>{copy.description}</AlertDialogDescription>
+          {phase === "write" && hasUnsentDraft && (
+            <p role="alert" className="text-sm font-medium text-destructive">
+              You have an unsent note draft. Advancing now will make it
+              uneditable and it will not be shared with the room.
+            </p>
+          )}
+          {(phase === "write" || phase === "vote") &&
+            notReadyNames.length > 0 && (
+              <p role="alert" className="text-sm font-medium">
+                Not ready: {notReadyNames.join(", ")}. Advancing now will end
+                this phase for them.
+              </p>
+            )}
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={submitting}>Cancel</AlertDialogCancel>

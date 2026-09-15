@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { RetroPhase } from "shared/retrospective";
+import type { RetroColumn, RetroPhase } from "shared/retrospective";
+import { Button } from "ui/components/button";
 import { RetroProvider, useRetro } from "./retro-provider";
 import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
+import { NoteGrouping } from "./note-grouping";
 import { ActionItems } from "./action-items";
+import { MobileActions, useCompactDiscussion } from "./mobile-actions";
 import { RoomDetails } from "./room-details";
 import { PhaseAdvanceDialog } from "./phase-advance-dialog";
 import { RetroExport } from "./retro-export";
@@ -21,14 +24,21 @@ const phases: {
     id: "write",
     label: "Write",
     description:
-      "Write independently. Only you can see your notes during this phase. Starting voting reveals every note to the team at the same time.",
+      "Write independently. Only you can see your notes during this phase. Revealing the board shows every note to the team at the same time.",
+    next: "Reveal and group notes",
+  },
+  {
+    id: "group",
+    label: "Group",
+    description:
+      "Review the revealed board. The moderator can organize related notes into themes before voting begins.",
     next: "Start voting",
   },
   {
     id: "vote",
     label: "Vote",
     description:
-      "Choose your priorities. Three votes per person, one per note. Click a voted note again to remove your vote.",
+      "Choose your priorities. Three votes per person, one per theme or ungrouped note. Totals stay hidden until discussion; click a voted target again to remove your vote.",
     next: "Start discussion",
   },
   {
@@ -66,7 +76,9 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     cookieSaved,
     historySaved,
   } = useRetro();
+  const compactDiscussion = useCompactDiscussion();
   const [now, setNow] = useState<number | null>(null);
+  const [draftColumns, setDraftColumns] = useState<RetroColumn[]>([]);
   useEffect(() => {
     // Synchronize the browser clock after hydration, then keep the expiry boundary current.
     // oxlint-disable-next-line react/set-state-in-effect
@@ -78,7 +90,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
   const expired =
     error?.code === "room-expired" ||
     !!(room && now !== null && now >= room.expiresAt);
-  const invalid = error?.code === "invalid-session";
+  const removed = error?.code === "removed";
+  const invalid = error?.code === "invalid-session" || removed;
   const disabled =
     connection !== "connected" ||
     pending ||
@@ -86,15 +99,23 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     invalid ||
     room?.phase === "closed" ||
     !selfId;
-  const moderator = !!room?.members.find((member) => member.id === selfId)
-    ?.moderator;
+  const self = room?.members.find((member) => member.id === selfId);
+  const moderator = !!self?.moderator;
   const current = phases.find((phase) => phase.id === room?.phase);
+  const readinessPhase = room?.phase === "write" || room?.phase === "vote";
+  const activeMembers = readinessPhase
+    ? (room?.members ?? []).filter((member) => member.connected)
+    : [];
+  const readyMembers = activeMembers.filter((member) => member.ready);
+  const notReadyNames = activeMembers
+    .filter((member) => !member.ready)
+    .map((member) => member.name);
   const remaining = room
     ? Math.max(
         0,
         3 -
-          room.notes.filter((note) => selfId && note.voterIds.includes(selfId))
-            .length
+          room.notes.filter((note) => note.votedBySelf).length -
+          room.groups.filter((group) => group.votedBySelf).length
       )
     : 3;
   const minutes =
@@ -132,19 +153,20 @@ function Workspace({ initialCode }: { initialCode?: string }) {
           </p>
           {invalid && (
             <p>
-              This connection no longer owns the session. The last snapshot is
-              read-only. If you reopened the room in another tab, use that tab
-              or reopen it here. If the saved credential was rejected, join with
-              a new name; the old notes and moderator role cannot be reclaimed.
+              {removed
+                ? "Your former session and reconnect credential are no longer valid. Its existing notes keep their author attribution, but this browser cannot mutate them."
+                : "This connection no longer owns the session. The last snapshot is read-only. If you reopened the room in another tab, use that tab or reopen it here. If the saved credential was rejected, join with a new name; the old notes and moderator role cannot be reclaimed."}
             </p>
           )}
           <a
             className="inline-block underline underline-offset-4"
             href={
-              invalid ? `/retro/${encodeURIComponent(room.code)}` : "/retro"
+              invalid && !removed
+                ? `/retro/${encodeURIComponent(room.code)}`
+                : "/retro"
             }
           >
-            {invalid ? "Reopen room" : "Start or join another room"}
+            {invalid && !removed ? "Reopen room" : "Start or join another room"}
           </a>
         </div>
       )}
@@ -171,7 +193,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
             </div>
             <ol
               aria-label="Retrospective phases"
-              className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+              className="grid grid-cols-2 gap-2 sm:grid-cols-5"
             >
               {phases.map((phase, index) => (
                 <li
@@ -199,6 +221,41 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                     {remaining} of 3 votes remaining
                   </output>
                 )}
+                {readinessPhase && self && (
+                  <div className="flex flex-wrap items-center gap-2 pt-2">
+                    <Button
+                      size="sm"
+                      variant={self.ready ? "secondary" : "outline"}
+                      disabled={
+                        disabled ||
+                        (room.phase === "write" &&
+                          !self.ready &&
+                          draftColumns.length > 0)
+                      }
+                      onClick={() => void send({ type: "toggle-ready" })}
+                    >
+                      {self.ready
+                        ? "Mark as not ready"
+                        : room.phase === "write"
+                          ? "Mark writing done"
+                          : "Mark voting done"}
+                    </Button>
+                    {room.phase === "write" &&
+                      !self.ready &&
+                      draftColumns.length > 0 && (
+                        <span className="text-xs font-medium text-destructive">
+                          Submit or clear your note drafts before marking
+                          writing done.
+                        </span>
+                      )}
+                  </div>
+                )}
+                {readinessPhase && moderator && (
+                  <output className="block text-sm font-medium">
+                    {readyMembers.length} of {activeMembers.length} active
+                    participants ready
+                  </output>
+                )}
                 {!moderator && room.phase !== "closed" && (
                   <p className="text-xs text-muted-foreground">
                     The moderator moves the team to the next phase.
@@ -210,7 +267,13 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                   phase={room.phase}
                   label={current.next}
                   disabled={disabled}
-                  onConfirm={() => send({ type: "advance" })}
+                  notReadyNames={notReadyNames}
+                  hasUnsentDraft={draftColumns.length > 0}
+                  onConfirm={async () => {
+                    const success = await send({ type: "advance" });
+                    if (success) setDraftColumns([]);
+                    return success;
+                  }}
                 />
               )}
             </div>
@@ -231,12 +294,38 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               phase={room.phase}
             />
             <div className="order-2 min-w-0 space-y-6 xl:col-start-1 xl:row-span-2 xl:row-start-1">
-              <NoteBoard
-                room={room}
-                selfId={selfId}
-                disabled={disabled}
-                send={send}
-              />
+              {room.phase === "discuss" && compactDiscussion && (
+                <MobileActions
+                  room={room}
+                  moderator={moderator}
+                  disabled={disabled}
+                  send={send}
+                />
+              )}
+              {room.phase === "group" ? (
+                <NoteGrouping
+                  room={room}
+                  moderator={moderator}
+                  disabled={disabled}
+                  send={send}
+                />
+              ) : (
+                <NoteBoard
+                  room={room}
+                  selfId={selfId}
+                  disabled={disabled}
+                  send={send}
+                  onDraftChange={(column, hasDraft) =>
+                    setDraftColumns((currentDrafts) =>
+                      hasDraft
+                        ? currentDrafts.includes(column)
+                          ? currentDrafts
+                          : [...currentDrafts, column]
+                        : currentDrafts.filter((item) => item !== column)
+                    )
+                  }
+                />
+              )}
               {room.phase === "closed" && (
                 <RetroExport room={room} selfId={selfId} />
               )}
@@ -245,7 +334,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               aria-label="Room information and actions"
               className="order-3 space-y-4 xl:col-start-2 xl:row-start-2"
             >
-              {(room.phase === "discuss" || room.phase === "closed") && (
+              {((room.phase === "discuss" && !compactDiscussion) ||
+                room.phase === "closed") && (
                 <ActionItems
                   room={room}
                   moderator={moderator}
@@ -253,7 +343,12 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                   send={send}
                 />
               )}
-              <RoomDetails room={room} selfId={selfId} />
+              <RoomDetails
+                room={room}
+                selfId={selfId}
+                disabled={disabled}
+                send={send}
+              />
             </aside>
           </div>
         </>

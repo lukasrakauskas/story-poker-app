@@ -6,11 +6,53 @@ export const RETRO_HISTORY_CHANGED = "retro-history-changed";
 
 // Parse both server snapshots and local data with an allowlist. Private session
 // fields (including future additions) must never enter the archive or exports.
-const roomSchema = z.object({
+const noteFields = {
+  id: z.string(),
+  authorId: z.string(),
+  // Older archives derive this stable display snapshot from their member list.
+  authorName: z.string().max(30).default("Former member"),
+  column: z.enum(["went-well", "improve", "ideas"]),
+  text: z.string().max(1000),
+  groupId: z.string().nullable().default(null),
+};
+const groupSchema = z.object({
+  id: z.string(),
+  title: z.string().max(100),
+  voteCount: z.number().int().min(0).max(30).nullable(),
+  votedBySelf: z.boolean(),
+});
+const actionOwnerSchema = z.union([
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("unassigned") }),
+    z.object({
+      kind: z.literal("participant"),
+      participantId: z.string(),
+      name: z.string().max(30),
+    }),
+    z.object({ kind: z.literal("external"), name: z.string().max(60) }),
+  ]),
+  // Legacy free-text owners must not be guessed into participant identities.
+  z
+    .string()
+    .max(60)
+    .transform((name) =>
+      name.trim()
+        ? { kind: "external" as const, name: name.trim() }
+        : { kind: "unassigned" as const }
+    ),
+]);
+const roomBaseSchema = z.object({
   code: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   title: z.string().max(100),
-  phase: z.enum(["write", "vote", "discuss", "closed"]),
+  phase: z.enum(["write", "group", "vote", "discuss", "closed"]),
   expiresAt: z.number().int().nonnegative().max(8.64e15),
+  closedAt: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(8.64e15)
+    .nullable()
+    .default(null),
   members: z
     .array(
       z.object({
@@ -18,51 +60,131 @@ const roomSchema = z.object({
         name: z.string().max(30),
         moderator: z.boolean(),
         connected: z.boolean(),
+        // Version 2 archives created before phase readiness omit this field.
+        ready: z.boolean().default(false),
       })
     )
     .max(30),
-  notes: z
-    .array(
-      z.object({
-        id: z.string(),
-        authorId: z.string(),
-        column: z.enum(["went-well", "improve", "ideas"]),
-        text: z.string().max(1000),
-        voterIds: z.array(z.string()).max(30),
-      })
-    )
-    .max(300),
+  groups: z.array(groupSchema).max(300).default([]),
   actions: z
     .array(
       z.object({
         id: z.string(),
         text: z.string().max(1000),
-        owner: z.string().max(60),
+        owner: actionOwnerSchema,
         done: z.boolean(),
       })
     )
     .max(100),
 });
+const roomSchema = roomBaseSchema.extend({
+  notes: z
+    .array(
+      z.object({
+        ...noteFields,
+        voteCount: z.number().int().min(0).max(30).nullable(),
+        votedBySelf: z.boolean(),
+      })
+    )
+    .max(300),
+});
+const legacyRoomSchema = roomBaseSchema.extend({
+  notes: z
+    .array(
+      z.object({
+        ...noteFields,
+        voterIds: z.array(z.string()).max(30),
+      })
+    )
+    .max(300),
+});
 const archiveSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(3),
   savedAt: z.number().int().nonnegative().max(8.64e15),
   viewerId: z.string().optional(),
   room: roomSchema,
 });
+const legacyArchiveSchema = z.object({
+  version: z.literal(1),
+  savedAt: z.number().int().nonnegative().max(8.64e15),
+  viewerId: z.string().optional(),
+  room: legacyRoomSchema,
+});
 export type SavedRetro = z.infer<typeof archiveSchema>;
+
+function parseArchive(value: unknown): {
+  entry: SavedRetro;
+  migrated: boolean;
+} {
+  const current = archiveSchema.safeParse(value);
+  if (current.success) return { entry: current.data, migrated: false };
+  const versionTwo = archiveSchema
+    .extend({ version: z.literal(2) })
+    .safeParse(value);
+  if (versionTwo.success)
+    return { entry: { ...versionTwo.data, version: 3 }, migrated: true };
+  const legacy = legacyArchiveSchema.parse(value);
+  const room = roomSchema.parse({
+    ...legacy.room,
+    notes: legacy.room.notes.map(({ voterIds, ...note }) => ({
+      ...note,
+      voteCount:
+        legacy.room.phase === "discuss" || legacy.room.phase === "closed"
+          ? voterIds.length
+          : null,
+      votedBySelf:
+        legacy.room.phase === "vote" &&
+        !!legacy.viewerId &&
+        voterIds.includes(legacy.viewerId),
+    })),
+  });
+  return {
+    entry: {
+      version: 3,
+      savedAt: legacy.savedAt,
+      ...(legacy.viewerId ? { viewerId: legacy.viewerId } : {}),
+      room,
+    },
+    migrated: true,
+  };
+}
 
 export function publicRetro(
   room: RetroRoom,
   viewerId?: string | null
 ): RetroRoom {
   const snapshot = roomSchema.parse(room);
-  if (snapshot.phase !== "write") return snapshot;
   return {
     ...snapshot,
-    // Fail closed when sanitizing a write-phase snapshot without its audience.
-    notes: viewerId
-      ? snapshot.notes.filter((note) => note.authorId === viewerId)
-      : [],
+    groups: snapshot.groups.map((group) => ({
+      ...group,
+      voteCount:
+        snapshot.phase === "discuss" || snapshot.phase === "closed"
+          ? (group.voteCount ?? 0)
+          : null,
+      votedBySelf: snapshot.phase === "vote" && group.votedBySelf,
+    })),
+    notes: snapshot.notes
+      // Fail closed when sanitizing a write-phase snapshot without its audience.
+      .filter(
+        (note) =>
+          snapshot.phase !== "write" ||
+          (!!viewerId && note.authorId === viewerId)
+      )
+      .map((note) => ({
+        ...note,
+        authorName:
+          note.authorName === "Former member"
+            ? (snapshot.members.find((member) => member.id === note.authorId)
+                ?.name ?? note.authorName)
+            : note.authorName,
+        voteCount:
+          !note.groupId &&
+          (snapshot.phase === "discuss" || snapshot.phase === "closed")
+            ? (note.voteCount ?? 0)
+            : null,
+        votedBySelf: snapshot.phase === "vote" && note.votedBySelf,
+      })),
   };
 }
 
@@ -81,19 +203,29 @@ export function saveRetroHistory(
     const previous = localStorage.getItem(key);
     if (previous) {
       try {
-        const parsed = archiveSchema.safeParse(JSON.parse(previous));
-        if (
-          parsed.success &&
-          parsed.data.room.phase === "closed" &&
-          snapshot.phase !== "closed"
-        )
+        const parsed = parseArchive(JSON.parse(previous));
+        if (parsed.entry.room.phase === "closed") {
+          if (parsed.migrated) {
+            try {
+              localStorage.setItem(
+                key,
+                JSON.stringify({
+                  ...parsed.entry,
+                  room: publicRetro(parsed.entry.room, parsed.entry.viewerId),
+                })
+              );
+            } catch {
+              /* Preserve the final entry even when it cannot be rewritten. */
+            }
+          }
           return true;
+        }
       } catch {
         /* Replace a corrupt entry with the fresh snapshot. */
       }
     }
     const entry: SavedRetro = {
-      version: 1,
+      version: 3,
       savedAt: Date.now(),
       ...(viewerId ? { viewerId } : {}),
       room: snapshot,
@@ -117,22 +249,25 @@ export function readRetroHistory(): {
       const key = localStorage.key(index);
       if (!key?.startsWith(RETRO_HISTORY_PREFIX)) continue;
       try {
-        const parsed = archiveSchema.parse(
+        const parsed = parseArchive(
           JSON.parse(localStorage.getItem(key) ?? "null")
         );
-        const entry = {
-          ...parsed,
-          room: publicRetro(parsed.room, parsed.viewerId),
+        const entry: SavedRetro = {
+          ...parsed.entry,
+          room: publicRetro(parsed.entry.room, parsed.entry.viewerId),
         };
         if (key !== retroHistoryKey(entry.room)) throw new Error("Invalid key");
         if (
-          parsed.room.phase === "write" &&
-          !parsed.viewerId &&
-          parsed.room.notes.length
+          parsed.migrated ||
+          JSON.stringify(parsed.entry) !== JSON.stringify(entry)
         ) {
-          // Pre-private-writing archives have no audience marker. Remove their
-          // notes in storage as well as in the rendered/exported snapshot.
-          localStorage.setItem(key, JSON.stringify(entry));
+          // Rewrite legacy entries without voter identities. Failure to rewrite
+          // must not hide an otherwise readable local snapshot.
+          try {
+            localStorage.setItem(key, JSON.stringify(entry));
+          } catch {
+            /* Storage may be read-only or full. */
+          }
         }
         entries.push(entry);
       } catch {
