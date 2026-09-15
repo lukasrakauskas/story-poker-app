@@ -62,11 +62,7 @@ export function verifyStoredRoomAccess(
   password?: unknown,
 ): boolean {
   if (!access?.requiresPassword) return true;
-  if (
-    !access.salt ||
-    !access.digest ||
-    validateRoomPassword(password) !== null
-  )
+  if (!access.salt || !access.digest || validateRoomPassword(password) !== null)
     return false;
   try {
     const candidate = scryptSync(
@@ -76,7 +72,8 @@ export function verifyStoredRoomAccess(
     );
     const expected = Buffer.from(access.digest, 'base64');
     return (
-      candidate.length === expected.length && timingSafeEqual(candidate, expected)
+      candidate.length === expected.length &&
+      timingSafeEqual(candidate, expected)
     );
   } catch {
     return false;

@@ -390,12 +390,7 @@ export class RedisRetroRoomRepository
         }
         // WATCH replaces the previous watch set, so keep the index watched
         // while validating the room keys and committing the capacity decision.
-        await this.client.watch([
-          this.indexKey,
-          ...activeKeys,
-          key,
-          tombstone,
-        ]);
+        await this.client.watch([this.indexKey, ...activeKeys, key, tombstone]);
 
         if (activeKeys.length >= options.maxRooms) {
           const transaction = this.client.multi();

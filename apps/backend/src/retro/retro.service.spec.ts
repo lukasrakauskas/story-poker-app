@@ -118,7 +118,9 @@ describe('room lifecycle and privacy', () => {
     const stored = await repository.get(protectedOwner.code);
     expect(stored?.access.requiresPassword).toBe(true);
     expect(stored?.access.digest).toEqual(expect.any(String));
-    expect(JSON.stringify(stored)).not.toContain('correct horse battery staple');
+    expect(JSON.stringify(stored)).not.toContain(
+      'correct horse battery staple',
+    );
     expect(await restarted.snapshot(protectedOwner)).toMatchObject({
       title: 'Private retro',
       requiresPassword: true,
@@ -137,10 +139,12 @@ describe('room lifecycle and privacy', () => {
       available: false,
       requiresPassword: false,
     });
-    expect(await restarted.snapshot(protectedOwner)).not.toHaveProperty('access');
-    expect(JSON.stringify(await restarted.snapshot(protectedOwner))).not.toContain(
-      'correct horse battery staple',
+    expect(await restarted.snapshot(protectedOwner)).not.toHaveProperty(
+      'access',
     );
+    expect(
+      JSON.stringify(await restarted.snapshot(protectedOwner)),
+    ).not.toContain('correct horse battery staple');
     creator.onModuleDestroy();
     restarted.onModuleDestroy();
     repository.onModuleDestroy();
