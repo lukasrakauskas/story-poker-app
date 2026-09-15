@@ -46,8 +46,17 @@ export class RetroGateway
     this.heartbeat.start(RETRO_APPLICATION_NAMESPACE, {
       interval: 30_000,
       probe: { type: 'ping' },
-      onTimeout: (socket) => this.handleDisconnect(socket),
-      onTick: () => this.transport.dispatch(this.application.expireRooms()),
+      onTimeout: (socket) => {
+        void this.handleDisconnect(socket).catch(() => undefined);
+      },
+      onTick: () => {
+        void this.application
+          .expireRooms()
+          .then((applicationResult) =>
+            this.transport.dispatch(applicationResult),
+          )
+          .catch(() => undefined);
+      },
     });
   }
 
@@ -62,18 +71,18 @@ export class RetroGateway
     this.heartbeat.register(RETRO_APPLICATION_NAMESPACE, socket, true);
   }
 
-  handleDisconnect(socket: WebSocket) {
+  async handleDisconnect(socket: WebSocket) {
     const connectionId = this.transport.id(socket);
     this.heartbeat.unregister(RETRO_APPLICATION_NAMESPACE, socket);
     if (connectionId) {
       this.rateLimits.release(RETRO_APPLICATION_NAMESPACE, connectionId);
-      this.transport.dispatch(this.application.disconnect(connectionId));
+      this.transport.dispatch(await this.application.disconnect(connectionId));
     }
     this.transport.unregister(socket);
   }
 
   @SubscribeMessage('retro-command')
-  onCommand(
+  async onCommand(
     @ConnectedSocket() socket: WebSocket,
     @MessageBody() data: unknown,
   ) {
@@ -118,7 +127,7 @@ export class RetroGateway
       );
     }
     return this.transport.dispatch(
-      this.application.execute(connectionId, command.data, requestId),
+      await this.application.execute(connectionId, command.data, requestId),
     );
   }
 }

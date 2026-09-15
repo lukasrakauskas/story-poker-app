@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RoomResult } from '../events/events.types.js';
 import { RoomService } from '../events/room.service.js';
 import { UserService } from '../events/user.service.js';
+import { InMemoryRetroRoomRepository } from '../retro/retro-room.repository.js';
 import { RetroService } from '../retro/retro.service.js';
 import { ParticipantService } from './participant.service.js';
 import { RetentionService } from './retention.service.js';
@@ -10,13 +11,13 @@ import { RoomRegistryService } from './room-registry.service.js';
 type Contract = {
   owner: { id: string; token: string };
   guest: { id: string; token: string };
-  names: () => string[];
-  isModerator: (id: string) => boolean;
-  isConnected: (id: string) => boolean;
-  disconnectGuest: () => void;
-  resumeGuest: () => { id: string; token: string };
-  duplicateNameIsRejected: () => boolean;
-  close: () => void;
+  names: () => Promise<string[]>;
+  isModerator: (id: string) => Promise<boolean>;
+  isConnected: (id: string) => Promise<boolean>;
+  disconnectGuest: () => Promise<void>;
+  resumeGuest: () => Promise<{ id: string; token: string }>;
+  duplicateNameIsRejected: () => Promise<boolean>;
+  close: () => Promise<void>;
 };
 
 function success<T>(result: RoomResult<T>): T {
@@ -25,10 +26,10 @@ function success<T>(result: RoomResult<T>): T {
   return result as T;
 }
 
-const domains: { name: string; setup: () => Contract }[] = [
+const domains: { name: string; setup: () => Promise<Contract> }[] = [
   {
     name: 'Planning Poker',
-    setup: () => {
+    setup: async () => {
       const participants = new ParticipantService();
       const rooms = new RoomService(
         new UserService(participants),
@@ -43,92 +44,93 @@ const domains: { name: string; setup: () => Contract }[] = [
       return {
         owner: { id: owner.id, token: owner.token },
         guest: { id: guest.id, token: guest.token },
-        names: () => room.users.map((participant) => participant.name),
-        isModerator: (id) =>
+        names: async () => room.users.map((participant) => participant.name),
+        isModerator: async (id) =>
           room.users.find((participant) => participant.id === id)?.role ===
           'moderator',
-        isConnected: (id) =>
+        isConnected: async (id) =>
           room.users.find((participant) => participant.id === id)?.connected ??
           false,
-        disconnectGuest: () => {
+        disconnectGuest: async () => {
           rooms.disconnect(room.code, guest.id);
         },
-        resumeGuest: () => {
+        resumeGuest: async () => {
           const resumed = success(rooms.reconnect(guest.token, room.code)).user;
           return { id: resumed.id, token: resumed.token };
         },
-        duplicateNameIsRejected: () =>
+        duplicateNameIsRejected: async () =>
           'error' in rooms.join(room.code, 'duplicate', ' bObBy '),
-        close: () => rooms.onModuleDestroy(),
+        close: async () => rooms.onModuleDestroy(),
       };
     },
   },
   {
     name: 'Retrospective',
-    setup: () => {
+    setup: async () => {
       const rooms = new RetroService(
         new ParticipantService(),
-        new RoomRegistryService(),
-        new RetentionService(),
+        new InMemoryRetroRoomRepository(),
       );
-      const owner = rooms.create('  Alice  ', 'Retro');
-      const guest = rooms.join(owner.code, '  Bobby  ');
+      const owner = await rooms.create('  Alice  ', 'Retro');
+      const guest = await rooms.join(owner.code, '  Bobby  ');
       return {
         owner,
         guest,
-        names: () =>
-          rooms.snapshot(owner).members.map((participant) => participant.name),
-        isModerator: (id) =>
-          rooms
-            .snapshot(owner)
-            .members.find((participant) => participant.id === id)?.moderator ??
-          false,
-        isConnected: (id) =>
-          rooms
-            .snapshot(owner)
-            .members.find((participant) => participant.id === id)?.connected ??
-          false,
-        disconnectGuest: () => rooms.disconnect(guest),
-        resumeGuest: () => rooms.resume(guest.code, guest.token),
-        duplicateNameIsRejected: () => {
+        names: async () =>
+          (await rooms.snapshot(owner)).members.map(
+            (participant) => participant.name,
+          ),
+        isModerator: async (id) =>
+          (await rooms.snapshot(owner)).members.find(
+            (participant) => participant.id === id,
+          )?.moderator ?? false,
+        isConnected: async (id) =>
+          (await rooms.snapshot(owner)).members.find(
+            (participant) => participant.id === id,
+          )?.connected ?? false,
+        disconnectGuest: async () => {
+          await rooms.disconnect(guest);
+        },
+        resumeGuest: async () => rooms.resume(guest.code, guest.token),
+        duplicateNameIsRejected: async () => {
           try {
-            rooms.join(owner.code, ' bObBy ');
+            await rooms.join(owner.code, ' bObBy ');
             return false;
           } catch {
             return true;
           }
         },
-        close: () => undefined,
+        close: async () => rooms.onModuleDestroy(),
       };
     },
   },
 ];
 
 describe.each(domains)('$name shared collaboration contract', ({ setup }) => {
-  it('normalizes unique names and assigns the same role and token guarantees', () => {
-    const room = setup();
+  it('normalizes unique names and assigns the same role and token guarantees', async () => {
+    const room = await setup();
     try {
-      expect(room.names()).toEqual(['Alice', 'Bobby']);
-      expect(room.duplicateNameIsRejected()).toBe(true);
+      expect(await room.names()).toEqual(['Alice', 'Bobby']);
+      expect(await room.duplicateNameIsRejected()).toBe(true);
       expect(room.owner.token).toHaveLength(32);
       expect(room.guest.token).toHaveLength(32);
       expect(room.guest.token).not.toBe(room.owner.token);
-      expect(room.isModerator(room.owner.id)).toBe(true);
-      expect(room.isModerator(room.guest.id)).toBe(false);
+      expect(await room.isModerator(room.owner.id)).toBe(true);
+      expect(await room.isModerator(room.guest.id)).toBe(false);
     } finally {
-      room.close();
+      await room.close();
     }
   });
 
-  it('retains a disconnected identity and restores it with the same token', () => {
-    const room = setup();
+  it('retains a disconnected identity and restores it with the same token', async () => {
+    const room = await setup();
     try {
-      room.disconnectGuest();
-      expect(room.isConnected(room.guest.id)).toBe(false);
-      expect(room.resumeGuest()).toEqual(room.guest);
-      expect(room.isConnected(room.guest.id)).toBe(true);
+      await room.disconnectGuest();
+      expect(await room.isConnected(room.guest.id)).toBe(false);
+      expect(await room.resumeGuest()).toEqual(room.guest);
+      expect(await room.isConnected(room.guest.id)).toBe(true);
     } finally {
-      room.close();
+      await room.close();
     }
   });
 });
