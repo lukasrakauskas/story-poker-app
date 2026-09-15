@@ -18,6 +18,7 @@ import type {
   WebSocketTransportEvent,
   WebSocketTransportEventMap,
 } from "../lib/websocket-transport";
+import { createRetroReconnectPolicy } from "../lib/retro-reconnect-policy";
 import { parseRetroRoomCode } from "../lib/retro-route";
 
 class FakeTimers implements RetroTimerStorage {
@@ -240,6 +241,11 @@ function setup(initialCode?: string) {
     navigation: { replaceRoom: () => undefined },
     connectionTimeoutMs: 100,
     requestTimeoutMs: 100,
+    reconnectPolicy: createRetroReconnectPolicy({
+      initialDelayMs: 1000,
+      maxDelayMs: 1000,
+      jitterRatio: 0,
+    }),
   });
   client.start();
   return { client, transport, sessions, history, timers };
@@ -446,6 +452,62 @@ test("forget uses the HTTP identity endpoint and clears only remembered state", 
       .map((call) => call.code),
     ["retro-room"]
   );
+});
+
+test("bounds automatic recovery and leaves manual retry available", async () => {
+  const context = setup();
+  clients.push(context.client);
+  context.transport.openSocket();
+  context.transport.message(stateEvent());
+  context.sessions.resumeFailure = {
+    code: "connection",
+    message: "Offline server",
+  };
+  context.transport.closeFromPeer();
+  for (let i = 0; i < 6; i++) {
+    context.timers.advance(1000);
+    await flush();
+  }
+  assert.equal(context.client.getSnapshot().recovery, "exhausted");
+  assert.equal(
+    context.sessions.calls.filter((call) => call.operation === "resume").length,
+    6
+  );
+  context.timers.advance(60000);
+  assert.equal(
+    context.sessions.calls.filter((call) => call.operation === "resume").length,
+    6
+  );
+  context.client.retry();
+  await flush();
+  assert.equal(
+    context.sessions.calls.filter((call) => call.operation === "resume").length,
+    7
+  );
+});
+
+test("ignores HTTP establishment completing after timeout or disposal", async () => {
+  const context = setup();
+  clients.push(context.client);
+  context.transport.openSocket();
+  let resolve!: (value: RetroSessionView) => void;
+  context.sessions.establish = () =>
+    new Promise((done) => {
+      resolve = done;
+    });
+  const pending = context.client.send({
+    type: "create",
+    name: "Alice",
+    title: "Late response",
+  });
+  context.timers.advance(100);
+  assert.equal(await pending, false);
+  resolve(view);
+  await flush();
+  assert.equal(context.transport.reconnectCalls, 0);
+  assert.equal(context.client.getSnapshot().room, null);
+  context.client.dispose();
+  assert.equal(context.timers.timeoutCount, 0);
 });
 
 test("keeps route parsing independent from the transport", () => {

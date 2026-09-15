@@ -91,7 +91,21 @@ export function useRetroSocket(initialCode?: string) {
 
   useEffect(() => {
     client.start();
-    return () => client.dispose();
+    const updateEnvironment = () =>
+      client.setEnvironment(
+        navigator.onLine,
+        document.visibilityState !== "hidden"
+      );
+    updateEnvironment();
+    window.addEventListener("online", updateEnvironment);
+    window.addEventListener("offline", updateEnvironment);
+    document.addEventListener("visibilitychange", updateEnvironment);
+    return () => {
+      window.removeEventListener("online", updateEnvironment);
+      window.removeEventListener("offline", updateEnvironment);
+      document.removeEventListener("visibilitychange", updateEnvironment);
+      client.dispose();
+    };
   }, [client]);
 
   const state = useSyncExternalStore(
@@ -105,6 +119,9 @@ export function useRetroSocket(initialCode?: string) {
     roomInfo: state.roomInfo,
     selfId: state.selfId,
     connection: state.connection,
+    reconnectAttempt: state.reconnectAttempt,
+    recovery: state.recovery,
+    terminal: state.phase === "terminal",
     pending: state.pendingRequestId !== null,
     error: state.error,
     send: client.send,

@@ -5,6 +5,11 @@ import type {
   RetroServerEvent,
   RetroSessionView,
 } from "shared/retrospective";
+import {
+  createRetroReconnectPolicy,
+  type RetroReconnectPolicy,
+} from "./retro-reconnect-policy";
+import type { RetroRecovery } from "./retro-session-state";
 import { parseRetroServerEvent } from "./retro-protocol";
 import {
   initialRetroSessionState,
@@ -73,6 +78,8 @@ export interface RetroSessionClientOptions {
   navigation: RetroNavigationAdapter;
   connectionTimeoutMs?: number;
   requestTimeoutMs?: number;
+  reconnectPolicy?: RetroReconnectPolicy;
+  maxReconnectAttempts?: number;
 }
 
 type PendingKind = "resume" | "mutation" | "inspect";
@@ -116,7 +123,13 @@ const INVALID_RESPONSE_FAILURE: RetroFailure = {
   code: "connection",
   message: "Received an invalid response. Retry to get a fresh room snapshot.",
 };
-const TERMINAL_CODES = new Set(["room-expired", "invalid-session", "removed"]);
+const TERMINAL_CODES = new Set([
+  "room-expired",
+  "invalid-session",
+  "session-required",
+  "session-replaced",
+  "removed",
+]);
 
 function isEntryCommand(
   command: RetroCommand
@@ -158,11 +171,19 @@ export class RetroSessionClient {
   private resumeRequired = false;
   private resumePrepared = false;
   private identityInspection = 0;
+  private reconnectTimer: unknown;
+  private stableTimer: unknown;
+  private online = true;
+  private visible = true;
+  private uncertainty: RetroFailure | null = null;
+  private readonly reconnectPolicy: RetroReconnectPolicy;
 
   constructor(private readonly options: RetroSessionClientOptions) {
     this.connectionTimeoutMs = options.connectionTimeoutMs ?? 15_000;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
     this.activeCode = options.initialCode ?? null;
+    this.reconnectPolicy =
+      options.reconnectPolicy ?? createRetroReconnectPolicy();
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -200,6 +221,7 @@ export class RetroSessionClient {
     this.started = false;
     this.notificationGeneration++;
     this.identityInspection++;
+    this.clearRecoveryTimers();
     this.scheduledNotificationGeneration = undefined;
     this.clearConnectionTimer();
     this.finishPending(false);
@@ -210,6 +232,13 @@ export class RetroSessionClient {
 
   retry = (): void => {
     if (!this.started || this.state.phase === "terminal") return;
+    this.clearRecoveryTimers();
+    if (this.state.recovery === "exhausted") this.reconnectPolicy.reset();
+    if (!this.online || !this.visible) {
+      this.scheduleRecovery();
+      return;
+    }
+    this.setRecovery("connecting");
     this.clearConnectionTimer();
     // A mutation that was not acknowledged is never replayed. An established
     // room is resumed through a fresh HTTP rotation after the socket opens.
@@ -217,6 +246,12 @@ export class RetroSessionClient {
     this.resumePrepared = false;
     const resuming = !!this.activeCode && this.resumeRequired;
     this.transition({ type: "retry", resuming });
+    if (resuming) {
+      // Rotate before the new handshake; opening with the stale cookie first
+      // would waste a connection and race its replacement.
+      void this.beginResume(this.activeCode!);
+      return;
+    }
     this.armConnectionTimer();
     if (!this.options.transport.reconnect())
       this.failConnection(CONFIGURATION_FAILURE);
@@ -239,6 +274,8 @@ export class RetroSessionClient {
     )
       return Promise.resolve(false);
 
+    if (command.type !== "inspect" && command.type !== "resume")
+      this.uncertainty = null;
     if (isEntryCommand(command)) return this.beginEstablish(command);
     if (command.type === "resume") return this.beginResume(command.code);
     return this.issue(
@@ -349,10 +386,21 @@ export class RetroSessionClient {
     this.failConnection(CONNECTION_FAILURE);
   };
 
-  private handleClose = (): void => {
+  private handleClose = (event: WebSocketTransportEventMap["close"]): void => {
     if (!this.started || this.state.phase === "terminal") return;
+    if (event.code === 4001 || event.code === 4003 || event.code === 4004) {
+      this.handleTerminalError({
+        code: event.code === 4003 ? "removed" : "invalid-session",
+        message:
+          event.code === 4001
+            ? "Your session was resumed in another connection."
+            : "This session was removed or forgotten. Join as someone else.",
+      });
+      return;
+    }
     this.clearConnectionTimer();
-    const hadPending = !!this.pendingRequest;
+    const hadPending = this.pendingRequest?.kind === "mutation";
+    if (hadPending) this.uncertainty = REQUEST_FAILURE;
     this.finishPending(false);
     if (this.activeCode && this.state.phase === "active")
       this.resumeRequired = true;
@@ -360,8 +408,9 @@ export class RetroSessionClient {
       type: "connection-failed",
       error: hadPending
         ? REQUEST_FAILURE
-        : (this.state.error ?? CONNECTION_FAILURE),
+        : (this.uncertainty ?? this.state.error ?? CONNECTION_FAILURE),
     });
+    this.scheduleRecovery();
   };
 
   private handleState(
@@ -392,6 +441,15 @@ export class RetroSessionClient {
       false
     );
     if (acknowledged && pending) this.finishPending(true, false);
+    if (this.uncertainty)
+      this.state = { ...this.state, error: this.uncertainty };
+    this.setRecovery("idle");
+    if (this.stableTimer === undefined)
+      this.stableTimer = this.options.timers.setTimeout(() => {
+        this.stableTimer = undefined;
+        this.reconnectPolicy.reset();
+        this.setRecovery("idle");
+      }, 30_000);
     this.notifySoon();
   }
 
@@ -437,6 +495,8 @@ export class RetroSessionClient {
     // that tab. HTTP rotation/forget has already made the old value unusable.
     this.finishPending(false);
     this.clearConnectionTimer();
+    this.clearRecoveryTimers();
+    this.setRecovery("idle");
     this.transition({
       type: "connection-failed",
       error,
@@ -585,10 +645,16 @@ export class RetroSessionClient {
   }
 
   private failPending(error: RetroFailure) {
+    if (TERMINAL_CODES.has(error.code)) {
+      this.handleTerminalError(error);
+      return;
+    }
+    if (this.pendingRequest?.kind === "mutation") this.uncertainty = error;
     this.finishPending(false);
     this.transition({ type: "server-error", error });
     this.transition({ type: "connection-failed", error });
     this.options.transport.close();
+    this.scheduleRecovery();
   }
 
   private finishPending(success: boolean, notify = true) {
@@ -653,9 +719,77 @@ export class RetroSessionClient {
   private failConnection(error: RetroFailure) {
     if (!this.started || this.state.phase === "terminal") return;
     this.clearConnectionTimer();
+    if (this.pendingRequest?.kind === "mutation")
+      this.uncertainty = REQUEST_FAILURE;
     this.finishPending(false);
-    this.transition({ type: "connection-failed", error });
+    this.transition({
+      type: "connection-failed",
+      error: this.uncertainty ?? error,
+    });
     this.options.transport.close();
+    if (error.code !== "configuration") this.scheduleRecovery();
+  }
+
+  setEnvironment = (online: boolean, visible: boolean): void => {
+    this.online = online;
+    this.visible = visible;
+    if (!this.started || this.state.phase === "terminal") return;
+    if (!online && this.state.room) this.failConnection(CONNECTION_FAILURE);
+    else if (this.state.connection === "disconnected") {
+      if (online && visible) this.retry();
+      else {
+        this.clearRecoveryTimers();
+        this.scheduleRecovery();
+      }
+    }
+  };
+
+  private setRecovery(recovery: RetroRecovery) {
+    this.state = {
+      ...this.state,
+      recovery,
+      reconnectAttempt: this.reconnectPolicy.attempt,
+    };
+    this.notify();
+  }
+
+  private clearRecoveryTimers() {
+    if (this.reconnectTimer !== undefined)
+      this.options.timers.clearTimeout(this.reconnectTimer);
+    if (this.stableTimer !== undefined)
+      this.options.timers.clearTimeout(this.stableTimer);
+    this.reconnectTimer = undefined;
+    this.stableTimer = undefined;
+  }
+
+  private scheduleRecovery() {
+    if (
+      !this.started ||
+      this.state.phase === "terminal" ||
+      !this.state.room ||
+      !this.resumeRequired
+    )
+      return;
+    if (this.stableTimer !== undefined)
+      this.options.timers.clearTimeout(this.stableTimer);
+    this.stableTimer = undefined;
+    if (this.reconnectTimer !== undefined) return;
+    if (!this.online || !this.visible) {
+      this.setRecovery(!this.online ? "offline" : "hidden");
+      return;
+    }
+    if (
+      this.reconnectPolicy.attempt >= (this.options.maxReconnectAttempts ?? 6)
+    ) {
+      this.setRecovery("exhausted");
+      return;
+    }
+    const attempt = this.reconnectPolicy.next();
+    this.setRecovery("scheduled");
+    this.reconnectTimer = this.options.timers.setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.retry();
+    }, attempt.delayMs);
   }
 
   private setRememberedStatus(status: RememberedIdentityStatus) {

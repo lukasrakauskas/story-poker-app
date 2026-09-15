@@ -1,5 +1,6 @@
 "use client";
 
+import type { RetroRecovery } from "../../../lib/retro-session-state";
 import type { RetroPhase } from "shared/retrospective";
 import { Button } from "ui/components/button";
 import {
@@ -18,6 +19,8 @@ export function RetroStatus({
   pending,
   error,
   retry,
+  reconnectAttempt,
+  recovery,
   historySaved,
   forgetSession,
   expired,
@@ -31,6 +34,8 @@ export function RetroStatus({
   pending: boolean;
   error: Failure | null;
   retry: () => void;
+  reconnectAttempt: number;
+  recovery: RetroRecovery;
   historySaved: boolean | null;
   forgetSession: () => Promise<boolean>;
   expired: boolean;
@@ -40,15 +45,20 @@ export function RetroStatus({
   phase: RetroPhase;
   className?: string;
 }) {
-  const status = pending
-    ? connection === "connecting"
-      ? "Restoring your session…"
-      : "Waiting for server confirmation…"
-    : connection === "connecting"
-      ? "Connecting to retrospective…"
-      : connection === "connected"
-        ? "Connected · changes sync live"
-        : "Disconnected · changes are disabled";
+  const status =
+    recovery === "offline"
+      ? "Offline · reconnects when online"
+      : recovery === "hidden"
+        ? "Reconnect paused while this tab is hidden"
+        : pending
+          ? connection === "connecting"
+            ? "Restoring your session…"
+            : "Waiting for server confirmation…"
+          : connection === "connecting"
+            ? "Connecting to retrospective…"
+            : connection === "connected"
+              ? "Connected · changes sync live"
+              : "Disconnected · changes are disabled";
 
   return (
     <Card className={`gap-4 py-4 ${className}`}>
@@ -75,6 +85,20 @@ export function RetroStatus({
           <Button size="sm" variant="outline" onClick={retry}>
             Retry connection
           </Button>
+        )}
+        {recovery === "scheduled" && (
+          <output>
+            Automatic reconnect scheduled · attempt {reconnectAttempt}
+          </output>
+        )}
+        {recovery === "connecting" && reconnectAttempt > 0 && (
+          <output>Automatic reconnect attempt {reconnectAttempt}…</output>
+        )}
+        {recovery === "exhausted" && (
+          <output>
+            Automatic reconnect paused after six attempts. Retry when your
+            connection is available.
+          </output>
         )}
         {error && !expired && (
           <p className="text-destructive">{error.message}</p>

@@ -4,6 +4,13 @@ import type {
   RetroRoomInfo,
 } from "shared/retrospective";
 
+export type RetroRecovery =
+  | "idle"
+  | "scheduled"
+  | "connecting"
+  | "offline"
+  | "hidden"
+  | "exhausted";
 export type RetroConnection = "connecting" | "connected" | "disconnected";
 export type RetroSessionPhase =
   | "anonymous"
@@ -26,6 +33,8 @@ export type RememberedIdentityStatus =
  */
 export interface RetroSessionState {
   connection: RetroConnection;
+  reconnectAttempt: number;
+  recovery: RetroRecovery;
   phase: RetroSessionPhase;
   room: RetroRoom | null;
   roomInfo: RetroRoomInfo | null;
@@ -40,6 +49,8 @@ export interface RetroSessionState {
 
 export const initialRetroSessionState: RetroSessionState = {
   connection: "connecting",
+  reconnectAttempt: 0,
+  recovery: "idle",
   phase: "anonymous",
   room: null,
   roomInfo: null,

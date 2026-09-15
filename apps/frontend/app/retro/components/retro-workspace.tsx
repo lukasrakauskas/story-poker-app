@@ -72,6 +72,9 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     pending,
     error,
     retry,
+    reconnectAttempt,
+    recovery,
+    terminal: sessionTerminal,
     send,
     forgetRememberedSession,
     historySaved,
@@ -92,6 +95,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     !!(room && now !== null && now >= room.expiresAt);
   const removed = error?.code === "removed";
   const invalid = error?.code === "invalid-session" || removed;
+  const terminal =
+    sessionTerminal || expired || invalid || room?.phase === "closed";
   const disabled =
     connection !== "connected" ||
     pending ||
@@ -288,7 +293,9 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               historySaved={historySaved}
               forgetSession={() => forgetRememberedSession(room.code)}
               expired={expired}
-              terminal={expired || invalid}
+              reconnectAttempt={reconnectAttempt}
+              recovery={recovery}
+              terminal={terminal}
               minutes={minutes}
               expiresAt={room.expiresAt}
               phase={room.phase}
