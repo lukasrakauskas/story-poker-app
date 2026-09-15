@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { RetroCommand } from 'shared/retrospective';
-import { participantNameSchema } from '../collaboration/participant.service.js';
+import { participantNameSchema } from 'shared/participant';
 
 const id = z.string().min(1).max(64);
 const text = z.string().trim().min(1).max(1000);

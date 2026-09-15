@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import { z } from 'zod';
+import {
+  normalizeParticipantName,
+  validateParticipantName,
+} from 'shared/participant';
 
 export type CollaborationRole = 'participant' | 'moderator';
 
@@ -12,21 +15,14 @@ export interface CollaborationParticipant {
   connected: boolean;
 }
 
-export const participantNameSchema = z
-  .string()
-  .trim()
-  .min(3, 'Name must be at least 3 characters after trimming spaces')
-  .max(30, 'Name must be at most 30 characters after trimming spaces');
-
 @Injectable()
 export class ParticipantService {
   normalizeName(name: unknown): string {
-    return typeof name === 'string' ? name.trim() : '';
+    return normalizeParticipantName(name);
   }
 
   validateName(name: unknown): string | null {
-    const parsed = participantNameSchema.safeParse(name);
-    return parsed.success ? null : parsed.error.format()._errors.join(', ');
+    return validateParticipantName(name);
   }
 
   create(
