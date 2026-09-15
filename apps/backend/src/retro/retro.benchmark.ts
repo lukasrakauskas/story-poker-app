@@ -1,287 +1,171 @@
 import { performance } from 'node:perf_hooks';
 import { WebSocket } from 'ws';
-import type { RetroRoom, RetroServerEvent } from 'shared/retrospective';
-import { materializeRetroState, type RetroCommand } from 'shared/retrospective';
-import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
+import {
+  materializeRetroState,
+  type RetroStateData,
+} from 'shared/retrospective';
 import { ParticipantService } from '../collaboration/participant.service.js';
-import { RoomRegistryService } from '../collaboration/room-registry.service.js';
-import { RetentionService } from '../collaboration/retention.service.js';
-import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
-import { RetroApplicationService } from './retro-application.service.js';
-import { RetroService, type RetroSession } from './retro.service.js';
+import { result } from '../transport/application-result.js';
+import { InMemoryRetroRoomRepository } from './retro-room.repository.js';
+import { RetroService } from './retro.service.js';
 
-type Fixture = {
+const ITERATIONS = 20;
+const WARMUP = 5;
+function stats(values: number[]) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return {
+    meanMs: +(values.reduce((a, b) => a + b, 0) / values.length).toFixed(3),
+    p95Ms: +sorted[Math.floor(sorted.length * 0.95)].toFixed(3),
+  };
+}
+
+async function run(size: {
   members: number;
   notes: number;
   groups: number;
   actions: number;
-};
-
-type BuiltFixture = {
-  application: RetroApplicationService;
-  retro: RetroService;
-  transport: WebSocketTransportService;
-  code: string;
-  sessions: RetroSession[];
-  sockets: FakeSocket[];
-  room: RetroRoom;
-};
-
-type FakeSocket = {
-  readyState: number;
-  sent: string[];
-  send(value: string): void;
-};
-
-const WARMUP = 10;
-const ITERATIONS = 50;
-const LONG_NOTE = 'A representative near-limit note '.padEnd(1000, 'x');
-const LONG_ACTION = 'A representative action '.padEnd(1000, 'a');
-
-function state(
-  result: ReturnType<RetroApplicationService['execute']>,
-  id: string,
-) {
-  const event = result.messages.find((message) => message.connectionId === id)
-    ?.event as RetroServerEvent | undefined;
-  if (!event || event.event !== 'retro-state')
-    throw new Error(`Expected a state for ${id}`);
-  return event.data;
-}
-
-function command(
-  application: RetroApplicationService,
-  connectionId: string,
-  value: RetroCommand,
-) {
-  return application.execute(connectionId, value);
-}
-
-function buildFixture(size: Fixture): BuiltFixture {
-  const retro = new RetroService(
-    new ParticipantService(),
-    new RoomRegistryService(),
-    new RetentionService(),
-  );
-  const application = new RetroApplicationService(
-    retro,
-    new ConnectionRegistryService(),
-    new ApplicationEventBus(),
-  );
+}) {
+  const repository = new InMemoryRetroRoomRepository();
+  const service = new RetroService(new ParticipantService(), repository);
   const transport = new WebSocketTransportService();
-  const sockets: FakeSocket[] = [];
-  const sessions: RetroSession[] = [];
-  const owner = state(
-    command(application, 'connection-0', {
-      type: 'create',
-      name: 'Alice',
-      title: 'Benchmark room',
-    }),
-    'connection-0',
-  );
-  const code = owner.room.code;
-  sessions.push({ code, ...owner.self });
-  sockets.push(registerSocket('connection-0'));
-
-  for (let index = 1; index < size.members; index++) {
-    const connectionId = `connection-${index}`;
-    const joined = state(
-      command(application, connectionId, {
-        type: 'join',
-        code,
-        name: `Member ${String(index).padStart(2, '0')}`,
-      }),
-      connectionId,
-    );
-    sessions.push({ code, ...joined.self });
-    sockets.push(registerSocket(connectionId));
-  }
-
-  for (let index = 0; index < size.notes; index++)
-    command(application, 'connection-0', {
-      type: 'add-note',
-      column:
-        index % 3 === 0 ? 'went-well' : index % 3 === 1 ? 'improve' : 'ideas',
-      text: `${LONG_NOTE.slice(0, 995)}${String(index).padStart(5, '0')}`,
+  try {
+    const owner = await service.create('Alice', 'Snapshot benchmark');
+    const sessions = [owner];
+    for (let i = 1; i < size.members; i++)
+      sessions.push(await service.join(owner.code, `Member ${i}`));
+    // Seed a valid near-limit committed domain record without measuring fixture setup.
+    await repository.update(owner.code, (room) => {
+      room.phase = 'discuss';
+      room.notes = Array.from({ length: size.notes }, (_, i) => ({
+        id: `note-${i}`,
+        authorId: owner.id,
+        authorName: 'Alice',
+        column: 'ideas' as const,
+        text: 'Useful retrospective feedback '.padEnd(1000, 'x'),
+        groupId: i < size.groups * 2 ? `group-${Math.floor(i / 2)}` : null,
+        voterIds: [],
+      }));
+      room.groups = Array.from({ length: size.groups }, (_, i) => ({
+        id: `group-${i}`,
+        title: 'Theme'.padEnd(100, 'x'),
+        voterIds: i < 3 ? sessions.map((s) => s.id) : [],
+      }));
+      room.actions = Array.from({ length: size.actions }, (_, i) => ({
+        id: `action-${i}`,
+        text: 'Follow up'.padEnd(1000, 'x'),
+        owner: { kind: 'unassigned' as const },
+        done: false,
+      }));
+      return { result: undefined };
     });
-
-  const revealed = state(
-    command(application, 'connection-0', { type: 'advance' }),
-    'connection-0',
-  );
-  const noteIds = revealed.room.notes.map((note) => note.id);
-  for (let index = 0; index < size.groups; index++)
-    command(application, 'connection-0', {
-      type: 'group-notes',
-      title: `${'Theme '.padEnd(100, 't').slice(0, 97)}${String(index).padStart(3, '0')}`,
-      noteIds: [noteIds[index * 2], noteIds[index * 2 + 1]],
-    });
-
-  command(application, 'connection-0', { type: 'advance' });
-  const voteTargets = state(
-    command(application, 'connection-0', { type: 'refresh' }),
-    'connection-0',
-  ).room;
-  const targetIds = [
-    ...voteTargets.groups.slice(0, 3).map((group) => group.id),
-    ...voteTargets.notes
-      .filter((note) => !note.groupId)
-      .slice(0, 3)
-      .map((note) => note.id),
-  ].slice(0, 3);
-  for (const session of sessions)
-    for (const id of targetIds)
-      command(application, `connection-${sessions.indexOf(session)}`, {
-        type: 'toggle-vote',
-        id,
+    const wire = new Map<string, string>();
+    for (const session of sessions)
+      transport.register(
+        {
+          readyState: WebSocket.OPEN,
+          send: (text: string) => wire.set(session.id, text),
+        } as unknown as WebSocket,
+        session.id,
+      );
+    const baselineProjection: number[] = [],
+      baselineSerialization: number[] = [];
+    const optimizedProjection: number[] = [],
+      optimizedSerialization: number[] = [];
+    let last: RetroStateData | undefined;
+    for (let i = -WARMUP; i < ITERATIONS; i++) {
+      await service.mutate(owner, { type: 'toggle-action', id: 'action-0' });
+      let start = performance.now();
+      const old: unknown[] = [];
+      for (const session of sessions)
+        old.push({
+          event: 'retro-state',
+          data: {
+            room: await service.snapshot(session),
+            self: { id: session.id },
+          },
+        });
+      const oldProjection = performance.now() - start;
+      start = performance.now();
+      for (const event of old) JSON.stringify(event);
+      const oldSerialization = performance.now() - start;
+      start = performance.now();
+      const projection = await service.prepareBroadcast(owner.code);
+      const messages = sessions.map((session) => {
+        const data = {
+          room: projection.room,
+          self: { id: session.id },
+          recipient: projection.recipient(session),
+          version: projection.version,
+        };
+        last = data;
+        return {
+          connectionId: session.id,
+          event: { event: 'retro-state', data },
+          serialization: {
+            type: 'retro-state' as const,
+            publicRoom: data.room,
+            self: data.self,
+            recipient: data.recipient,
+            version: data.version,
+          },
+        };
       });
-
-  command(application, 'connection-0', { type: 'advance' });
-  for (let index = 0; index < size.actions; index++)
-    command(application, 'connection-0', {
-      type: 'add-action',
-      text: `${LONG_ACTION.slice(0, 995)}${String(index).padStart(5, '0')}`,
-      owner: { kind: 'unassigned' },
-    });
-
-  const final = state(
-    command(application, 'connection-0', { type: 'refresh' }),
-    'connection-0',
-  );
-  return {
-    application,
-    retro,
-    transport,
-    code,
-    sessions,
-    sockets,
-    room: materializeRetroState(final),
-  };
-
-  function registerSocket(connectionId: string) {
-    const fake: FakeSocket = {
-      readyState: WebSocket.OPEN,
-      sent: [],
-      send(value) {
-        this.sent.push(value);
+      const newProjection = performance.now() - start;
+      start = performance.now();
+      transport.dispatch(result(undefined, messages));
+      const newSerialization = performance.now() - start;
+      if (i >= 0) {
+        baselineProjection.push(oldProjection);
+        baselineSerialization.push(oldSerialization);
+        optimizedProjection.push(newProjection);
+        optimizedSerialization.push(newSerialization);
+      }
+    }
+    return {
+      ...size,
+      materializedRoomBytes: Buffer.byteLength(
+        JSON.stringify(materializeRetroState(last!)),
+      ),
+      publicRoomBytes: Buffer.byteLength(JSON.stringify(last!.room)),
+      perRecipientWireBytes: Buffer.byteLength(wire.get(owner.id)!),
+      totalWireBytes: [...wire.values()].reduce(
+        (n, text) => n + Buffer.byteLength(text),
+        0,
+      ),
+      baseline: {
+        projection: stats(baselineProjection),
+        serialization: stats(baselineSerialization),
+      },
+      optimized: {
+        projection: stats(optimizedProjection),
+        serialization: stats(optimizedSerialization),
       },
     };
-    // The benchmark uses the same opaque IDs as the application result.
-    transport.register(fake as unknown as WebSocket, connectionId);
-    return fake;
+  } finally {
+    transport.onModuleDestroy();
+    service.onModuleDestroy();
+    repository.onModuleDestroy();
   }
 }
-
-function measureBaseline(fixture: BuiltFixture) {
-  const snapshotTimes: number[] = [];
-  const serializationTimes: number[] = [];
-  const events = () =>
-    fixture.sessions.map((session) => ({
-      event: 'retro-state',
-      data: {
-        room: fixture.retro.snapshot(session),
-        self: { id: session.id, token: session.token },
-        recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
-        version: 1,
-      },
-    }));
-  for (let index = 0; index < WARMUP; index++) events();
-  for (let index = 0; index < ITERATIONS; index++) {
-    const started = performance.now();
-    events();
-    snapshotTimes.push(performance.now() - started);
-  }
-  for (let index = 0; index < WARMUP; index++) JSON.stringify(events());
-  for (let index = 0; index < ITERATIONS; index++) {
-    const values = events();
-    const started = performance.now();
-    for (const event of values) JSON.stringify(event);
-    serializationTimes.push(performance.now() - started);
-  }
-  return {
-    snapshotMs: statistics(snapshotTimes),
-    serializationMs: statistics(serializationTimes),
-  };
-}
-
-function measureOptimized(fixture: BuiltFixture) {
-  const applicationTimes: number[] = [];
-  const transportTimes: number[] = [];
-  let lastResult: ReturnType<RetroApplicationService['execute']> | undefined;
-  const actionId = fixture.room.actions[0]?.id;
-  if (!actionId) throw new Error('Benchmark fixture did not create an action');
-  for (let index = 0; index < WARMUP; index++) {
-    lastResult = command(fixture.application, 'connection-0', {
-      type: 'toggle-action',
-      id: actionId,
-    });
-    fixture.transport.dispatch(lastResult);
-  }
-  for (let index = 0; index < ITERATIONS; index++) {
-    const applicationStarted = performance.now();
-    lastResult = command(fixture.application, 'connection-0', {
-      type: 'toggle-action',
-      id: actionId,
-    });
-    applicationTimes.push(performance.now() - applicationStarted);
-    const transportStarted = performance.now();
-    fixture.transport.dispatch(lastResult);
-    transportTimes.push(performance.now() - transportStarted);
-  }
-  if (!lastResult) throw new Error('Benchmark did not produce an update');
-  const sent = fixture.sockets.map((socket) => socket.sent.at(-1) ?? '');
-  const lastEvent = lastResult.messages[0].event as RetroServerEvent;
-  if (lastEvent.event !== 'retro-state')
-    throw new Error('Benchmark did not produce a state event');
-  return {
-    applicationMs: statistics(applicationTimes),
-    transportMs: statistics(transportTimes),
-    publicRoomBytes: Buffer.byteLength(JSON.stringify(lastEvent.data.room)),
-    wireBytes: Buffer.byteLength(sent[0]),
-    totalWireBytes: sent.reduce(
-      (total, value) => total + Buffer.byteLength(value),
-      0,
-    ),
-  };
-}
-
-function statistics(values: number[]) {
-  const sorted = [...values].sort((left, right) => left - right);
-  return {
-    average: round(
-      values.reduce((total, value) => total + value, 0) / values.length,
-    ),
-    p95: round(sorted[Math.floor(sorted.length * 0.95)]),
-  };
-}
-
-function round(value: number) {
-  return Number(value.toFixed(3));
-}
-
-function run(size: Fixture) {
-  const fixture = buildFixture(size);
-  // materializedRoomBytes is the room a browser reconstructs; the optimized
-  // wire metrics separately report the shared public payload.
-  const result = measureOptimized(fixture);
-  const baseline = measureBaseline(fixture);
-  fixture.application.onModuleDestroy();
-  return {
-    ...size,
-    materializedRoomBytes: Buffer.byteLength(JSON.stringify(fixture.room)),
-    baseline,
-    optimized: result,
-  };
-}
-
 console.log(
   JSON.stringify(
     {
+      storage: 'in-memory (Redis network latency excluded)',
       iterations: ITERATIONS,
       warmup: WARMUP,
-      representative: run({ members: 15, notes: 120, groups: 20, actions: 30 }),
-      nearLimit: run({ members: 30, notes: 300, groups: 150, actions: 100 }),
+      representative: await run({
+        members: 15,
+        notes: 120,
+        groups: 20,
+        actions: 30,
+      }),
+      nearLimit: await run({
+        members: 30,
+        notes: 300,
+        groups: 150,
+        actions: 100,
+      }),
     },
     null,
     2,

@@ -7,7 +7,13 @@ import {
   publicRetro,
   readRetroHistory,
   retroHistoryKey,
-  saveRetroHistory,
+  saveRetroHistory as persistRetroHistory,
+  saveRetroHistoryPreference,
+  readRetroHistoryPreference,
+  deleteAllRetroHistory,
+  isRetroHistorySuppressed,
+  createRetroHistoryPersistence,
+  type RetroHistoryPolicy,
   RETRO_HISTORY_PREFIX,
 } from "../lib/retro-history";
 import { roomAsMarkdown, roomAsText } from "../lib/retro-export";
@@ -31,6 +37,19 @@ class MemoryStorage {
   }
 }
 let storage: MemoryStorage;
+const recoveryPolicy = {
+  mode: "recovery" as const,
+  retention: "forever" as const,
+};
+
+function saveRetroHistory(
+  room: RetroRoom,
+  viewerId?: string | null,
+  policy: RetroHistoryPolicy = recoveryPolicy
+) {
+  return persistRetroHistory(room, viewerId, policy);
+}
+
 const originalStorage = Object.getOwnPropertyDescriptor(
   globalThis,
   "localStorage"
@@ -60,6 +79,7 @@ const room: RetroRoom = {
   title: "Sprint retro",
   phase: "discuss",
   closedAt: null,
+  requiresPassword: false,
   expiresAt: 1800000000000,
   members: [
     {
@@ -110,6 +130,151 @@ test("updates a single snapshot, stores final actions, and preserves separate ro
   assert.equal(deleteRetroHistory(closed), true);
   assert.equal(readRetroHistory().entries.length, 2);
   assert.equal(storage.getItem(retroHistoryKey(closed)), null);
+});
+
+test("requires an explicit policy and keeps the safe final-only default out of live storage", () => {
+  assert.equal(persistRetroHistory(room), false);
+  assert.equal(storage.length, 0);
+  assert.equal(
+    persistRetroHistory(room, "alice", {
+      mode: "final-only",
+      retention: "30d",
+    }),
+    false
+  );
+  assert.equal(storage.length, 0);
+  saveRetroHistory(room);
+  assert.equal(
+    saveRetroHistoryPreference(room, {
+      mode: "final-only",
+      retention: "30d",
+    }),
+    true
+  );
+  assert.equal(storage.getItem(retroHistoryKey(room)), null);
+  const closed = { ...room, phase: "closed" as const, closedAt: 900 };
+  assert.equal(
+    persistRetroHistory(closed, "alice", {
+      mode: "final-only",
+      retention: "30d",
+    }),
+    true
+  );
+  const saved = JSON.parse(storage.getItem(retroHistoryKey(closed))!);
+  assert.equal(saved.room.phase, "closed");
+  assert.equal(saved.retentionUntil - saved.savedAt, 30 * 24 * 60 * 60 * 1000);
+});
+
+test("the explicit no-history choice removes an existing copy and prevents future saves", () => {
+  saveRetroHistory(room);
+  assert.equal(
+    saveRetroHistoryPreference(room, {
+      mode: "none",
+      retention: "30d",
+    }),
+    true
+  );
+  assert.deepEqual(readRetroHistoryPreference(room), {
+    mode: "none",
+    retention: "30d",
+  });
+  assert.equal(storage.getItem(retroHistoryKey(room)), null);
+  assert.equal(saveRetroHistory(room), false);
+  assert.equal(isRetroHistorySuppressed(room), true);
+});
+
+test("stores room-scoped choices and suppresses a live tab after per-room deletion", () => {
+  const choice = { mode: "recovery" as const, retention: "7d" as const };
+  assert.equal(saveRetroHistoryPreference(room, choice), true);
+  assert.deepEqual(readRetroHistoryPreference(room), choice);
+  assert.equal(saveRetroHistory(room, undefined, choice), true);
+  assert.equal(deleteRetroHistory(room), true);
+  assert.equal(isRetroHistorySuppressed(room), true);
+  assert.equal(
+    persistRetroHistory(room, "alice", {
+      mode: "recovery",
+      retention: "forever",
+    }),
+    false
+  );
+  assert.equal(readRetroHistory().entries.length, 0);
+
+  // Re-enabling is another explicit choice, not a side effect of a stale tab.
+  assert.equal(saveRetroHistoryPreference(room, choice), true);
+  assert.equal(isRetroHistorySuppressed(room), false);
+  assert.equal(saveRetroHistory(room, undefined, choice), true);
+});
+
+test("Delete all removes every archive and suppresses open rooms until reselected", () => {
+  const second = { ...room, code: "second" };
+  saveRetroHistory(room);
+  saveRetroHistory(second);
+  assert.equal(deleteAllRetroHistory(), true);
+  assert.equal(readRetroHistory().entries.length, 0);
+  assert.equal(isRetroHistorySuppressed(room), true);
+  assert.equal(isRetroHistorySuppressed(second), true);
+  assert.equal(saveRetroHistory(room), false);
+  assert.equal(saveRetroHistory(second), false);
+
+  assert.equal(
+    saveRetroHistoryPreference(room, {
+      mode: "recovery",
+      retention: "forever",
+    }),
+    true
+  );
+  assert.equal(isRetroHistorySuppressed(room), false);
+  assert.equal(saveRetroHistory(room), true);
+  assert.equal(isRetroHistorySuppressed(second), true);
+});
+
+test("cleans entries at their retention deadline and exposes a scheduler seam", () => {
+  let now = 1_000_000;
+  let scheduled: (() => void) | null = null;
+  let delay = -1;
+  let cleared = false;
+  const persistence = createRetroHistoryPersistence({
+    storage,
+    eventTarget: new EventTarget(),
+    clock: () => now,
+    scheduler: {
+      setTimeout(callback, timeout) {
+        scheduled = callback;
+        delay = timeout;
+        return callback;
+      },
+      clearTimeout() {
+        cleared = true;
+      },
+    },
+  });
+  assert.equal(
+    persistence.saveRetroHistory(room, "alice", {
+      mode: "recovery",
+      retention: "7d",
+    }),
+    true
+  );
+  const saved = JSON.parse(storage.getItem(retroHistoryKey(room))!);
+  const second = { ...room, code: "second" };
+  assert.equal(
+    persistence.saveRetroHistory(second, "alice", {
+      mode: "recovery",
+      retention: "7d",
+    }),
+    true
+  );
+  now = saved.retentionUntil;
+  const cleanup = scheduled as (() => void) | null;
+  assert.ok(cleanup);
+  cleanup!();
+  assert.equal(storage.getItem(retroHistoryKey(room)), null);
+  assert.equal(storage.getItem(retroHistoryKey(second)), null);
+  persistence.scheduleCleanup(250);
+  assert.equal(delay, 250);
+  assert.ok(scheduled);
+  persistence.dispose();
+  assert.equal(cleared, true);
 });
 
 test("write-phase history and exports retain only the current participant's notes", () => {
@@ -392,6 +557,13 @@ test("storage denial and quota exhaustion return failures without throwing or er
     throw new Error("QuotaExceededError");
   };
   assert.equal(saveRetroHistory({ ...room, title: "New title" }), false);
+  assert.equal(
+    saveRetroHistoryPreference(room, {
+      mode: "recovery",
+      retention: "30d",
+    }),
+    false
+  );
   assert.equal(readRetroHistory().entries[0].room.title, room.title);
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,

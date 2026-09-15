@@ -54,7 +54,7 @@ describe('WebSocket transport adapters', () => {
       serialization: {
         type: 'retro-state' as const,
         publicRoom,
-        self: { id, token: `${id}-secret` },
+        self: { id },
         recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
         version: 4,
       },
@@ -71,14 +71,14 @@ describe('WebSocket transport adapters', () => {
     ).toMatchObject({
       data: {
         room: { code: 'retro', title: 'Cached' },
-        self: { id: 'alice', token: 'alice-secret' },
+        self: { id: 'alice' },
       },
     });
     expect(
       JSON.parse(vi.mocked(second.send).mock.calls[0][0] as string).data,
     ).toMatchObject({
       room: { code: 'retro', title: 'Cached' },
-      self: { id: 'bobby', token: 'bobby-secret' },
+      self: { id: 'bobby' },
     });
     transport.dispatch(result(undefined, [message('first', 'alice-again')]));
     expect(toJSON).toHaveBeenCalledOnce();

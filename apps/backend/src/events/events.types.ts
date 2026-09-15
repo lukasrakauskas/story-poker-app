@@ -1,4 +1,5 @@
 import type { CollaborationParticipant } from '../collaboration/participant.service.js';
+import type { RoomAccess } from '../collaboration/room-access.service.js';
 
 export type User = CollaborationParticipant & {
   vote: string | null;
@@ -26,7 +27,7 @@ export interface Room {
   state: 'voting' | 'results';
   cardSet: string[];
   results: Record<string, number>;
-  password: string | null;
+  access: RoomAccess;
 }
 
 export type RoomError = {

@@ -6,7 +6,7 @@
 export type OutboundSerialization = {
   type: 'retro-state';
   publicRoom: object;
-  self: { id: string; token: string };
+  self: { id: string };
   recipient: object;
   version: number;
   requestId?: string;

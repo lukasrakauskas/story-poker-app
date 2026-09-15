@@ -12,6 +12,7 @@ const room = {
   phase: "write" as const,
   expiresAt: 1_800_000_000_000,
   closedAt: null,
+  requiresPassword: false,
   members: [
     {
       id: "alice",
@@ -29,7 +30,7 @@ const room = {
 function state(overrides: Partial<RetroStateData> = {}): RetroStateData {
   return {
     room,
-    self: { id: "alice", token: "secret" },
+    self: { id: "alice" },
     recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
     version: 4,
     ...overrides,

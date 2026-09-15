@@ -1,6 +1,8 @@
 "use client";
 
+import type { RetroRecovery } from "../../../lib/retro-session-state";
 import type { RetroPhase } from "shared/retrospective";
+import type { RetroHistoryPreference } from "../../../lib/retro-history";
 import { Button } from "ui/components/button";
 import {
   Card,
@@ -18,8 +20,13 @@ export function RetroStatus({
   pending,
   error,
   retry,
-  cookieSaved,
+  reconnectAttempt,
+  recovery,
   historySaved,
+  historyPreference,
+  historyPreferenceSaved,
+  historyDisabled,
+  forgetSession,
   expired,
   terminal,
   minutes,
@@ -31,8 +38,13 @@ export function RetroStatus({
   pending: boolean;
   error: Failure | null;
   retry: () => void;
-  cookieSaved: boolean | null;
+  reconnectAttempt: number;
+  recovery: RetroRecovery;
   historySaved: boolean | null;
+  historyPreference: RetroHistoryPreference | null;
+  historyPreferenceSaved: boolean | null;
+  historyDisabled: boolean;
+  forgetSession: () => Promise<boolean>;
   expired: boolean;
   terminal: boolean;
   minutes: number | null;
@@ -40,15 +52,20 @@ export function RetroStatus({
   phase: RetroPhase;
   className?: string;
 }) {
-  const status = pending
-    ? connection === "connecting"
-      ? "Restoring your session…"
-      : "Waiting for server confirmation…"
-    : connection === "connecting"
-      ? "Connecting to retrospective…"
-      : connection === "connected"
-        ? "Connected · changes sync live"
-        : "Disconnected · changes are disabled";
+  const status =
+    recovery === "offline"
+      ? "Offline · reconnects when online"
+      : recovery === "hidden"
+        ? "Reconnect paused while this tab is hidden"
+        : pending
+          ? connection === "connecting"
+            ? "Restoring your session…"
+            : "Waiting for server confirmation…"
+          : connection === "connecting"
+            ? "Connecting to retrospective…"
+            : connection === "connected"
+              ? "Connected · changes sync live"
+              : "Disconnected · changes are disabled";
 
   return (
     <Card className={`gap-4 py-4 ${className}`}>
@@ -75,6 +92,20 @@ export function RetroStatus({
           <Button size="sm" variant="outline" onClick={retry}>
             Retry connection
           </Button>
+        )}
+        {recovery === "scheduled" && (
+          <output>
+            Automatic reconnect scheduled · attempt {reconnectAttempt}
+          </output>
+        )}
+        {recovery === "connecting" && reconnectAttempt > 0 && (
+          <output>Automatic reconnect attempt {reconnectAttempt}…</output>
+        )}
+        {recovery === "exhausted" && (
+          <output>
+            Automatic reconnect paused after six attempts. Retry when your
+            connection is available.
+          </output>
         )}
         {error && !expired && (
           <p className="text-destructive">{error.message}</p>
@@ -106,13 +137,31 @@ export function RetroStatus({
             </p>
           )}
         </div>
-        {cookieSaved === false && (
+        {historyPreferenceSaved === false && (
           <p className="text-destructive">
-            Could not save your rejoin cookie. Keep this tab open to retain your
-            identity and moderator access.
+            Could not save this history preference. It applies only to this tab;
+            collaboration is not interrupted.
           </p>
         )}
-        {historySaved === false && (
+        {historyDisabled && historyPreference?.mode !== "none" && (
+          <p>
+            Browser history is disabled for this room after deletion. Live
+            updates will not recreate the saved entry.
+          </p>
+        )}
+        {historyPreference?.mode === "none" && (
+          <p>
+            Browser history is disabled for this room. Exported backups still
+            work.
+          </p>
+        )}
+        {historyPreference?.mode === "final-only" && phase !== "closed" && (
+          <p>
+            Only the completed takeaway will be saved; in-progress recovery
+            snapshots stay out of browser history.
+          </p>
+        )}
+        {historySaved === false && !historyDisabled && (
           <p className="text-destructive">
             Could not save this snapshot in browser history. Storage may be
             blocked or full.
@@ -132,12 +181,23 @@ export function RetroStatus({
             Privacy and browser storage
           </summary>
           <p className="mt-2">
-            No account is required. A room cookie restores your identity until
-            expiry. Notes, names, and actions are saved in this browser when
-            storage is available; they are not a backup or shared across
-            devices. Opening this room in another tab moves your live connection
-            there.
+            The backend keeps a room-scoped HttpOnly identity cookie that
+            JavaScript cannot read. Notes, names and actions are saved in this
+            browser only after you choose a history policy. Anyone sharing this
+            browser profile can read saved history. Exported files are separate
+            backups. Another tab takes over only after you choose Continue.
           </p>
+          {!expired && (
+            <Button
+              className="mt-3"
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => void forgetSession()}
+            >
+              Forget this browser session
+            </Button>
+          )}
         </details>
       </CardContent>
     </Card>
