@@ -19,6 +19,7 @@ import {
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
 import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
+import { verifyWebSocketClient } from '../transport/websocket-origin-policy.js';
 import {
   POKER_APPLICATION_NAMESPACE,
   PokerApplicationService,
@@ -26,6 +27,7 @@ import {
 
 @WebSocketGateway({
   cors: { origin: '*' },
+  verifyClient: verifyWebSocketClient,
   clientTracking: true,
   WebSocket: Client,
 })

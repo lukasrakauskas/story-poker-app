@@ -1,87 +1,124 @@
 import { afterEach, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
+import type { RetroSessionView } from "shared/retrospective";
 import {
-  clearRetroToken,
-  readRetroToken,
-  saveRetroToken,
+  establishRetroSession,
+  forgetRetroSession,
+  inspectRetroSession,
+  resumeRetroSession,
+  RetroSessionError,
 } from "../lib/retro-session";
 
-let cookie = "";
-let written = "";
-const originals = ["document", "location"].map(
-  (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const
-);
+const originalFetch = globalThis.fetch;
+const originalApi = process.env.NEXT_PUBLIC_RETRO_API_URL;
+let calls: { input: RequestInfo | URL; init?: RequestInit }[] = [];
+
+const view: RetroSessionView = {
+  room: {
+    code: "first-room",
+    title: "Retro",
+    phase: "write",
+    expiresAt: Date.now() + 7_200_000,
+    closedAt: null,
+    members: [],
+    notes: [],
+    groups: [],
+    actions: [],
+    requiresPassword: false,
+  },
+  self: { id: "alice" },
+};
+
+function response(body: unknown, ok = true, status = 200): Response {
+  return { ok, status, json: async () => body } as Response;
+}
+
 beforeEach(() => {
-  cookie = "";
-  written = "";
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: {
-      get cookie() {
-        return cookie;
-      },
-      set cookie(value: string) {
-        written = value;
-        cookie = value.split(";")[0];
-      },
-    },
-  });
-  Object.defineProperty(globalThis, "location", {
-    configurable: true,
-    value: { protocol: "https:" },
-  });
+  calls = [];
+  process.env.NEXT_PUBLIC_RETRO_API_URL = "https://backend.example";
+  globalThis.fetch = async (inputValue, init) => {
+    calls.push({ input: inputValue, init });
+    const input = String(inputValue);
+    if (init?.method === "DELETE") return response({ forgotten: true });
+    if (input.endsWith("/first-room"))
+      return response({
+        code: "first-room",
+        name: "Alice",
+        moderator: true,
+      });
+    return response(view);
+  };
 });
+
 afterEach(() => {
-  for (const [key, descriptor] of originals) {
-    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-    else Reflect.deleteProperty(globalThis, key);
-  }
+  globalThis.fetch = originalFetch;
+  if (originalApi === undefined) delete process.env.NEXT_PUBLIC_RETRO_API_URL;
+  else process.env.NEXT_PUBLIC_RETRO_API_URL = originalApi;
 });
 
-test("cookies are host-only, secure on HTTPS, scoped to retro, and expire with the room", () => {
-  const expiresAt = Date.now() + 7200000;
-  assert.equal(saveRetroToken("first-room", "secret-token", expiresAt), true);
-  assert.match(written, /; Path=\/retro;/);
-  assert.match(written, /; SameSite=Lax; Secure$/);
-  assert.ok(written.includes(`Expires=${new Date(expiresAt).toUTCString()}`));
-  assert.ok(!written.includes("Domain="));
-  assert.equal(readRetroToken("first-room"), "secret-token");
-  assert.equal(readRetroToken("other-room"), null);
-  Object.defineProperty(globalThis, "location", {
-    configurable: true,
-    value: { protocol: "http:" },
-  });
-  saveRetroToken("first-room", "secret-token", expiresAt);
-  assert.ok(!written.includes("Secure"));
-  clearRetroToken("first-room");
-  assert.match(written, /Max-Age=0/);
-  assert.equal(readRetroToken("first-room"), null);
+test("establishment, inspection, rotation, and forget use credentialed HTTP without exposing cookies", async () => {
+  assert.deepEqual(
+    await establishRetroSession({
+      type: "create",
+      name: "Alice",
+      title: "Retro",
+    }),
+    view
+  );
+  assert.equal(calls[0].input, "https://backend.example/retro/session");
+  assert.equal(calls[0].init?.credentials, "include");
+  assert.equal(calls[0].init?.method, "POST");
+  assert.match(String(calls[0].init?.body), /Alice/);
+  assert.ok(!String(calls[0].init?.body).includes("token"));
+
+  await inspectRetroSession("first-room");
+  await resumeRetroSession("first-room");
+  await forgetRetroSession("first-room");
+  assert.deepEqual(
+    calls.map(({ input, init }) => [input, init?.method, init?.credentials]),
+    [
+      ["https://backend.example/retro/session", "POST", "include"],
+      ["https://backend.example/retro/session/first-room", "GET", "include"],
+      [
+        "https://backend.example/retro/session/first-room/resume",
+        "POST",
+        "include",
+      ],
+      ["https://backend.example/retro/session/first-room", "DELETE", "include"],
+    ]
+  );
 });
 
-test("malformed or oversized cookies are discarded rather than causing repeated failed resumes", () => {
-  for (const value of ["%broken", "a".repeat(65), ""]) {
-    cookie = `retro-session-first-room=${value}`;
-    assert.equal(readRetroToken("first-room"), null);
-    assert.match(written, /Max-Age=0/);
-  }
-  written = "";
-  assert.equal(saveRetroToken("bad; Path=/", "token", Date.now()), false);
-  assert.equal(written, "");
-});
-
-test("blocked cookie access is nonfatal", () => {
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: {
-      get cookie() {
-        throw new Error("SecurityError");
+test("failed rotations surface a safe error and never attempt JavaScript cookie deletion", async () => {
+  globalThis.fetch = async (input, init) => {
+    calls.push({ input, init });
+    return response(
+      {
+        code: "invalid-session",
+        message: "This session is no longer available. Join again.",
       },
-      set cookie(_value: string) {
-        throw new Error("SecurityError");
-      },
-    },
-  });
-  assert.equal(readRetroToken("room"), null);
-  assert.equal(saveRetroToken("room", "token", Date.now() + 7200000), false);
-  assert.doesNotThrow(() => clearRetroToken("room"));
+      false,
+      401
+    );
+  };
+  await assert.rejects(
+    () => resumeRetroSession("first-room"),
+    (error: unknown) => {
+      assert.ok(error instanceof RetroSessionError);
+      assert.equal(error.code, "invalid-session");
+      assert.equal(error.status, 401);
+      return true;
+    }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init?.credentials, "include");
+});
+
+test("invalid room codes are rejected before a request can be sent", () => {
+  assert.throws(
+    () => inspectRetroSession("bad; Path=/"),
+    (error: unknown) =>
+      error instanceof RetroSessionError && error.code === "invalid-command"
+  );
+  assert.equal(calls.length, 0);
 });

@@ -42,15 +42,17 @@ test("automatically resumes after repeated transient connection failures", async
 }) => {
   await trackSockets(context);
   let socketCount = 0;
+  let failures = 0;
   await context.routeWebSocket("**/retro", (socket) => {
     socketCount += 1;
-    // Strict Mode opens and cleans up one development-only socket before the
-    // mounted connection. Fail the first two reconnects (the third and
-    // fourth sockets) so the browser exercises increasing attempts.
-    if (socketCount === 3 || socketCount === 4) void socket.close();
-    else socket.connectToServer();
+    if (failures > 0) {
+      failures--;
+      void socket.close();
+    } else socket.connectToServer();
   });
   await createRoom(page, "Transient recovery");
+  const initialSockets = socketCount;
+  failures = 2;
 
   await page.evaluate(() => window.retroTestSocket?.close());
   await expect(
@@ -64,7 +66,7 @@ test("automatically resumes after repeated transient connection failures", async
   await expect(
     status(page).getByText("Connected · changes sync live", { exact: true })
   ).toBeVisible({ timeout: 10_000 });
-  expect(socketCount).toBe(5);
+  expect(socketCount).toBe(initialSockets + 3);
   // The resumed socket is server-authoritative; no command is sent while it
   // is catching up.
   await expect(status(page).getByText(/Connected/)).toBeVisible();
@@ -134,6 +136,7 @@ test("pauses recovery offline and while hidden, then resumes on browser signals"
     socket.connectToServer();
   });
   await createRoom(page, "Browser signal recovery");
+  const initialSockets = socketCount;
 
   await page.evaluate(() => {
     Object.defineProperty(navigator, "onLine", {
@@ -146,7 +149,7 @@ test("pauses recovery offline and while hidden, then resumes on browser signals"
     status(page).getByText("Offline · reconnects when online", { exact: true })
   ).toBeVisible();
   await page.waitForTimeout(1_500);
-  expect(socketCount).toBe(2);
+  expect(socketCount).toBe(initialSockets);
 
   await page.evaluate(() => {
     Object.defineProperty(navigator, "onLine", {
@@ -158,7 +161,7 @@ test("pauses recovery offline and while hidden, then resumes on browser signals"
   await expect(
     status(page).getByText("Connected · changes sync live", { exact: true })
   ).toBeVisible({ timeout: 5_000 });
-  expect(socketCount).toBe(3);
+  expect(socketCount).toBe(initialSockets + 1);
 
   await page.evaluate(() => {
     Object.defineProperty(document, "visibilityState", {
@@ -174,7 +177,7 @@ test("pauses recovery offline and while hidden, then resumes on browser signals"
     })
   ).toBeVisible();
   await page.waitForTimeout(1_500);
-  expect(socketCount).toBe(3);
+  expect(socketCount).toBe(initialSockets + 1);
 
   await page.evaluate(() => {
     Object.defineProperty(document, "visibilityState", {
@@ -186,15 +189,16 @@ test("pauses recovery offline and while hidden, then resumes on browser signals"
   await expect(
     status(page).getByText("Connected · changes sync live", { exact: true })
   ).toBeVisible({ timeout: 5_000 });
-  expect(socketCount).toBe(4);
+  expect(socketCount).toBe(initialSockets + 2);
 });
 
 test("does not retry a replacement close", async ({ page, context }) => {
   await trackSockets(context);
   let socketCount = 0;
+  let replaceNext = false;
   await context.routeWebSocket("**/retro", (socket) => {
     socketCount += 1;
-    if (socketCount === 3)
+    if (replaceNext)
       void socket.close({
         code: 4001,
         reason: "Session replaced",
@@ -202,6 +206,8 @@ test("does not retry a replacement close", async ({ page, context }) => {
     else socket.connectToServer();
   });
   await createRoom(page, "Terminal recovery");
+  const initialSockets = socketCount;
+  replaceNext = true;
   await page.evaluate(() => window.retroTestSocket?.close());
   await expect(
     page.getByText("Your session was resumed in another connection.", {
@@ -209,7 +215,7 @@ test("does not retry a replacement close", async ({ page, context }) => {
     })
   ).toBeVisible({ timeout: 10_000 });
   await page.waitForTimeout(2_000);
-  expect(socketCount).toBe(3);
+  expect(socketCount).toBe(initialSockets + 1);
   await expect(
     status(page).getByRole("button", { name: "Retry connection" })
   ).toHaveCount(0);

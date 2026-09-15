@@ -1,135 +1,68 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import {
+  WebSocketTransport,
+  type WebSocketTransportEvent,
+  type WebSocketTransportEventMap,
+} from "../lib/websocket-transport";
 
-declare global {
-  interface Window {
-    __webSocketClient?: WebSocket;
-  }
-}
-
-type SocketListener<K extends keyof WebSocketEventMap> = (
-  event: WebSocketEventMap[K]
+type SocketListener<K extends WebSocketTransportEvent> = (
+  event: WebSocketTransportEventMap[K]
 ) => void;
-type StoredListener = EventListenerOrEventListenerObject;
 
+/** Planning Poker's protocol adapter over the shared WebSocket transport. */
 export function useWebsocket(url: string) {
-  const client = useRef<WebSocket | null>(null);
-  const listeners = useRef(
-    new Map<keyof WebSocketEventMap, Set<StoredListener>>()
+  const transport = useMemo(
+    () => new WebSocketTransport({ url, queueWhileConnecting: true }),
+    [url]
   );
 
-  const attachListeners = useCallback((socket: WebSocket) => {
-    for (const [event, eventListeners] of listeners.current) {
-      for (const listener of eventListeners) {
-        socket.addEventListener(event, listener);
-      }
-    }
-  }, []);
-
-  const detachListeners = useCallback((socket: WebSocket) => {
-    for (const [event, eventListeners] of listeners.current) {
-      for (const listener of eventListeners) {
-        socket.removeEventListener(event, listener);
-      }
-    }
-  }, []);
-
-  const connect = useCallback(() => {
-    if (typeof window === "undefined") return null;
-
-    let socket = window.__webSocketClient;
-    if (
-      !socket ||
-      socket.readyState === WebSocket.CLOSED ||
-      socket.readyState === WebSocket.CLOSING
-    ) {
-      socket = new WebSocket(url);
-      window.__webSocketClient = socket;
-    }
-
-    if (client.current !== socket) {
-      if (client.current) detachListeners(client.current);
-      client.current = socket;
-      attachListeners(socket);
-    }
-
-    return socket;
-  }, [attachListeners, detachListeners, url]);
-
   useEffect(() => {
-    connect();
-
+    transport.connect();
+    if (typeof window !== "undefined")
+      window.__webSocketClient = transport.getSocket() as WebSocket | undefined;
     return () => {
-      const socket = client.current;
-      if (!socket) return;
-      detachListeners(socket);
-      socket.close();
-      if (window.__webSocketClient === socket) {
+      if (
+        typeof window !== "undefined" &&
+        window.__webSocketClient === transport.getSocket()
+      )
         window.__webSocketClient = undefined;
-      }
-      client.current = null;
+      transport.dispose();
     };
-  }, [connect, detachListeners]);
+  }, [transport]);
 
   const on = useCallback(
-    <K extends keyof WebSocketEventMap>(
+    <K extends WebSocketTransportEvent>(
       event: K,
       listener: SocketListener<K>
-    ) => {
-      const storedListener = listener as StoredListener;
-      const eventListeners = listeners.current.get(event) ?? new Set();
-      eventListeners.add(storedListener);
-      listeners.current.set(event, eventListeners);
-      client.current?.addEventListener(event, storedListener);
-    },
-    []
+    ) => transport.on(event, listener),
+    [transport]
   );
 
   const off = useCallback(
-    <K extends keyof WebSocketEventMap>(
+    <K extends WebSocketTransportEvent>(
       event: K,
       listener: SocketListener<K>
-    ) => {
-      const storedListener = listener as StoredListener;
-      listeners.current.get(event)?.delete(storedListener);
-      client.current?.removeEventListener(event, storedListener);
-    },
-    []
+    ) => transport.off(event, listener),
+    [transport]
   );
 
   const reconnect = useCallback(() => {
-    connect();
-  }, [connect]);
+    transport.reconnect();
+    if (typeof window !== "undefined")
+      window.__webSocketClient = transport.getSocket() as WebSocket | undefined;
+  }, [transport]);
 
   const send = useCallback(
     (data: string) => {
-      const socket = connect();
-      if (!socket) return;
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(data);
-        return;
-      }
-      if (socket.readyState === WebSocket.CONNECTING) {
-        socket.addEventListener("open", () => socket.send(data), {
-          once: true,
-        });
-      }
+      transport.send(data, { queue: true });
     },
-    [connect]
+    [transport]
   );
 
-  const close = useCallback(() => {
-    const socket = client.current;
-    if (!socket) return;
-    detachListeners(socket);
-    socket.close();
-  }, [detachListeners]);
-
-  const isOpen = useCallback(
-    () => client.current?.readyState === WebSocket.OPEN,
-    []
-  );
+  const close = useCallback(() => transport.close(), [transport]);
+  const isOpen = useCallback(() => transport.isOpen(), [transport]);
 
   return useMemo(
     () => ({ close, reconnect, send, on, off, isOpen }),

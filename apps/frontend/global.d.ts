@@ -1,5 +1,8 @@
 declare global {
   interface Window {
-    __webSocketClient: WebSocket;
+    /** Legacy Planning Poker test/integration access; one hook owns this socket. */
+    __webSocketClient?: WebSocket;
   }
 }
+
+export {};
