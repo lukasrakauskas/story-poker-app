@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { RetroServerEvent } from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
+import { RoomAccessService } from '../collaboration/room-access.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { RetroApplicationService } from './retro-application.service.js';
 import { RetentionService } from '../collaboration/retention.service.js';
@@ -16,6 +17,7 @@ beforeEach(() => {
       new ParticipantService(),
       new RoomRegistryService(),
       new RetentionService(),
+      new RoomAccessService(),
     ),
     new ConnectionRegistryService(),
     new ApplicationEventBus(),
@@ -130,6 +132,69 @@ describe('RetroApplicationService', () => {
       votedBySelf: false,
     });
     expect(joined.self.token).not.toBe(created.self.token);
+  });
+
+  it('protects create and join responses while exposing only inspection metadata', () => {
+    const created = state(
+      application.execute('owner', {
+        type: 'create',
+        name: 'Alice',
+        title: 'Sensitive retrospective',
+        password: 'secret',
+      }),
+      'owner',
+    );
+    expect(created.room.requiresPassword).toBe(true);
+    expect(JSON.stringify(created)).not.toContain('secret');
+
+    const inspection = application.execute('visitor', {
+      type: 'inspect',
+      code: created.room.code,
+    });
+    expect(event(inspection, 'visitor')).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: created.room.code,
+        available: true,
+        requiresPassword: true,
+      },
+    });
+    expect(JSON.stringify(inspection)).not.toContain('Sensitive retrospective');
+    expect(JSON.stringify(inspection)).not.toContain('secret');
+
+    const rejected = application.execute('guest', {
+      type: 'join',
+      name: 'Bobby',
+      code: created.room.code,
+      password: 'wrong',
+    });
+    expect(event(rejected, 'guest')).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'wrong-room-password' },
+    });
+    expect(rejected.messages).toHaveLength(1);
+
+    const joined = state(
+      application.execute('guest', {
+        type: 'join',
+        name: 'Bobby',
+        code: created.room.code,
+        password: 'secret',
+      }),
+      'guest',
+    );
+    expect(joined.room.members).toHaveLength(2);
+    application.disconnect('guest');
+    expect(
+      state(
+        application.execute('replacement', {
+          type: 'resume',
+          code: created.room.code,
+          token: joined.self.token,
+        }),
+        'replacement',
+      ).self,
+    ).toEqual(joined.self);
   });
 
   it('revokes and closes a participant removed by a moderator', () => {

@@ -13,6 +13,7 @@ const room = {
   phase: "discuss" as const,
   expiresAt: 1_800_000_000_000,
   closedAt: null,
+  requiresPassword: false,
   members: [
     {
       id: "alice",

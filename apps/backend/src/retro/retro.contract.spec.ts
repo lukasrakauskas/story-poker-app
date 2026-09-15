@@ -13,6 +13,7 @@ const publicRoom = {
   phase: 'vote' as const,
   expiresAt: 1_800_000_000_000,
   closedAt: null,
+  requiresPassword: false,
   members: [
     {
       id: 'alice',
@@ -62,6 +63,48 @@ describe('shared retrospective contracts', () => {
         owner: { kind: 'external', name: 'Platform team' },
         requestId: 'request-1',
         moderator: true,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('keeps access commands strict and exposes only minimum inspection metadata', () => {
+    expect(
+      retroCommandSchema.parse({
+        type: 'create',
+        name: 'Alice',
+        title: 'Private retro',
+        password: 'secret',
+      }),
+    ).toMatchObject({ password: 'secret' });
+    expect(
+      retroCommandSchema.safeParse({
+        type: 'join',
+        name: 'Bobby',
+        code: 'room',
+        password: 'secret',
+        verifier: 'private',
+      }).success,
+    ).toBe(false);
+    expect(
+      retroServerEventSchema.safeParse({
+        event: 'retro-room-info',
+        data: {
+          code: 'room',
+          available: true,
+          requiresPassword: true,
+          requestId: 'request-1',
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      retroServerEventSchema.safeParse({
+        event: 'retro-room-info',
+        data: {
+          code: 'room',
+          available: true,
+          requiresPassword: true,
+          title: 'secret title',
+        },
       }).success,
     ).toBe(false);
   });

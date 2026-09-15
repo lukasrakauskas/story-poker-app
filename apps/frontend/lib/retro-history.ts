@@ -50,6 +50,7 @@ function projectPublicRoom(value: unknown): unknown {
     phase: source.phase,
     expiresAt: source.expiresAt,
     closedAt: source.closedAt,
+    requiresPassword: source.requiresPassword,
     members: Array.isArray(source.members)
       ? source.members.map((member) =>
           pick(member, ["id", "name", "moderator", "connected", "ready"])

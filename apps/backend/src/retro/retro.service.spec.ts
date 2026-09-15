@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RetentionService } from '../collaboration/retention.service.js';
+import { RoomAccessService } from '../collaboration/room-access.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import {
   RETRO_LIFETIME_MS,
@@ -15,6 +16,7 @@ function createService() {
     new ParticipantService(),
     new RoomRegistryService(),
     new RetentionService(),
+    new RoomAccessService(),
   );
 }
 
@@ -99,6 +101,43 @@ describe('room lifecycle and privacy', () => {
       'no longer available',
     );
   });
+  it('protects room entry before membership or snapshots and resumes without a password', () => {
+    const protectedOwner = service.create('Alice', 'Private retro', 'secret');
+    expect(service.inspect(protectedOwner.code)).toEqual({
+      code: protectedOwner.code,
+      available: true,
+      requiresPassword: true,
+    });
+    expect(() => service.join(protectedOwner.code, 'ab')).toThrow('password');
+    expect(() => service.join(protectedOwner.code, 'Bobby', 'wrong')).toThrow(
+      'password',
+    );
+    expect(service.snapshot(protectedOwner)).toMatchObject({
+      title: 'Private retro',
+      phase: 'write',
+      members: [expect.objectContaining({ name: 'Alice' })],
+      notes: [],
+      actions: [],
+      requiresPassword: true,
+    });
+    expect(service.snapshot(protectedOwner)).not.toHaveProperty('access');
+    expect(JSON.stringify(service.snapshot(protectedOwner))).not.toContain(
+      'secret',
+    );
+    expect(() =>
+      service.join(protectedOwner.code, 'Bobby', 'secret'),
+    ).not.toThrow();
+    service.disconnect(protectedOwner);
+    expect(() =>
+      service.resume(protectedOwner.code, protectedOwner.token),
+    ).not.toThrow();
+    expect(service.inspect('missing')).toEqual({
+      code: 'missing',
+      available: false,
+      requiresPassword: false,
+    });
+  });
+
   it('keeps rooms isolated, credentials private and snapshots detached', () => {
     add();
     const other = service.create('Carol', 'Other room');
@@ -760,6 +799,7 @@ it.each([
   {},
   { type: 'create', name: 'ab', title: 'Room' },
   { type: 'create', name: 'Alice', title: ' ' },
+  { type: 'create', name: 'Alice', title: 'Room', password: 'x'.repeat(101) },
   { type: 'add-note', column: 'wrong', text: 'Hello' },
   { type: 'add-note', column: 'ideas', text: ' ' },
   { type: 'edit-note', id: 'note', text: 'x'.repeat(1001) },
@@ -792,6 +832,7 @@ it.each([
     owner: { kind: 'external', name: 'x'.repeat(61) },
   },
   { type: 'resume', code: 'room', token: '' },
+  { type: 'join', name: 'Alice', code: 'room', password: 'x'.repeat(101) },
 ])('rejects malformed and oversized commands: %j', (command) => {
   expect(retroCommandSchema.safeParse(command).success).toBe(false);
 });

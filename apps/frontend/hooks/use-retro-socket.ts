@@ -6,6 +6,7 @@ import {
   RETRO_PROTOCOL_ERROR_MESSAGE,
   type RetroCommand,
   type RetroRoom,
+  type RetroRoomInfo,
 } from "shared/retrospective";
 
 import {
@@ -35,6 +36,7 @@ export function useRetroSocket() {
   const terminal = useRef(false);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [room, setRoom] = useState<RetroRoom | null>(null);
+  const [roomInfo, setRoomInfo] = useState<RetroRoomInfo | null>(null);
   const [selfId, setSelfId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Failure | null>(null);
@@ -140,8 +142,17 @@ export function useRetroSocket() {
         return;
       }
       try {
-        if (event.event === "retro-state") {
+        if (event.event === "retro-room-info") {
+          const { requestId, ...info } = event.data;
+          setRoomInfo(info);
+          setError(null);
+          clearTimeout(timer);
+          if (!inFlight.current || requestId === inFlight.current.id) {
+            settle(true);
+          }
+        } else if (event.event === "retro-state") {
           const { room: snapshot, self } = event.data;
+          setRoomInfo(null);
           credentials.current = { code: snapshot.code, token: self.token };
           setCookieSaved(
             saveRetroToken(snapshot.code, self.token, snapshot.expiresAt)
@@ -304,6 +315,7 @@ export function useRetroSocket() {
 
   return {
     room,
+    roomInfo,
     selfId,
     connection,
     pending,

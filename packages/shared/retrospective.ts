@@ -23,6 +23,7 @@ export const RETRO_MAX_ID_LENGTH = 64;
 export const RETRO_MAX_TITLE_LENGTH = 100;
 export const RETRO_MAX_TEXT_LENGTH = 1000;
 export const RETRO_MAX_EXTERNAL_OWNER_LENGTH = 60;
+export const RETRO_MAX_PASSWORD_LENGTH = 100;
 export const RETRO_MAX_TIMESTAMP = 8.64e15;
 
 export const retroProtocolVersionSchema = z.literal(RETRO_PROTOCOL_VERSION);
@@ -42,6 +43,10 @@ export const retroTextSchema = z
   .trim()
   .min(1)
   .max(RETRO_MAX_TEXT_LENGTH);
+export const retroPasswordSchema = z
+  .string()
+  .max(RETRO_MAX_PASSWORD_LENGTH)
+  .optional();
 export const retroTimestampSchema = z
   .number()
   .int()
@@ -156,6 +161,8 @@ const publicRoomShape = {
   notes: z.array(retroPublicNoteSchema).max(RETRO_MAX_NOTES),
   groups: z.array(retroPublicGroupSchema).max(RETRO_MAX_NOTES),
   actions: z.array(retroActionSchema).max(RETRO_MAX_ACTIONS),
+  /** Only the minimum access metadata is public; no verifier is exposed. */
+  requiresPassword: z.boolean().default(false),
 };
 
 /** Secret-free recipient snapshot. This is also the archive/export source. */
@@ -237,6 +244,7 @@ export const retroCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("create"),
       name: participantNameSchema,
       title: retroTitleSchema,
+      password: retroPasswordSchema,
     })
     .strict(),
   z
@@ -244,8 +252,10 @@ export const retroCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("join"),
       name: participantNameSchema,
       code: retroCodeSchema,
+      password: retroPasswordSchema,
     })
     .strict(),
+  z.object({ type: z.literal("inspect"), code: retroCodeSchema }).strict(),
   z
     .object({
       type: z.literal("resume"),
@@ -340,6 +350,23 @@ export const retroStateEventSchema = z
   })
   .strict();
 
+export const retroRoomInfoSchema = z
+  .object({
+    code: retroCodeSchema,
+    available: z.boolean(),
+    requiresPassword: z.boolean(),
+  })
+  .strict();
+
+export const retroRoomInfoEventSchema = z
+  .object({
+    event: z.literal("retro-room-info"),
+    data: retroRoomInfoSchema
+      .extend({ requestId: retroRequestIdSchema.optional() })
+      .strict(),
+  })
+  .strict();
+
 export const retroErrorDataSchema = z
   .object({
     code: retroIdSchema,
@@ -358,6 +385,7 @@ export const retroErrorEventSchema = z
 /** Strict v1 union used at both the backend boundary and the browser boundary. */
 export const retroServerEventSchema = z.discriminatedUnion("event", [
   retroStateEventSchema,
+  retroRoomInfoEventSchema,
   retroErrorEventSchema,
 ]);
 export const retroEventSchema = retroServerEventSchema;
@@ -408,6 +436,7 @@ const legacyRoomBaseShape = {
         .strict()
     )
     .max(RETRO_MAX_ACTIONS),
+  requiresPassword: z.boolean().default(false),
 };
 
 const legacyNoteShape = {
@@ -486,6 +515,7 @@ export type RetroCommand = z.infer<typeof retroCommandSchema>;
 export type RetroCommandMessage = z.infer<typeof retroCommandMessageSchema>;
 export type RetroClientSelf = z.infer<typeof retroClientSelfSchema>;
 export type RetroClientState = z.infer<typeof retroClientStateSchema>;
+export type RetroRoomInfo = z.infer<typeof retroRoomInfoSchema>;
 export type RetroErrorData = z.infer<typeof retroErrorDataSchema>;
 export type RetroServerEvent = z.infer<typeof retroServerEventSchema>;
 export type RetroArchive = z.infer<typeof retroArchiveSchema>;

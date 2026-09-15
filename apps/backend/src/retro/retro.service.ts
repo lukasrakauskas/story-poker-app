@@ -21,6 +21,10 @@ import {
   type CollaborationParticipant,
   type CollaborationRole,
 } from '../collaboration/participant.service.js';
+import {
+  RoomAccessService,
+  type RoomAccess,
+} from '../collaboration/room-access.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { RetentionService } from '../collaboration/retention.service.js';
 
@@ -46,8 +50,13 @@ export interface RetroMutationResult {
 }
 type StoredNote = RetroInternalNote;
 type StoredGroup = RetroInternalGroup;
-type StoredRoom = RetroInternalRoom;
-type Mutation = Exclude<RetroCommand, { type: 'create' | 'join' | 'resume' }>;
+type StoredRoom = Omit<RetroInternalRoom, 'requiresPassword'> & {
+  access: RoomAccess;
+};
+type Mutation = Exclude<
+  RetroCommand,
+  { type: 'create' | 'join' | 'resume' | 'inspect' }
+>;
 
 const ROOM_NAMESPACE = 'retro';
 
@@ -68,15 +77,19 @@ export class RetroService {
     private readonly participants: ParticipantService,
     private readonly registry: RoomRegistryService,
     private readonly retention: RetentionService,
+    private readonly access: RoomAccessService,
   ) {}
 
-  create(name: string, title: string): RetroSession {
+  create(name: string, title: string, password?: string): RetroSession {
+    const passwordError = this.access.validate(password);
+    if (passwordError) throw new RetroError('invalid-command', passwordError);
     this.sweep();
     if (this.registry.size(ROOM_NAMESPACE) >= MAX_ROOMS)
       throw new RetroError(
         'capacity',
         'All retrospective rooms are in use. Try again later.',
       );
+    const access = this.access.create(password);
     const member = this.createParticipant(name, 'moderator');
     const room = this.registry.register<StoredRoom>(
       ROOM_NAMESPACE,
@@ -87,6 +100,7 @@ export class RetroService {
         phase: 'write',
         expiresAt: Date.now() + RETRO_LIFETIME_MS,
         closedAt: null,
+        access,
         members: [member],
         notes: [],
         groups: [],
@@ -102,8 +116,10 @@ export class RetroService {
     return { code: room.code, id: member.id, token: member.token };
   }
 
-  join(code: string, name: string): RetroSession {
+  join(code: string, name: string, password?: string): RetroSession {
     const room = this.room(code);
+    if (!this.access.verify(room.access, password))
+      throw new RetroError('wrong-room-password', 'Incorrect room password.');
     if (room.phase === 'closed')
       throw new RetroError(
         'room-closed',
@@ -121,6 +137,17 @@ export class RetroService {
     const member = this.participants.create(normalizedName);
     room.members.push(member);
     return { code, id: member.id, token: member.token };
+  }
+
+  inspect(code: string) {
+    const room = this.registry.get<StoredRoom>(ROOM_NAMESPACE, code);
+    if (!room || room.expiresAt <= Date.now())
+      return { code, available: false, requiresPassword: false };
+    return {
+      code,
+      available: true,
+      requiresPassword: room.access.requiresPassword,
+    };
   }
 
   resume(code: string, token: string): RetroSession {
@@ -175,7 +202,18 @@ export class RetroService {
 
   snapshot(session: RetroSession): RetroRoom {
     const { room, member } = this.authorize(session);
-    const { readyMemberIds, groups, ...publicRoom } = room;
+    const { readyMemberIds, groups } = room;
+    // Keep the public shape explicit. Internal access capabilities, participant
+    // tokens, readiness sets, and voter identities must never be spread out.
+    const publicRoom = {
+      code: room.code,
+      title: room.title,
+      phase: room.phase,
+      expiresAt: room.expiresAt,
+      closedAt: room.closedAt,
+      actions: room.actions,
+      requiresPassword: room.access.requiresPassword,
+    };
     // Writing is private even for moderators. Advancing to vote changes the
     // phase before one broadcast reveals the complete board to everyone.
     const notes =
