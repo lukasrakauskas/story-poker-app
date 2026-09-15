@@ -152,7 +152,9 @@ describe('RetroGateway', () => {
     });
     expect(JSON.stringify(latest(visitor))).not.toContain('Sensitive retro');
 
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // The creator's password-bearing create shares the source budget with
+    // joins, leaving four guesses for this source in the current window.
+    for (let attempt = 0; attempt < 4; attempt++) {
       await gateway.onCommand(visitor, {
         type: 'join',
         code: created.room.code,
@@ -195,6 +197,21 @@ describe('RetroGateway', () => {
           ]),
         },
       },
+    });
+  });
+
+  it('shares the source admission budget across fresh sockets', async () => {
+    const clients = Array.from({ length: 6 }, () => socket());
+    for (const client of clients)
+      await gateway.onCommand(client, {
+        type: 'join',
+        name: 'Bobby',
+        code: 'missing-room',
+        password: 'guess',
+      });
+    expect(latest(clients.at(-1)!)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'rate-limit' },
     });
   });
 

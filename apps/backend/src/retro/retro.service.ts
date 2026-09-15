@@ -75,7 +75,10 @@ type PasswordOrContext = string | RetroRepositoryContext | undefined;
 function splitPasswordAndContext(
   passwordOrContext: PasswordOrContext,
   context?: RetroRepositoryContext,
-): { password: string | undefined; context: RetroRepositoryContext | undefined } {
+): {
+  password: string | undefined;
+  context: RetroRepositoryContext | undefined;
+} {
   if (typeof passwordOrContext === 'object' && passwordOrContext !== null)
     return { password: undefined, context: passwordOrContext };
   return { password: passwordOrContext, context };
@@ -161,7 +164,10 @@ export class RetroService {
         // therefore admits a join only against the same room revision that is
         // subsequently updated, and no verifier state is process-local.
         if (!verifyStoredRoomAccess(room.access, resolved.password))
-          throw new RetroError('wrong-room-password', 'Incorrect room password.');
+          throw new RetroError(
+            'wrong-room-password',
+            'Incorrect room password.',
+          );
         if (room.phase === 'closed')
           throw new RetroError(
             'room-closed',
@@ -671,7 +677,10 @@ export class RetroService {
             return { result: undefined };
           }
         }
-        throw new RetroError('invalid-command', 'Unsupported retrospective command.');
+        throw new RetroError(
+          'invalid-command',
+          'Unsupported retrospective command.',
+        );
       },
       context,
     );
