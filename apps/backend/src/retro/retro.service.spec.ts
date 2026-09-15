@@ -115,13 +115,23 @@ describe('room lifecycle and privacy', () => {
       available: false,
       requiresPassword: false,
     });
+    for (let i = 0; i < 28; i++) service.join(owner.code, `Member ${i}`);
+    expect(service.inspect(owner.code)).toEqual({
+      code: owner.code,
+      available: false,
+      requiresPassword: false,
+    });
+    expect(() => service.join(owner.code, 'Carol')).toThrow('full');
+
+    // Closure rejects anonymous entry as well as join mutations. Existing
+    // members can still use their saved resume credential for the frozen view.
     for (let i = 0; i < 4; i++) service.mutate(owner, { type: 'advance' });
     expect(service.inspect(owner.code)).toEqual({
       code: owner.code,
-      available: true,
+      available: false,
       requiresPassword: false,
     });
-    expect(() => service.join(owner.code, 'Carol')).toThrow('New participants');
+    expect(service.resume(owner.code, owner.token)).toEqual(owner);
 
     vi.advanceTimersByTime(RETRO_LIFETIME_MS);
     expect(service.inspect(owner.code)).toEqual({

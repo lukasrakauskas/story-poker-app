@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-type RetroCommandLog = { type: string; code?: string };
+type RetroCommandLog = {
+  type: string;
+  code?: string;
+  requestId?: string;
+};
 
 declare global {
   interface Window {
@@ -36,10 +40,113 @@ function recordRetroCommands() {
 test("checks unknown room links without showing participant fields", async ({
   page,
 }) => {
+  await page.addInitScript(recordRetroCommands);
   await page.goto("/retro/missing-room");
   await expect(
     page.getByText("This room link is expired or does not exist.", {
       exact: false,
+    })
+  ).toBeVisible();
+  await expect(page.getByLabel("Your name")).toHaveCount(0);
+  expect(await page.evaluate(() => window.retroCommands)).toContainEqual({
+    type: "inspect",
+    code: "missing-room",
+    requestId: expect.any(String),
+  });
+  await expect(
+    page.getByRole("link", { name: "Start or join another room", exact: true })
+  ).toHaveAttribute("href", "/retro");
+});
+
+test("shows a checking state before an inspection responds", async ({
+  page,
+}) => {
+  await page.routeWebSocket("**/retro", (socket) => {
+    socket.onMessage(() => {
+      // Keep the inspection pending so the lobby remains in its loading state.
+    });
+  });
+  await page.goto("/retro/loading-room");
+  await expect(
+    page.getByText("Checking room availability…", { exact: true })
+  ).toBeVisible();
+  await expect(page.getByLabel("Your name")).toHaveCount(0);
+});
+
+test("keeps protected room inspection metadata opaque", async ({ page }) => {
+  await page.routeWebSocket("**/retro", (socket) => {
+    socket.onMessage((message) => {
+      const request = JSON.parse(
+        typeof message === "string" ? message : message.toString()
+      );
+      if (request.data?.type !== "inspect") return;
+      socket.send(
+        JSON.stringify({
+          event: "retro-room-info",
+          data: {
+            code: request.data.code,
+            available: true,
+            requiresPassword: true,
+            requestId: request.data.requestId,
+          },
+        })
+      );
+    });
+  });
+  await page.goto("/retro/protected-room");
+  await expect(
+    page.getByText("Room access required", { exact: true })
+  ).toBeVisible();
+  await expect(page.getByLabel("Your name")).toHaveCount(0);
+  await expect(
+    page.getByText("Start or join another room", { exact: true })
+  ).toBeVisible();
+});
+
+test("shows an unavailable state when a room expires after inspection", async ({
+  page,
+}) => {
+  await page.routeWebSocket("**/retro", (socket) => {
+    socket.onMessage((message) => {
+      const request = JSON.parse(
+        typeof message === "string" ? message : message.toString()
+      );
+      const command = request.data;
+      if (command?.type === "inspect") {
+        socket.send(
+          JSON.stringify({
+            event: "retro-room-info",
+            data: {
+              code: command.code,
+              available: true,
+              requiresPassword: false,
+              requestId: command.requestId,
+            },
+          })
+        );
+      } else if (command?.type === "join") {
+        socket.send(
+          JSON.stringify({
+            event: "retro-error",
+            data: {
+              code: "room-expired",
+              message: "This room has expired. Create a new retrospective.",
+              requestId: command.requestId,
+            },
+          })
+        );
+      }
+    });
+  });
+  await page.goto("/retro/expired-room");
+  await expect(page.getByLabel("Your name")).toBeVisible();
+  await page.getByLabel("Your name").fill("Alice");
+  await page
+    .getByRole("button", { name: "Join retrospective", exact: true })
+    .click();
+  await expect(
+    page.getByText("This room has expired. Create a new retrospective.", {
+      exact: true,
     })
   ).toBeVisible();
   await expect(page.getByLabel("Your name")).toHaveCount(0);

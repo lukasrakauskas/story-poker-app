@@ -99,6 +99,25 @@ describe('RetroApplicationService', () => {
       event: 'retro-error',
       data: { code: 'invalid-session' },
     });
+
+    for (let i = 0; i < 4; i++)
+      application.execute('owner', { type: 'advance' });
+    expect(
+      event(
+        application.execute('late-visitor', {
+          type: 'inspect',
+          code: created.room.code,
+        }),
+        'late-visitor',
+      ),
+    ).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: created.room.code,
+        available: false,
+        requiresPassword: false,
+      },
+    });
   });
 
   it('owns session routing, recipient privacy, and synchronized reveal', () => {

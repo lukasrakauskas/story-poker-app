@@ -141,7 +141,12 @@ export class RetroService {
     if (!isValidRetroCode(code))
       return { code, available: false, requiresPassword: false };
     const room = this.registry.get<StoredRoom>(ROOM_NAMESPACE, code);
-    if (!room || room.expiresAt <= Date.now())
+    if (
+      !room ||
+      room.expiresAt <= Date.now() ||
+      room.phase === 'closed' ||
+      room.members.length >= MAX_MEMBERS
+    )
       return { code, available: false, requiresPassword: false };
     return { code, available: true, requiresPassword: false };
   }

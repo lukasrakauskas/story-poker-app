@@ -132,6 +132,12 @@ export function useRetroSocket(initialCode?: string) {
       settle(false);
       client.close();
     };
+    const markUnavailable = () => {
+      const code =
+        inspectedCode.current ?? credentials.current?.code ?? routeCode;
+      if (code && isValidRetroCode(code))
+        setRoomInfo({ code, available: false, requiresPassword: false });
+    };
     const timer = setTimeout(
       () => fail("Connection timed out. Retry to resume this session."),
       15000
@@ -182,15 +188,25 @@ export function useRetroSocket(initialCode?: string) {
       try {
         event = JSON.parse(message.data);
         if (event.event === "retro-room-info") {
+          const responseRequestId = event.data?.requestId;
           if (
             typeof event.data?.code !== "string" ||
             !isValidRetroCode(event.data.code) ||
             typeof event.data.available !== "boolean" ||
             typeof event.data.requiresPassword !== "boolean" ||
+            (responseRequestId !== undefined &&
+              (typeof responseRequestId !== "string" ||
+                responseRequestId.length > 64)) ||
             (inspectedCode.current && event.data.code !== inspectedCode.current)
           ) {
             throw new Error("Invalid room info");
           }
+          if (
+            inFlight.current &&
+            responseRequestId !== undefined &&
+            responseRequestId !== inFlight.current.id
+          )
+            return;
           setRoomInfo({
             code: event.data.code,
             available: event.data.available,
@@ -261,6 +277,7 @@ export function useRetroSocket(initialCode?: string) {
             event.data.code === "invalid-session" ||
             event.data.code === "removed"
           ) {
+            if (event.data.code === "room-expired") markUnavailable();
             // A live tab replaced by another tab must not delete their shared
             // valid cookie. Clear only rejected resume credentials or expired rooms.
             if (
@@ -276,6 +293,11 @@ export function useRetroSocket(initialCode?: string) {
             setSelfId(null);
             client.close();
             setConnection("disconnected");
+          } else if (
+            event.data.code === "room-closed" ||
+            event.data.code === "capacity"
+          ) {
+            markUnavailable();
           } else if (!ready.current) {
             // A failed resume must not enable edits on a stale snapshot.
             client.close();

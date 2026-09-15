@@ -70,11 +70,18 @@ test("closure freezes snapshots and save times across presence, reopen and late 
   const lateContext = await browser.newContext();
   const late = await lateContext.newPage();
   await late.goto(url);
-  await late.getByLabel("Your name").fill("Carol");
-  await late
-    .getByRole("button", { name: "Join retrospective", exact: true })
-    .click();
-  await expect(late.getByText(/New participants cannot join/)).toBeVisible();
+  await expect(
+    late.getByText("This room link is expired or does not exist.", {
+      exact: false,
+    })
+  ).toBeVisible();
+  await expect(late.getByLabel("Your name")).toHaveCount(0);
+  await expect(
+    late.getByRole("link", {
+      name: "Start or join another room",
+      exact: true,
+    })
+  ).toHaveAttribute("href", "/retro");
   expect(await saved(page)).toBe(originalOwner);
   expect(await saved(reopened)).toBe(originalGuest);
   await page
