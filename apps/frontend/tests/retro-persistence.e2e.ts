@@ -82,6 +82,12 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   await expect(
     reopened.getByText("Continue as Alice", { exact: true }).first()
   ).toBeVisible();
+  await expect(
+    reopened.getByText(
+      "Your entered name, Ignored new name, is kept if you choose to join as someone else.",
+      { exact: true }
+    )
+  ).toBeVisible();
   await reopened
     .getByRole("button", {
       name: "Join as someone else / Forget this session",

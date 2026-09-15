@@ -195,6 +195,7 @@ export function useRetroSocket(initialCode?: string) {
       credentials.current = null;
       operationCode.current = null;
       resumeOnConnect.current = false;
+      terminal.current = false;
       latestRoom.current = null;
       clearRememberedIdentity();
       setRoom(null);

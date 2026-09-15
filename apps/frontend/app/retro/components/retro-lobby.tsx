@@ -187,6 +187,12 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
                     Moderator access is saved with this identity.
                   </output>
                 )}
+                {name.trim() && (
+                  <p className="text-sm text-muted-foreground">
+                    Your entered name, {name.trim()}, is kept if you choose to
+                    join as someone else.
+                  </p>
+                )}
                 <Button
                   className="w-full"
                   disabled={disabled}
@@ -201,7 +207,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
                     <Button
                       className="w-full"
                       variant="outline"
-                      disabled={pending}
+                      disabled={disabled}
                     >
                       Join as someone else / Forget this session
                     </Button>
@@ -224,7 +230,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
                       <AlertDialogCancel>Keep this session</AlertDialogCancel>
                       <AlertDialogAction
                         variant="destructive"
-                        disabled={pending}
+                        disabled={disabled}
                         onClick={() =>
                           void forgetRememberedSession(remembered.code)
                         }
