@@ -14,7 +14,15 @@ import { Label } from "ui/components/label";
 import { useRetro } from "./retro-provider";
 
 export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
-  const { send, connection, pending, error, retry } = useRetro();
+  const {
+    send,
+    connection,
+    pending,
+    error,
+    retry,
+    reconnectAttempt,
+    recovery,
+  } = useRetro();
   const [mode, setMode] = useState<"create" | "join">(
     initialCode ? "join" : "create"
   );
@@ -78,14 +86,23 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
         <CardContent className="space-y-4">
           <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
             <output aria-live="polite" aria-atomic="true">
-              {pending
-                ? "Waiting for the room…"
-                : connection === "connecting"
-                  ? "Connecting to retrospective…"
-                  : connection === "connected"
-                    ? "Connected · ready to enter"
-                    : "Disconnected · room entry is unavailable"}
+              {recovery === "offline"
+                ? "Offline · reconnects when online"
+                : recovery === "hidden"
+                  ? "Reconnect paused while this tab is hidden"
+                  : pending
+                    ? "Waiting for the room…"
+                    : connection === "connecting"
+                      ? "Connecting to retrospective…"
+                      : connection === "connected"
+                        ? "Connected · ready to enter"
+                        : "Disconnected · room entry is unavailable"}
             </output>
+            {recovery === "scheduled" && (
+              <output aria-live="polite" aria-atomic="true">
+                Automatic reconnect scheduled · attempt {reconnectAttempt}
+              </output>
+            )}
             {error && (
               <p role="alert" className="text-destructive">
                 {error.message}

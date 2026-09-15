@@ -10,7 +10,11 @@ import {
   CardTitle,
 } from "ui/components/card";
 
-type Connection = "connecting" | "connected" | "disconnected";
+import type {
+  Connection,
+  RetroRecovery,
+} from "../../../hooks/use-retro-socket";
+
 type Failure = { code: string; message: string };
 
 export function RetroStatus({
@@ -18,6 +22,8 @@ export function RetroStatus({
   pending,
   error,
   retry,
+  reconnectAttempt,
+  recovery,
   cookieSaved,
   historySaved,
   expired,
@@ -31,6 +37,8 @@ export function RetroStatus({
   pending: boolean;
   error: Failure | null;
   retry: () => void;
+  reconnectAttempt: number;
+  recovery: RetroRecovery;
   cookieSaved: boolean | null;
   historySaved: boolean | null;
   expired: boolean;
@@ -40,15 +48,26 @@ export function RetroStatus({
   phase: RetroPhase;
   className?: string;
 }) {
-  const status = pending
-    ? connection === "connecting"
-      ? "Restoring your session…"
-      : "Waiting for server confirmation…"
-    : connection === "connecting"
-      ? "Connecting to retrospective…"
-      : connection === "connected"
-        ? "Connected · changes sync live"
-        : "Disconnected · changes are disabled";
+  const status =
+    recovery === "offline"
+      ? "Offline · reconnects when online"
+      : recovery === "hidden"
+        ? "Reconnect paused while this tab is hidden"
+        : pending
+          ? connection === "connecting"
+            ? "Restoring your session…"
+            : "Waiting for server confirmation…"
+          : connection === "connecting"
+            ? "Connecting to retrospective…"
+            : connection === "connected"
+              ? "Connected · changes sync live"
+              : "Disconnected · changes are disabled";
+  const recoveryStatus =
+    recovery === "scheduled"
+      ? `Automatic reconnect scheduled · attempt ${reconnectAttempt}`
+      : recovery === "connecting" && reconnectAttempt > 0
+        ? `Automatic reconnect attempt ${reconnectAttempt}…`
+        : null;
 
   return (
     <Card className={`gap-4 py-4 ${className}`}>
@@ -71,10 +90,15 @@ export function RetroStatus({
         aria-live="polite"
         aria-atomic="false"
       >
-        {connection === "disconnected" && !terminal && (
+        {connection !== "connected" && !terminal && (
           <Button size="sm" variant="outline" onClick={retry}>
             Retry connection
           </Button>
+        )}
+        {recoveryStatus && (
+          <output aria-live="polite" aria-atomic="true">
+            {recoveryStatus}
+          </output>
         )}
         {error && !expired && (
           <p className="text-destructive">{error.message}</p>
