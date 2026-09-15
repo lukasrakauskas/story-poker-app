@@ -8,6 +8,7 @@ import { z } from "zod";
 export const PARTICIPANT_NAME_MIN_LENGTH = 3;
 export const PARTICIPANT_NAME_MAX_LENGTH = 30;
 
+/** The canonical participant name contract shared by every collaboration domain. */
 export const participantNameSchema = z
   .string()
   .trim()
@@ -24,9 +25,10 @@ export function normalizeParticipantName(name: unknown): string {
   return typeof name === "string" ? name.trim() : "";
 }
 
-export function validateParticipantName(name: unknown): string | null {
+export function participantNameError(name: unknown): string | null {
   const parsed = participantNameSchema.safeParse(name);
-  return parsed.success
-    ? null
-    : parsed.error.issues.map((issue) => issue.message).join(", ");
+  return parsed.success ? null : parsed.error.format()._errors.join(", ");
 }
+
+/** Compatibility alias for callers of the earlier participant contract. */
+export const validateParticipantName = participantNameError;

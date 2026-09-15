@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  participantNameError,
   participantNameSchema,
-  validateParticipantName,
 } from 'shared/participant';
 import { retroCommandSchema } from '../retro/retro.schema.js';
 import { ParticipantService } from './participant.service.js';
@@ -23,13 +23,13 @@ describe('shared participant name contract', () => {
 
       expect(parsed.success).toBe(valid);
       if (valid) {
-        expect(validateParticipantName(input)).toBeNull();
+        expect(participantNameError(input)).toBeNull();
         expect(participants.validateName(input)).toBeNull();
         if (!parsed.success) throw new Error(parsed.error.message);
         expect(parsed.data).toBe(input.trim());
         expect(participants.create(input).name).toBe(input.trim());
       } else {
-        expect(validateParticipantName(input)).toEqual(expect.any(String));
+        expect(participantNameError(input)).toEqual(expect.any(String));
         expect(participants.validateName(input)).toEqual(expect.any(String));
       }
     },

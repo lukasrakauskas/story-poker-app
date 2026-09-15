@@ -3,7 +3,7 @@
 import { useState } from "react";
 import {
   normalizeParticipantName,
-  validateParticipantName,
+  participantNameError,
 } from "shared/participant";
 import { Button } from "ui/components/button";
 import {
@@ -32,7 +32,7 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
     error?.code === "room-expired" ||
     error?.code === "invalid-session";
   const normalizedName = normalizeParticipantName(name);
-  const nameError = validateParticipantName(name);
+  const nameError = participantNameError(normalizedName);
   const visibleNameError = nameTouched ? nameError : null;
   const canSubmit =
     !disabled &&

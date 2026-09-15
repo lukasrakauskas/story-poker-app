@@ -2,7 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
 import {
   normalizeParticipantName,
-  validateParticipantName,
+  participantNameError,
+} from 'shared/participant';
+
+export {
+  normalizeParticipantName,
+  participantNameError,
+  participantNameSchema,
 } from 'shared/participant';
 
 export type CollaborationRole = 'participant' | 'moderator';
@@ -22,7 +28,7 @@ export class ParticipantService {
   }
 
   validateName(name: unknown): string | null {
-    return validateParticipantName(name);
+    return participantNameError(name);
   }
 
   create(
