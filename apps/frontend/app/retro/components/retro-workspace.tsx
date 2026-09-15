@@ -58,7 +58,7 @@ const phases: {
 
 export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
   return (
-    <RetroProvider>
+    <RetroProvider initialCode={initialCode}>
       <Workspace initialCode={initialCode} />
     </RetroProvider>
   );
