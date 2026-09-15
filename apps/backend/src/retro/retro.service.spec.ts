@@ -32,6 +32,34 @@ async function add(text = 'Great teamwork') {
 }
 
 describe('room lifecycle and privacy', () => {
+  it('inspects unknown, malformed, full, closed and expired links without revealing content', async () => {
+    const unavailable = (code: string) => ({
+      code,
+      available: false,
+      requiresPassword: false,
+    });
+    expect(await service.inspect(owner.code)).toEqual({
+      code: owner.code,
+      available: true,
+      requiresPassword: false,
+    });
+    expect(await service.inspect('missing-room')).toEqual(
+      unavailable('missing-room'),
+    );
+    expect(await service.inspect('not a room')).toEqual(
+      unavailable('not a room'),
+    );
+    for (let i = 0; i < 28; i++) await service.join(owner.code, `Member ${i}`);
+    expect(await service.inspect(owner.code)).toEqual(unavailable(owner.code));
+    for (let i = 0; i < 4; i++)
+      await service.mutate(owner, { type: 'advance' });
+    expect(await service.inspect(owner.code)).toEqual(unavailable(owner.code));
+    // An unavailable anonymous link still permits an authorized frozen viewer.
+    const resumed = await service.resume(owner.code, owner.token);
+    expect((await service.snapshot(resumed)).phase).toBe('closed');
+    vi.advanceTimersByTime(RETRO_LIFETIME_MS);
+    expect(await service.inspect(owner.code)).toEqual(unavailable(owner.code));
+  });
   it('recovers stale capacity and names after five minutes while retaining author and owner display', async () => {
     await service.mutate(guest, {
       type: 'add-note',
