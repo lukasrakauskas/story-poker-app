@@ -202,6 +202,7 @@ const room: RetroRoom = {
   notes: [],
   groups: [],
   actions: [],
+  requiresPassword: false,
 };
 
 function stateEvent(
@@ -248,6 +249,37 @@ beforeEach(() => {
 });
 afterEach(() => {
   for (const client of clients) client.dispose();
+});
+
+test("correlates room inspection and exposes only access metadata", async () => {
+  const context = setup();
+  clients.push(context.client);
+  context.transport.openSocket();
+
+  const pending = context.client.send({ type: "inspect", code: "retro-room" });
+  assert.deepEqual(context.transport.lastCommand().data, {
+    type: "inspect",
+    code: "retro-room",
+    requestId: "1",
+  });
+  context.transport.message(
+    JSON.stringify({
+      event: "retro-room-info",
+      data: {
+        code: "retro-room",
+        available: true,
+        requiresPassword: true,
+        requestId: "1",
+      },
+    })
+  );
+
+  assert.equal(await pending, true);
+  assert.deepEqual(context.client.getSnapshot().roomInfo, {
+    code: "retro-room",
+    available: true,
+    requiresPassword: true,
+  });
 });
 
 test("resumes a cookie session with a correlated request and saves the snapshot", () => {

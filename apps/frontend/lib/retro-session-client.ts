@@ -1,9 +1,9 @@
-import { z } from "zod";
 import type {
-  RetroActionOwner,
   RetroCommand,
   RetroRoom,
+  RetroServerEvent,
 } from "shared/retrospective";
+import { parseRetroServerEvent } from "./retro-protocol";
 import {
   initialRetroSessionState,
   retroSessionReducer,
@@ -63,85 +63,6 @@ export interface RetroSessionClientOptions {
   connectionTimeoutMs?: number;
   requestTimeoutMs?: number;
 }
-
-const id = z.string().min(1).max(64);
-const roomCode = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
-const participantName = z.string().min(3).max(30);
-const text = z.string().min(1).max(1000);
-const memberSchema = z.object({
-  id,
-  name: participantName,
-  moderator: z.boolean(),
-  connected: z.boolean(),
-  ready: z.boolean(),
-});
-const noteSchema = z.object({
-  id,
-  authorId: id,
-  authorName: participantName,
-  column: z.enum(["went-well", "improve", "ideas"]),
-  text,
-  groupId: id.nullable(),
-  voteCount: z.number().int().min(0).max(30).nullable(),
-  votedBySelf: z.boolean(),
-});
-const groupSchema = z.object({
-  id,
-  title: z.string().min(1).max(100),
-  voteCount: z.number().int().min(0).max(30).nullable(),
-  votedBySelf: z.boolean(),
-});
-const actionOwnerSchema: z.ZodType<RetroActionOwner> = z.discriminatedUnion(
-  "kind",
-  [
-    z.object({ kind: z.literal("unassigned") }),
-    z.object({
-      kind: z.literal("participant"),
-      participantId: id,
-      name: participantName,
-    }),
-    z.object({
-      kind: z.literal("external"),
-      name: z.string().min(1).max(60),
-    }),
-  ]
-);
-const actionSchema = z.object({
-  id,
-  text,
-  owner: actionOwnerSchema,
-  done: z.boolean(),
-});
-const roomSchema: z.ZodType<RetroRoom> = z.object({
-  code: roomCode,
-  title: z.string().min(1).max(100),
-  phase: z.enum(["write", "group", "vote", "discuss", "closed"]),
-  expiresAt: z.number().int().nonnegative().max(8.64e15),
-  closedAt: z.number().int().nonnegative().max(8.64e15).nullable(),
-  members: memberSchema.array().max(30),
-  notes: noteSchema.array().max(300),
-  groups: groupSchema.array().max(300),
-  actions: actionSchema.array().max(100),
-});
-const retroServerEventSchema = z.discriminatedUnion("event", [
-  z.object({
-    event: z.literal("retro-state"),
-    data: z.object({
-      room: roomSchema,
-      self: z.object({ id, token: id }),
-      requestId: z.string().max(64).optional(),
-    }),
-  }),
-  z.object({
-    event: z.literal("retro-error"),
-    data: z.object({
-      code: z.string().min(1).max(100),
-      message: z.string().min(1).max(1000),
-      requestId: z.string().max(64).optional(),
-    }),
-  }),
-]);
-type RetroServerEvent = z.infer<typeof retroServerEventSchema>;
 
 type PendingRequest = {
   id: string;
@@ -303,6 +224,7 @@ export class RetroSessionClient {
       return;
     }
     if (parsed.event === "retro-state") this.handleState(parsed);
+    else if (parsed.event === "retro-room-info") this.handleRoomInfo(parsed);
     else this.handleError(parsed);
   };
 
@@ -350,6 +272,18 @@ export class RetroSessionClient {
     // Resolve the command before publishing the room update. React editors can
     // clear their local draft in the promise continuation, preventing an
     // intermediate render that shows both the committed note and old draft.
+    this.notifySoon();
+  }
+
+  private handleRoomInfo(
+    event: Extract<RetroServerEvent, { event: "retro-room-info" }>
+  ) {
+    const pending = this.pendingRequest;
+    const acknowledged = !pending || event.data.requestId === pending.id;
+    if (!acknowledged) return;
+    const { requestId: _requestId, ...info } = event.data;
+    this.transition({ type: "room-info", info }, false);
+    if (pending) this.finishPending(true, false);
     this.notifySoon();
   }
 
@@ -516,8 +450,7 @@ export class RetroSessionClient {
   private parseMessage(data: unknown): RetroServerEvent | null {
     try {
       const raw = typeof data === "string" ? JSON.parse(data) : data;
-      const parsed = retroServerEventSchema.safeParse(raw);
-      return parsed.success ? parsed.data : null;
+      return parseRetroServerEvent(raw);
     } catch {
       return null;
     }

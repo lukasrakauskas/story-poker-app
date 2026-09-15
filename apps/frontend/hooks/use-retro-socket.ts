@@ -95,6 +95,7 @@ export function useRetroSocket(initialCode?: string) {
 
   return {
     room: state.room,
+    roomInfo: state.roomInfo,
     selfId: state.selfId,
     connection: state.connection,
     pending: state.pendingRequestId !== null,

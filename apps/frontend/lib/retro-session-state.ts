@@ -1,4 +1,4 @@
-import type { RetroRoom } from "shared/retrospective";
+import type { RetroRoom, RetroRoomInfo } from "shared/retrospective";
 
 export type RetroConnection = "connecting" | "connected" | "disconnected";
 export type RetroSessionPhase =
@@ -17,6 +17,7 @@ export interface RetroSessionState {
   connection: RetroConnection;
   phase: RetroSessionPhase;
   room: RetroRoom | null;
+  roomInfo: RetroRoomInfo | null;
   selfId: string | null;
   pendingRequestId: string | null;
   error: RetroFailure | null;
@@ -28,6 +29,7 @@ export const initialRetroSessionState: RetroSessionState = {
   connection: "connecting",
   phase: "anonymous",
   room: null,
+  roomInfo: null,
   selfId: null,
   pendingRequestId: null,
   error: null,
@@ -45,6 +47,7 @@ type RetroSessionAction =
       selfId: string;
       acknowledged: boolean;
     }
+  | { type: "room-info"; info: RetroRoomInfo }
   | { type: "request-settled"; requestId: string; success: boolean }
   | { type: "server-error"; error: RetroFailure }
   | {
@@ -104,9 +107,12 @@ export function retroSessionReducer(
             ? "active"
             : "resuming",
         room: action.room,
+        roomInfo: null,
         selfId: action.selfId,
         error: action.acknowledged ? null : state.error,
       };
+    case "room-info":
+      return { ...state, roomInfo: action.info, error: null };
     case "request-settled":
       if (state.pendingRequestId !== action.requestId) return state;
       return {
