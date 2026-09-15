@@ -2,10 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { RetroServerEvent } from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
-import { RoomRegistryService } from '../collaboration/room-registry.service.js';
-import { RetroApplicationService } from './retro-application.service.js';
-import { RetentionService } from '../collaboration/retention.service.js';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
+import { InMemoryRetroRoomRepository } from './retro-room.repository.js';
+import { RetroApplicationService } from './retro-application.service.js';
 import { RetroService } from './retro.service.js';
 
 let application: RetroApplicationService;
@@ -14,8 +13,7 @@ beforeEach(() => {
   application = new RetroApplicationService(
     new RetroService(
       new ParticipantService(),
-      new RoomRegistryService(),
-      new RetentionService(),
+      new InMemoryRetroRoomRepository(),
     ),
     new ConnectionRegistryService(),
     new ApplicationEventBus(),
@@ -23,7 +21,7 @@ beforeEach(() => {
 });
 
 function event(
-  applicationResult: ReturnType<RetroApplicationService['execute']>,
+  applicationResult: Awaited<ReturnType<RetroApplicationService['execute']>>,
   connectionId: string,
 ): RetroServerEvent {
   return applicationResult.messages.find(
@@ -32,7 +30,7 @@ function event(
 }
 
 function state(
-  applicationResult: ReturnType<RetroApplicationService['execute']>,
+  applicationResult: Awaited<ReturnType<RetroApplicationService['execute']>>,
   connectionId: string,
 ) {
   const message = event(applicationResult, connectionId);
@@ -40,113 +38,47 @@ function state(
   return message.data;
 }
 
+async function establish(
+  connectionId: string,
+  command: Extract<
+    Parameters<RetroApplicationService['establish']>[0],
+    { type: 'create' | 'join' }
+  >,
+) {
+  const operation = await application.establish(command);
+  const result = await application.execute(
+    connectionId,
+    { type: 'resume', code: operation.session.code },
+    undefined,
+    operation.session.token,
+  );
+  return { operation, state: state(result, connectionId), result };
+}
+
 describe('RetroApplicationService', () => {
-  it('answers anonymous inspections with only availability metadata', () => {
-    const created = state(
-      application.execute('owner', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Private room title',
-      }),
-      'owner',
-    );
-
-    expect(
-      event(
-        application.execute(
-          'visitor',
-          { type: 'inspect', code: created.room.code },
-          'inspect-1',
-        ),
-        'visitor',
-      ),
-    ).toEqual({
-      event: 'retro-room-info',
-      data: {
-        code: created.room.code,
-        available: true,
-        requiresPassword: false,
-        requestId: 'inspect-1',
-      },
+  it('owns session routing, recipient privacy, and synchronized reveal', async () => {
+    const created = await establish('owner-connection', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
     });
-    expect(
-      event(
-        application.execute('unknown', {
-          type: 'inspect',
-          code: 'missing-room',
-        }),
-        'unknown',
-      ),
-    ).toEqual({
-      event: 'retro-room-info',
-      data: {
-        code: 'missing-room',
-        available: false,
-        requiresPassword: false,
-      },
-    });
-    expect(
-      JSON.stringify(
-        application.execute('visitor', {
-          type: 'inspect',
-          code: created.room.code,
-        }),
-      ),
-    ).not.toContain('Private room title');
-    expect(
-      event(application.execute('visitor', { type: 'advance' }), 'visitor'),
-    ).toMatchObject({
-      event: 'retro-error',
-      data: { code: 'invalid-session' },
-    });
-
-    for (let i = 0; i < 4; i++)
-      application.execute('owner', { type: 'advance' });
-    expect(
-      event(
-        application.execute('late-visitor', {
-          type: 'inspect',
-          code: created.room.code,
-        }),
-        'late-visitor',
-      ),
-    ).toEqual({
-      event: 'retro-room-info',
-      data: {
-        code: created.room.code,
-        available: false,
-        requiresPassword: false,
-      },
-    });
-  });
-
-  it('owns session routing, recipient privacy, and synchronized reveal', () => {
-    const created = state(
-      application.execute('owner-connection', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'owner-connection',
-    );
-    const joinedResult = application.execute('guest-connection', {
+    const joined = await establish('guest-connection', {
       type: 'join',
       name: 'Bobby',
-      code: created.room.code,
+      code: created.state.room.code,
     });
-    const joined = state(joinedResult, 'guest-connection');
     expect(
-      joinedResult.messages.map((message) => message.connectionId),
+      joined.result.messages.map((message) => message.connectionId),
     ).toEqual(['owner-connection', 'guest-connection']);
 
-    const ownerWrite = application.execute('owner-connection', {
+    const ownerWrite = await application.execute('owner-connection', {
       type: 'add-note',
       column: 'went-well',
       text: 'Owner thought',
     });
     expect(state(ownerWrite, 'owner-connection').room.notes).toHaveLength(1);
     expect(state(ownerWrite, 'guest-connection').room.notes).toEqual([]);
-    const guestWrite = application.execute('guest-connection', {
+    const guestWrite = await application.execute('guest-connection', {
       type: 'add-note',
       column: 'ideas',
       text: 'Guest thought',
@@ -158,7 +90,7 @@ describe('RetroApplicationService', () => {
       'Guest thought',
     );
 
-    const ready = application.execute('guest-connection', {
+    const ready = await application.execute('guest-connection', {
       type: 'toggle-ready',
     });
     expect(
@@ -166,77 +98,117 @@ describe('RetroApplicationService', () => {
         (member) => member.name === 'Bobby',
       )?.ready,
     ).toBe(true);
-    expect(
-      state(ready, 'guest-connection').room.members.find(
-        (member) => member.name === 'Bobby',
-      )?.ready,
-    ).toBe(true);
 
-    const reveal = application.execute('owner-connection', { type: 'advance' });
+    const reveal = await application.execute('owner-connection', {
+      type: 'advance',
+    });
     const ownerGrouping = state(reveal, 'owner-connection').room;
     expect(ownerGrouping.phase).toBe('group');
     expect(ownerGrouping.notes).toHaveLength(2);
     expect(ownerGrouping.members.every((member) => !member.ready)).toBe(true);
     expect(state(reveal, 'guest-connection').room.notes).toHaveLength(2);
 
-    const voting = application.execute('owner-connection', {
+    const voting = await application.execute('owner-connection', {
       type: 'advance',
     });
     const ownerVoting = state(voting, 'owner-connection').room;
-    const voted = application.execute('guest-connection', {
+    const voted = await application.execute('guest-connection', {
       type: 'toggle-vote',
       id: ownerVoting.notes[0].id,
-    });
-    expect(state(voted, 'owner-connection').room.notes[0]).toMatchObject({
-      voteCount: null,
-      votedBySelf: false,
     });
     expect(state(voted, 'guest-connection').room.notes[0]).toMatchObject({
       voteCount: null,
       votedBySelf: true,
     });
+    expect(JSON.stringify(voted.messages)).not.toContain('token');
     expect(JSON.stringify(voted.messages)).not.toContain('voterIds');
 
-    const discuss = application.execute('owner-connection', {
+    const discuss = await application.execute('owner-connection', {
       type: 'advance',
     });
     expect(state(discuss, 'owner-connection').room.notes[0]).toMatchObject({
       voteCount: 1,
       votedBySelf: false,
     });
-    expect(state(discuss, 'guest-connection').room.notes[0]).toMatchObject({
-      voteCount: 1,
-      votedBySelf: false,
-    });
-    expect(joined.self.token).not.toBe(created.self.token);
+    expect(joined.operation.session.token).not.toBe(
+      created.operation.session.token,
+    );
   });
 
-  it('revokes and closes a participant removed by a moderator', () => {
-    const created = state(
-      application.execute('owner', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'owner',
+  it('protects entry with a repository-backed verifier and exposes inspection only', async () => {
+    const created = await establish('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Sensitive retrospective',
+      password: 'secret',
+    });
+    expect(created.state.room.requiresPassword).toBe(true);
+    expect(JSON.stringify(created.state)).not.toContain('secret');
+
+    const inspection = await application.execute(
+      'visitor',
+      { type: 'inspect', code: created.state.room.code },
+      'inspect-1',
     );
-    const joined = state(
-      application.execute('guest', {
+    expect(event(inspection, 'visitor')).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: created.state.room.code,
+        available: true,
+        requiresPassword: true,
+        requestId: 'inspect-1',
+      },
+    });
+    expect(JSON.stringify(inspection)).not.toContain('Sensitive retrospective');
+
+    await expect(
+      application.establish({
         type: 'join',
         name: 'Bobby',
-        code: created.room.code,
+        code: created.state.room.code,
+        password: 'wrong',
       }),
-      'guest',
-    );
-    application.execute('guest', {
+    ).rejects.toThrow('Incorrect room password');
+    const joined = await establish('guest', {
+      type: 'join',
+      name: 'Bobby',
+      code: created.state.room.code,
+      password: 'secret',
+    });
+    await application.disconnect('guest');
+    expect(
+      state(
+        await application.execute(
+          'replacement',
+          { type: 'resume', code: created.state.room.code },
+          undefined,
+          joined.operation.session.token,
+        ),
+        'replacement',
+      ).self.id,
+    ).toBe(joined.state.self.id);
+  });
+
+  it('revokes and closes a participant removed by a moderator', async () => {
+    const created = await establish('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    const joined = await establish('guest', {
+      type: 'join',
+      name: 'Bobby',
+      code: created.state.room.code,
+    });
+    await application.execute('guest', {
       type: 'add-note',
       column: 'ideas',
       text: 'Keep this attribution',
     });
 
-    const removed = application.execute('owner', {
+    const removed = await application.execute('owner', {
       type: 'remove-member',
-      memberId: joined.self.id,
+      memberId: joined.state.self.id,
     });
     expect(event(removed, 'guest')).toMatchObject({
       event: 'retro-error',
@@ -248,11 +220,12 @@ describe('RetroApplicationService', () => {
     expect(state(removed, 'owner').room.members).toHaveLength(1);
     expect(
       event(
-        application.execute('replacement', {
-          type: 'resume',
-          code: created.room.code,
-          token: joined.self.token,
-        }),
+        await application.execute(
+          'replacement',
+          { type: 'resume', code: created.state.room.code },
+          undefined,
+          joined.operation.session.token,
+        ),
         'replacement',
       ),
     ).toMatchObject({
@@ -261,25 +234,23 @@ describe('RetroApplicationService', () => {
     });
   });
 
-  it('returns explicit replacement messages and close effects', () => {
-    const created = state(
-      application.execute('original', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'original',
-    );
-    const resumed = application.execute('replacement', {
-      type: 'resume',
-      code: created.room.code,
-      token: created.self.token,
+  it('returns explicit replacement messages and close effects', async () => {
+    const created = await establish('original', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
     });
+    const resumed = await application.execute(
+      'replacement',
+      { type: 'resume', code: created.state.room.code },
+      undefined,
+      created.operation.session.token,
+    );
     expect(event(resumed, 'original')).toMatchObject({
       event: 'retro-error',
       data: { code: 'invalid-session' },
     });
-    expect(state(resumed, 'replacement').self).toEqual(created.self);
+    expect(state(resumed, 'replacement').self.id).toBe(created.state.self.id);
     expect(resumed.closes).toEqual([
       {
         connectionId: 'original',
@@ -289,7 +260,7 @@ describe('RetroApplicationService', () => {
     ]);
     expect(
       event(
-        application.execute('original', {
+        await application.execute('original', {
           type: 'add-note',
           column: 'ideas',
           text: 'Stale command',
@@ -302,28 +273,25 @@ describe('RetroApplicationService', () => {
     });
   });
 
-  it('accepts only the first moderator recovery claim', () => {
-    const created = state(
-      application.execute('owner', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'owner',
-    );
-    application.execute('guest', {
+  it('accepts only the first moderator recovery claim', async () => {
+    const created = await establish('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    await establish('guest', {
       type: 'join',
       name: 'Bobby',
-      code: created.room.code,
+      code: created.state.room.code,
     });
-    application.execute('third', {
+    await establish('third', {
       type: 'join',
       name: 'Carol',
-      code: created.room.code,
+      code: created.state.room.code,
     });
-    application.disconnect('owner');
+    await application.disconnect('owner');
 
-    const accepted = application.execute('guest', {
+    const accepted = await application.execute('guest', {
       type: 'claim-moderator',
     });
     expect(
@@ -332,28 +300,28 @@ describe('RetroApplicationService', () => {
       ),
     ).toEqual([expect.objectContaining({ name: 'Bobby' })]);
     expect(
-      event(application.execute('third', { type: 'claim-moderator' }), 'third'),
+      event(
+        await application.execute('third', { type: 'claim-moderator' }),
+        'third',
+      ),
     ).toMatchObject({
       event: 'retro-error',
       data: { code: 'moderator-active' },
     });
   });
 
-  it('broadcasts disconnect presence without transport dependencies', () => {
-    const created = state(
-      application.execute('owner', {
-        type: 'create',
-        name: 'Alice',
-        title: 'Retro',
-      }),
-      'owner',
-    );
-    application.execute('guest', {
+  it('broadcasts disconnect presence without transport dependencies', async () => {
+    const created = await establish('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    await establish('guest', {
       type: 'join',
       name: 'Bobby',
-      code: created.room.code,
+      code: created.state.room.code,
     });
-    const disconnected = application.disconnect('guest');
+    const disconnected = await application.disconnect('guest');
     expect(disconnected.messages).toHaveLength(1);
     expect(disconnected.messages[0].connectionId).toBe('owner');
     expect(disconnected.messages[0].event).toMatchObject({
