@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 function backendRoomUrl(room: string) {
-  return `http://localhost:4000${new URL(room).pathname}`;
+  const backendPort = process.env.PLAYWRIGHT_BACKEND_PORT ?? "4000";
+  return `http://localhost:${backendPort}${new URL(room).pathname}`;
 }
 
 async function createRoom(
@@ -31,6 +32,12 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   const reopened = await context.newPage();
   await reopened.goto(first);
   await expect(
+    reopened.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
+  await reopened
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
+  await expect(
     reopened.getByText("Alice (you)", { exact: true })
   ).toBeVisible();
   await expect(
@@ -45,6 +52,12 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   expect(replacementCookie.value).not.toBe(firstCookie.value);
   await page.close();
   await reopened.reload();
+  await expect(
+    reopened.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
+  await reopened
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
   await expect(
     reopened.getByRole("button", {
       name: "Reveal and group notes",
@@ -65,10 +78,32 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   await reopened.getByLabel("Your name").fill("Ignored new name");
   await reopened.getByLabel("Room code").fill(first.split("/").pop()!);
   await reopened
+    .getByRole("button", { name: "Check room availability", exact: true })
+    .click();
+  await expect(
+    reopened.getByRole("button", {
+      name: "Continue as Alice",
+      exact: true,
+    })
+  ).toBeVisible();
+  await reopened
+    .getByRole("button", {
+      name: "Join as someone else / Forget this session",
+      exact: true,
+    })
+    .click();
+  const confirmation = reopened.getByRole("alertdialog");
+  await confirmation
+    .getByRole("button", {
+      name: "Forget session and join as someone else",
+      exact: true,
+    })
+    .click();
+  await reopened
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
   await expect(
-    reopened.getByText("Alice (you)", { exact: true })
+    reopened.getByText("Ignored new name (you)", { exact: true })
   ).toBeVisible();
   await expect(
     reopened.getByRole("heading", { name: "First retrospective", exact: true })
@@ -134,18 +169,16 @@ test("rejects stale credentials without clearing them, then allows joining again
   ]);
   await page.reload();
   await expect(
-    page.getByText("This session is no longer available. Join again.", {
-      exact: true,
-    })
+    page.getByText(
+      "This saved session could not be verified. Join as someone else.",
+      { exact: true }
+    )
   ).toBeVisible();
   expect(
     (await context.cookies(backendRoomUrl(url))).find(
       (item) => item.name === cookie.name
     )?.value
   ).toBe("invalid-token-with-enough-characters");
-  await page
-    .getByRole("link", { name: "Rejoin as a new participant", exact: true })
-    .click();
   await page.getByLabel("Your name").fill("Bobby");
   await page
     .getByRole("button", { name: "Join retrospective", exact: true })

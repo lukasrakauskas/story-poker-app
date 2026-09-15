@@ -1,4 +1,8 @@
-import type { RetroSessionView, RetroCommand } from "shared/retrospective";
+import type {
+  RetroCommand,
+  RetroRememberedIdentity,
+  RetroSessionView,
+} from "shared/retrospective";
 
 const validCode = (code: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(code);
 
@@ -136,8 +140,24 @@ export function resumeRetroSession(code: string): Promise<RetroSessionView> {
   );
 }
 
-export function inspectRetroSession(code: string): Promise<RetroSessionView> {
-  return request(sessionPath(code), { method: "GET" }, isSessionView);
+function isRememberedIdentity(
+  value: unknown
+): value is RetroRememberedIdentity {
+  if (!isObject(value)) return false;
+  return (
+    typeof value.code === "string" &&
+    validCode(value.code) &&
+    typeof value.name === "string" &&
+    value.name.length > 0 &&
+    value.name.length <= 30 &&
+    typeof value.moderator === "boolean"
+  );
+}
+
+export function inspectRetroSession(
+  code: string
+): Promise<RetroRememberedIdentity> {
+  return request(sessionPath(code), { method: "GET" }, isRememberedIdentity);
 }
 
 export async function forgetRetroSession(code: string): Promise<boolean> {

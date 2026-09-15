@@ -7,8 +7,14 @@ import type { RetroSession } from "../../../hooks/use-retro-socket";
 
 const Context = createContext<RetroSession | null>(null);
 
-export function RetroProvider({ children }: { children: ReactNode }) {
-  const session = useRetroSocket();
+export function RetroProvider({
+  children,
+  initialCode,
+}: {
+  children: ReactNode;
+  initialCode?: string;
+}) {
+  const session = useRetroSocket(initialCode);
   return <Context.Provider value={session}>{children}</Context.Provider>;
 }
 

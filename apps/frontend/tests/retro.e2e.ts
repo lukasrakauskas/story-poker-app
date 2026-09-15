@@ -64,7 +64,8 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   const roomUrl = owner.url();
   // The cookie belongs to the backend origin, not the frontend origin. It is
   // visible to browser automation but intentionally not to page JavaScript.
-  const backendRoomUrl = `http://localhost:4000/retro/${owner.url().split("/").at(-1)}`;
+  const backendPort = process.env.PLAYWRIGHT_BACKEND_PORT ?? "4000";
+  const backendRoomUrl = `http://localhost:${backendPort}/retro/${owner.url().split("/").at(-1)}`;
   const cookies = await context.cookies(backendRoomUrl);
   let credential = cookies.find((cookie) =>
     cookie.name.startsWith("retro-session-")
@@ -256,6 +257,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await owner.setViewportSize({ width: 1280, height: 720 });
 
   await owner.reload();
+  await expect(
+    owner.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
+  await owner
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
   await expect(
     owner.getByRole("complementary").getByText("Alice (you)", { exact: true })
   ).toBeVisible();
@@ -483,6 +490,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
 
   await guest.reload();
   await expect(
+    guest.getByRole("button", { name: "Continue as Bobby", exact: true })
+  ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Continue as Bobby", exact: true })
+    .click();
+  await expect(
     guest.getByRole("button", {
       name: "Remove vote from theme: Delivery flow",
       exact: true,
@@ -677,6 +690,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   expect(saved[0][1]).not.toContain("voterIds");
   expect(JSON.parse(saved[0][1]).room.phase).toBe("closed");
   await guest.reload();
+  await expect(
+    guest.getByRole("button", { name: "Continue as Bobby", exact: true })
+  ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Continue as Bobby", exact: true })
+    .click();
   await expect(
     guest.getByRole("complementary").getByText("Bobby (you)", { exact: true })
   ).toBeVisible();

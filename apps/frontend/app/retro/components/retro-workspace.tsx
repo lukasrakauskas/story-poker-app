@@ -58,7 +58,7 @@ const phases: {
 
 export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
   return (
-    <RetroProvider>
+    <RetroProvider initialCode={initialCode}>
       <Workspace initialCode={initialCode} />
     </RetroProvider>
   );
@@ -73,7 +73,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     error,
     retry,
     send,
-    forgetSession,
+    forgetRememberedSession,
     historySaved,
   } = useRetro();
   const compactDiscussion = useCompactDiscussion();
@@ -286,7 +286,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               error={supportingError}
               retry={retry}
               historySaved={historySaved}
-              forgetSession={forgetSession}
+              forgetSession={() => forgetRememberedSession(room.code)}
               expired={expired}
               terminal={expired || invalid}
               minutes={minutes}

@@ -10,7 +10,11 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import type { RetroSessionView } from 'shared/retrospective';
+import type {
+  RetroRememberedIdentity,
+  RetroSessionView,
+} from 'shared/retrospective';
+import { sourceKeyFromUpgradeRequest } from '../transport/websocket-admission.service.js';
 import { OriginAllowlistService } from '../transport/origin-allowlist.service.js';
 import { WebSocketTransportService } from '../transport/websocket-transport.service.js';
 import { RetroApplicationService } from './retro-application.service.js';
@@ -25,10 +29,13 @@ const statusByError: Record<string, number> = {
   'session-required': 401,
   'invalid-session': 401,
   forbidden: 403,
+  'http-required': 426,
   'room-expired': 410,
   'room-closed': 409,
   'name-taken': 409,
   capacity: 409,
+  'wrong-room-password': 401,
+  'rate-limit': 429,
 };
 
 /** HTTP is the only boundary allowed to establish or rotate a cookie. */
@@ -42,52 +49,25 @@ export class RetroSessionController {
   ) {}
 
   @Post('session')
-  establish(
+  async establish(
     @Body() body: unknown,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
-  ): RetroSessionView {
+  ): Promise<RetroSessionView> {
     this.assertOrigin(request);
     const parsed = retroSessionEstablishmentSchema.safeParse(body);
     if (!parsed.success) this.failInvalidCommand();
-
-    // A remembered room is resumed for this browser instead of creating a
-    // second member. Resume still rotates the credential, so a socket that is
-    // displaced by this new connection cannot replay the shared old cookie.
-    if (parsed.data.type === 'join') {
-      const existing = this.cookies.read(request, parsed.data.code);
-      if (existing) {
-        try {
-          const resumed = this.application.resumeSession(
-            parsed.data.code,
-            existing,
-          );
-          this.cookies.set(
-            response,
-            parsed.data.code,
-            resumed.session.token,
-            resumed.view.room.expiresAt,
-          );
-          this.transport.dispatch(resumed.transport);
-          return resumed.view;
-        } catch (error) {
-          if (
-            !(error instanceof RetroError) ||
-            error.code !== 'invalid-session'
-          )
-            this.fail(error);
-        }
-      }
-    }
+    const source = sourceKeyFromUpgradeRequest(request);
 
     try {
-      const established = this.application.establish(parsed.data);
+      const established = await this.application.establish(parsed.data, source);
       this.cookies.set(
         response,
         established.session.code,
         established.session.token,
         established.view.room.expiresAt,
       );
+      this.transport.dispatch(established.transport);
       return established.view;
     } catch (error) {
       return this.fail(error);
@@ -95,14 +75,13 @@ export class RetroSessionController {
   }
 
   @Post('session/:code/resume')
-  resume(
+  async resume(
     @Param('code') code: string,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
-  ): RetroSessionView {
+  ): Promise<RetroSessionView> {
     this.assertOrigin(request);
-    const validCode = retroCodeSchema.safeParse(code);
-    if (!validCode.success) this.failInvalidCommand();
+    this.validateCode(code);
     const token = this.cookies.read(request, code);
     if (!token)
       return this.fail(
@@ -113,7 +92,11 @@ export class RetroSessionController {
       );
 
     try {
-      const resumed = this.application.resumeSession(code, token);
+      const resumed = await this.application.resumeSession(
+        code,
+        token,
+        sourceKeyFromUpgradeRequest(request),
+      );
       this.cookies.set(
         response,
         code,
@@ -130,13 +113,12 @@ export class RetroSessionController {
   }
 
   @Get('session/:code')
-  inspect(
+  async inspect(
     @Param('code') code: string,
     @Req() request: Request,
-  ): RetroSessionView {
+  ): Promise<RetroRememberedIdentity> {
     this.assertOrigin(request);
-    const validCode = retroCodeSchema.safeParse(code);
-    if (!validCode.success) this.failInvalidCommand();
+    this.validateCode(code);
     const token = this.cookies.read(request, code);
     if (!token)
       return this.fail(
@@ -146,21 +128,24 @@ export class RetroSessionController {
         ),
       );
     try {
-      return this.application.inspectSession(code, token);
+      return await this.application.inspectSession(
+        code,
+        token,
+        sourceKeyFromUpgradeRequest(request),
+      );
     } catch (error) {
       return this.fail(error);
     }
   }
 
   @Delete('session/:code')
-  forget(
+  async forget(
     @Param('code') code: string,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
-  ): { forgotten: true } {
+  ): Promise<{ forgotten: true }> {
     this.assertOrigin(request);
-    const validCode = retroCodeSchema.safeParse(code);
-    if (!validCode.success) this.failInvalidCommand();
+    this.validateCode(code);
     const token = this.cookies.read(request, code);
     if (!token)
       return this.fail(
@@ -170,7 +155,11 @@ export class RetroSessionController {
         ),
       );
     try {
-      const result = this.application.forgetSession(code, token);
+      const result = await this.application.forgetSession(
+        code,
+        token,
+        sourceKeyFromUpgradeRequest(request),
+      );
       this.cookies.clear(response, code);
       this.transport.dispatch(result);
       return { forgotten: true };
@@ -179,6 +168,10 @@ export class RetroSessionController {
       // already rotated the shared cookie to a valid session.
       return this.fail(error);
     }
+  }
+
+  private validateCode(code: string): void {
+    if (!retroCodeSchema.safeParse(code).success) this.failInvalidCommand();
   }
 
   private assertOrigin(request: Request): void {

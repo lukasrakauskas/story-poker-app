@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
 import { RetentionService } from '../collaboration/retention.service.js';
+import { RoomAccessService } from '../collaboration/room-access.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import {
   OFFLINE_USER_RETENTION_MS,
@@ -30,6 +31,7 @@ beforeEach(() => {
     participants,
     new RoomRegistryService(),
     new RetentionService(),
+    new RoomAccessService(),
   );
   application = new PokerApplicationService(
     config,

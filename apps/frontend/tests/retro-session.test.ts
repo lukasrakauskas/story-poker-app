@@ -24,6 +24,7 @@ const view: RetroSessionView = {
     notes: [],
     groups: [],
     actions: [],
+    requiresPassword: false,
   },
   self: { id: "alice" },
 };
@@ -35,9 +36,17 @@ function response(body: unknown, ok = true, status = 200): Response {
 beforeEach(() => {
   calls = [];
   process.env.NEXT_PUBLIC_RETRO_API_URL = "https://backend.example";
-  globalThis.fetch = async (input, init) => {
-    calls.push({ input, init });
-    return response(init?.method === "DELETE" ? { forgotten: true } : view);
+  globalThis.fetch = async (inputValue, init) => {
+    calls.push({ input: inputValue, init });
+    const input = String(inputValue);
+    if (init?.method === "DELETE") return response({ forgotten: true });
+    if (input.endsWith("/first-room"))
+      return response({
+        code: "first-room",
+        name: "Alice",
+        moderator: true,
+      });
+    return response(view);
   };
 });
 
