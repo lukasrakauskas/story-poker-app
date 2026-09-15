@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { type Server, WebSocket } from 'ws';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
+import { RoomAccessService } from '../collaboration/room-access.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
 import { RetentionService } from '../collaboration/retention.service.js';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
@@ -38,6 +39,7 @@ beforeEach(() => {
     new ParticipantService(),
     new RoomRegistryService(),
     new RetentionService(),
+    new RoomAccessService(),
   );
   const events = new ApplicationEventBus();
   const connections = new ConnectionRegistryService();
@@ -121,6 +123,79 @@ describe('RetroGateway', () => {
       data: { code: 'forbidden', requestId: 'advance-1' },
     });
   });
+  it('keeps protected rooms opaque and bounds password attempts', () => {
+    const owner = socket();
+    const visitor = socket();
+    gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Sensitive retro',
+      password: 'secret',
+    });
+    const created = latest(owner).data;
+    expect(created.room.requiresPassword).toBe(true);
+    expect(JSON.stringify(created)).not.toContain('secret');
+
+    gateway.onCommand(visitor, {
+      type: 'inspect',
+      code: created.room.code,
+    });
+    expect(latest(visitor)).toEqual({
+      event: 'retro-room-info',
+      data: {
+        code: created.room.code,
+        available: true,
+        requiresPassword: true,
+      },
+    });
+    expect(JSON.stringify(latest(visitor))).not.toContain('Sensitive retro');
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      gateway.onCommand(visitor, {
+        type: 'join',
+        code: created.room.code,
+        name: `Guest ${attempt}`,
+        password: 'wrong',
+      });
+      expect(latest(visitor)).toMatchObject({
+        event: 'retro-error',
+        data: { code: 'wrong-room-password' },
+      });
+    }
+    gateway.onCommand(visitor, {
+      type: 'join',
+      code: created.room.code,
+      name: 'Bobby',
+      password: 'wrong',
+    });
+    expect(latest(visitor)).toMatchObject({
+      event: 'retro-error',
+      data: { code: 'rate-limit' },
+    });
+    expect(service.inspect(created.room.code)).toMatchObject({
+      available: true,
+      requiresPassword: true,
+    });
+
+    vi.advanceTimersByTime(60_000);
+    gateway.onCommand(visitor, {
+      type: 'join',
+      code: created.room.code,
+      name: 'Bobby',
+      password: 'secret',
+    });
+    expect(latest(visitor)).toMatchObject({
+      event: 'retro-state',
+      data: {
+        room: {
+          members: expect.arrayContaining([
+            expect.objectContaining({ name: 'Bobby' }),
+          ]),
+        },
+      },
+    });
+  });
+
   it('expires attached rooms and cleans timers even without incoming messages', () => {
     const owner = socket();
     gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });

@@ -20,6 +20,10 @@ import {
 import { retroCommandSchema } from './retro.schema.js';
 import { RetroError } from './retro.service.js';
 
+const PASSWORD_RATE_NAMESPACE = 'retro-password';
+const PASSWORD_RATE_LIMIT = 5;
+const PASSWORD_RATE_WINDOW_MS = 60_000;
+
 @WebSocketGateway({ path: '/retro', maxPayload: 16 * 1024 })
 export class RetroGateway
   implements
@@ -55,6 +59,7 @@ export class RetroGateway
     this.unsubscribeEvents();
     this.heartbeat.stop(RETRO_APPLICATION_NAMESPACE);
     this.rateLimits.clear(RETRO_APPLICATION_NAMESPACE);
+    this.rateLimits.clear(PASSWORD_RATE_NAMESPACE);
   }
 
   handleConnection(socket: WebSocket) {
@@ -67,6 +72,7 @@ export class RetroGateway
     this.heartbeat.unregister(RETRO_APPLICATION_NAMESPACE, socket);
     if (connectionId) {
       this.rateLimits.release(RETRO_APPLICATION_NAMESPACE, connectionId);
+      this.rateLimits.release(PASSWORD_RATE_NAMESPACE, connectionId);
       this.transport.dispatch(this.application.disconnect(connectionId));
     }
     this.transport.unregister(socket);
@@ -111,7 +117,25 @@ export class RetroGateway
           connectionId,
           new RetroError(
             'invalid-command',
-            'Check your input: name 3–30 characters, title 1–100, note/action 1–1000, owner up to 60.',
+            'Check your input: name 3–30 characters, title 1–100, password up to 100, note/action 1–1000, owner up to 60.',
+          ),
+          requestId,
+        ),
+      );
+    }
+    const passwordAttemptAllowed =
+      command.data.type !== 'join' ||
+      this.rateLimits.consume(PASSWORD_RATE_NAMESPACE, connectionId, {
+        limit: PASSWORD_RATE_LIMIT,
+        windowMs: PASSWORD_RATE_WINDOW_MS,
+      });
+    if (!passwordAttemptAllowed) {
+      return this.transport.dispatch(
+        this.application.reject(
+          connectionId,
+          new RetroError(
+            'rate-limit',
+            'Too many password attempts. Wait a minute before trying again.',
           ),
           requestId,
         ),

@@ -61,10 +61,23 @@ export interface RetroRoom {
   notes: RetroNote[];
   groups: RetroGroup[];
   actions: RetroAction[];
+  /** Minimum public access metadata; no verifier or password is ever exposed. */
+  requiresPassword?: boolean;
 }
 export type RetroCommand =
-  | { type: "create"; name: string; title: string }
-  | { type: "join"; name: string; code: string }
+  | {
+      type: "create";
+      name: string;
+      title: string;
+      password?: string;
+    }
+  | {
+      type: "join";
+      name: string;
+      code: string;
+      password?: string;
+    }
+  | { type: "inspect"; code: string }
   | { type: "resume"; code: string; token: string }
   | { type: "add-note"; column: RetroColumn; text: string }
   | { type: "edit-note"; id: string; text: string }
@@ -87,7 +100,16 @@ export type RetroCommand =
     }
   | { type: "toggle-action"; id: string }
   | { type: "delete-action"; id: string };
+export interface RetroRoomInfo {
+  code: string;
+  available: boolean;
+  requiresPassword: boolean;
+}
 export type RetroServerEvent =
+  | {
+      event: "retro-room-info";
+      data: RetroRoomInfo & { requestId?: string };
+    }
   | {
       event: "retro-state";
       data: {

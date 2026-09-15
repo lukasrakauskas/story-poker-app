@@ -5,6 +5,7 @@ import { participantNameSchema } from '../collaboration/participant.service.js';
 const id = z.string().min(1).max(64);
 const text = z.string().trim().min(1).max(1000);
 const name = participantNameSchema;
+const password = z.string().max(100).optional();
 const owner = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('unassigned') }),
   z.object({ kind: z.literal('participant'), participantId: id }),
@@ -20,8 +21,10 @@ export const retroCommandSchema: z.ZodType<RetroCommand> = z.discriminatedUnion(
       type: z.literal('create'),
       name,
       title: z.string().trim().min(1).max(100),
+      password,
     }),
-    z.object({ type: z.literal('join'), name, code: id }),
+    z.object({ type: z.literal('join'), name, code: id, password }),
+    z.object({ type: z.literal('inspect'), code: id }),
     z.object({ type: z.literal('resume'), code: id, token: id }),
     z.object({
       type: z.literal('add-note'),

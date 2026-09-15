@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   RetroCommand,
   RetroRoom,
+  RetroRoomInfo,
   RetroServerEvent,
 } from "shared/retrospective";
 
@@ -33,6 +34,7 @@ export function useRetroSocket() {
   const terminal = useRef(false);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [room, setRoom] = useState<RetroRoom | null>(null);
+  const [roomInfo, setRoomInfo] = useState<RetroRoomInfo | null>(null);
   const [selfId, setSelfId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<Failure | null>(null);
@@ -125,7 +127,28 @@ export function useRetroSocket() {
       let event: RetroServerEvent;
       try {
         event = JSON.parse(message.data);
-        if (event.event === "retro-state") {
+        if (event.event === "retro-room-info") {
+          if (
+            typeof event.data?.code !== "string" ||
+            typeof event.data.available !== "boolean" ||
+            typeof event.data.requiresPassword !== "boolean"
+          ) {
+            throw new Error("Invalid room info");
+          }
+          setRoomInfo({
+            code: event.data.code,
+            available: event.data.available,
+            requiresPassword: event.data.requiresPassword,
+          });
+          setError(null);
+          clearTimeout(timer);
+          if (
+            !inFlight.current ||
+            event.data.requestId === inFlight.current.id
+          ) {
+            settle(true);
+          }
+        } else if (event.event === "retro-state") {
           if (
             !event.data?.self?.id ||
             !event.data.self.token ||
@@ -139,6 +162,7 @@ export function useRetroSocket() {
             throw new Error("Invalid snapshot");
           }
           const { room: snapshot, self } = event.data;
+          setRoomInfo(null);
           credentials.current = { code: snapshot.code, token: self.token };
           setCookieSaved(
             saveRetroToken(snapshot.code, self.token, snapshot.expiresAt)
@@ -308,6 +332,7 @@ export function useRetroSocket() {
 
   return {
     room,
+    roomInfo,
     selfId,
     connection,
     pending,

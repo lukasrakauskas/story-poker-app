@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "ui/components/button";
 import {
   Card,
@@ -14,18 +14,37 @@ import { Label } from "ui/components/label";
 import { useRetro } from "./retro-provider";
 
 export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
-  const { send, connection, pending, error, retry } = useRetro();
+  const { send, connection, pending, error, retry, roomInfo } = useRetro();
   const [mode, setMode] = useState<"create" | "join">(
     initialCode ? "join" : "create"
   );
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
   const [code, setCode] = useState(initialCode);
+  const [password, setPassword] = useState("");
+  const codeValue = code.trim();
+  const inspectedRoom = roomInfo?.code === codeValue ? roomInfo : null;
+  const needsPassword =
+    mode === "create" ||
+    inspectedRoom?.requiresPassword === true ||
+    error?.code === "wrong-room-password";
   const disabled =
     connection !== "connected" ||
     pending ||
     error?.code === "room-expired" ||
     error?.code === "invalid-session";
+
+  useEffect(() => {
+    if (
+      mode === "join" &&
+      initialCode &&
+      connection === "connected" &&
+      !pending &&
+      !inspectedRoom
+    ) {
+      void send({ type: "inspect", code: initialCode });
+    }
+  }, [connection, initialCode, inspectedRoom, mode, pending, send]);
 
   return (
     <div className="mx-auto max-w-lg space-y-6 py-6 sm:py-12">
@@ -50,7 +69,10 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
               variant={mode === "create" ? "default" : "outline"}
               aria-pressed={mode === "create"}
               disabled={pending || connection !== "connected"}
-              onClick={() => setMode("create")}
+              onClick={() => {
+                setMode("create");
+                setPassword("");
+              }}
             >
               Create a room
             </Button>
@@ -59,7 +81,10 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
               variant={mode === "join" ? "default" : "outline"}
               aria-pressed={mode === "join"}
               disabled={pending || connection !== "connected"}
-              onClick={() => setMode("join")}
+              onClick={() => {
+                setMode("join");
+                setPassword("");
+              }}
             >
               Join a room
             </Button>
@@ -119,18 +144,26 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
             onSubmit={(event) => {
               event.preventDefault();
               if (disabled || !name.trim()) return;
-              if (mode === "create" && title.trim())
+              if (mode === "create" && title.trim()) {
                 void send({
                   type: "create",
                   name: name.trim(),
                   title: title.trim(),
+                  ...(password ? { password } : {}),
                 });
-              if (mode === "join" && code.trim())
+              }
+              if (mode === "join" && codeValue) {
+                if (!inspectedRoom) {
+                  void send({ type: "inspect", code: codeValue });
+                  return;
+                }
                 void send({
                   type: "join",
                   name: name.trim(),
-                  code: code.trim(),
+                  code: codeValue,
+                  ...(password ? { password } : {}),
                 });
+              }
             }}
           >
             <div className="space-y-2">
@@ -148,34 +181,82 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
               />
             </div>
             {mode === "create" ? (
-              <div className="space-y-2">
-                <Label htmlFor="retro-title">Retrospective title</Label>
-                <Input
-                  id="retro-title"
-                  maxLength={100}
-                  value={title}
-                  onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Sprint 24 · Looking back"
-                  required
-                  disabled={pending || connection !== "connected"}
-                />
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="retro-title">Retrospective title</Label>
+                  <Input
+                    id="retro-title"
+                    maxLength={100}
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                    placeholder="Sprint 24 · Looking back"
+                    required
+                    disabled={pending || connection !== "connected"}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="retro-password">
+                    Room password{" "}
+                    <span className="text-muted-foreground">(optional)</span>
+                  </Label>
+                  <Input
+                    id="retro-password"
+                    type="password"
+                    maxLength={100}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete="off"
+                    placeholder="Use a separate channel to share it"
+                    disabled={pending || connection !== "connected"}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A password keeps forwarded links from granting access. Share
+                    it separately; it is never included in the room link or
+                    browser storage.
+                  </p>
+                </div>
+              </>
             ) : (
-              <div className="space-y-2">
-                <Label htmlFor="retro-code">Room code</Label>
-                <Input
-                  id="retro-code"
-                  maxLength={64}
-                  value={code}
-                  onChange={(event) => setCode(event.target.value)}
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  placeholder="Paste your room code"
-                  required
-                  disabled={pending || connection !== "connected"}
-                />
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="retro-code">Room code</Label>
+                  <Input
+                    id="retro-code"
+                    maxLength={64}
+                    value={code}
+                    onChange={(event) => setCode(event.target.value)}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    placeholder="Paste your room code"
+                    required
+                    disabled={pending || connection !== "connected"}
+                  />
+                </div>
+                {needsPassword && (
+                  <div className="space-y-2">
+                    <Label htmlFor="retro-password">
+                      Room password{" "}
+                      <span className="text-muted-foreground">(required)</span>
+                    </Label>
+                    <Input
+                      id="retro-password"
+                      type="password"
+                      maxLength={100}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      autoComplete="off"
+                      required
+                      disabled={pending || connection !== "connected"}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This protected room reveals nothing until the password is
+                      verified. Your password is not saved in cookies, history,
+                      or exports.
+                    </p>
+                  </div>
+                )}
+              </>
             )}
             <Button
               className="w-full"

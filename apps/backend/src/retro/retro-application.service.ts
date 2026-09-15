@@ -45,6 +45,22 @@ export class RetroApplicationService implements OnModuleDestroy {
     try {
       const current = this.sessions.get(connectionId);
       let session: RetroSession;
+      if (command.type === 'inspect') {
+        const inspection = this.retros.inspect(command.code);
+        return this.merge(
+          expired,
+          result(undefined, [
+            {
+              connectionId,
+              event: {
+                event: 'retro-room-info',
+                data: { ...inspection, ...(requestId ? { requestId } : {}) },
+              },
+            },
+          ]),
+        );
+      }
+
       if (
         command.type === 'create' ||
         command.type === 'join' ||
@@ -56,9 +72,17 @@ export class RetroApplicationService implements OnModuleDestroy {
             'You are already in a retrospective. Open a new tab to join another.',
           );
         if (command.type === 'create')
-          session = this.retros.create(command.name, command.title);
+          session = this.retros.create(
+            command.name,
+            command.title,
+            command.password,
+          );
         else if (command.type === 'join')
-          session = this.retros.join(command.code, command.name);
+          session = this.retros.join(
+            command.code,
+            command.name,
+            command.password,
+          );
         else session = this.retros.resume(command.code, command.token);
 
         const previous = this.connections.replace(

@@ -5,6 +5,7 @@ import { UserService } from '../events/user.service.js';
 import { RetroService } from '../retro/retro.service.js';
 import { ParticipantService } from './participant.service.js';
 import { RetentionService } from './retention.service.js';
+import { RoomAccessService } from './room-access.service.js';
 import { RoomRegistryService } from './room-registry.service.js';
 
 type Contract = {
@@ -35,6 +36,7 @@ const domains: { name: string; setup: () => Contract }[] = [
         participants,
         new RoomRegistryService(),
         new RetentionService(),
+        new RoomAccessService(),
       );
       const { room, user: owner } = success(rooms.create('owner', '  Alice  '));
       const { user: guest } = success(
@@ -70,6 +72,7 @@ const domains: { name: string; setup: () => Contract }[] = [
         new ParticipantService(),
         new RoomRegistryService(),
         new RetentionService(),
+        new RoomAccessService(),
       );
       const owner = rooms.create('  Alice  ', 'Retro');
       const guest = rooms.join(owner.code, '  Bobby  ');
