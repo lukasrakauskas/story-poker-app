@@ -27,8 +27,17 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   const reopened = await context.newPage();
   await reopened.goto(first);
   await expect(
-    reopened.getByText("Alice (you)", { exact: true })
+    reopened.getByRole("button", { name: "Continue as Alice", exact: true })
   ).toBeVisible();
+  await expect(
+    page.getByText("Your session was resumed in another connection.", {
+      exact: true,
+    })
+  ).toHaveCount(0);
+  // Read-only inspection does not displace the live participant.
+  await reopened
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
   await expect(
     page.getByText("Your session was resumed in another connection.", {
       exact: true,
@@ -42,6 +51,12 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
   ).toBe(firstCookie.value);
   await page.close();
   await reopened.reload();
+  await expect(
+    reopened.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
+  await reopened
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
   await expect(
     reopened.getByRole("button", {
       name: "Reveal and group notes",
@@ -65,7 +80,29 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
   await expect(
-    reopened.getByText("Alice (you)", { exact: true })
+    reopened.getByText("Continue as Alice", { exact: true }).first()
+  ).toBeVisible();
+  await reopened
+    .getByRole("button", {
+      name: "Join as someone else / Forget this session",
+      exact: true,
+    })
+    .click();
+  const forgetConfirmation = reopened.getByRole("alertdialog");
+  await expect(
+    forgetConfirmation.getByText(/lose.*moderator access/i)
+  ).toBeVisible();
+  await forgetConfirmation
+    .getByRole("button", {
+      name: "Forget session and join as someone else",
+      exact: true,
+    })
+    .click();
+  await reopened
+    .getByRole("button", { name: "Join retrospective", exact: true })
+    .click();
+  await expect(
+    reopened.getByText("Ignored new name (you)", { exact: true })
   ).toBeVisible();
   await expect(
     reopened.getByRole("heading", { name: "First retrospective", exact: true })
@@ -97,9 +134,12 @@ test("rejects and clears stale credentials, then allows joining again", async ({
   ]);
   await page.reload();
   await expect(
-    page.getByText("This session is no longer available. Join again.", {
-      exact: true,
-    })
+    page.getByText(
+      "This saved session could not be verified. Join as someone else.",
+      {
+        exact: true,
+      }
+    )
   ).toBeVisible();
   expect(
     (await context.cookies(url)).find((item) => item.name === cookie.name)

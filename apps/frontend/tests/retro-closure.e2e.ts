@@ -59,10 +59,22 @@ test("closure freezes snapshots and save times across presence, reopen and late 
   const reopened = await guestContext.newPage();
   await reopened.goto(url);
   await expect(
+    reopened.getByRole("button", { name: "Continue as Bobby", exact: true })
+  ).toBeVisible();
+  await reopened
+    .getByRole("button", { name: "Continue as Bobby", exact: true })
+    .click();
+  await expect(
     reopened.getByText("Retrospective complete · read-only", { exact: true })
   ).toBeVisible();
   expect(await saved(reopened)).toBe(originalGuest);
   await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
   await expect(
     page.getByText("Retrospective complete · read-only", { exact: true })
   ).toBeVisible();

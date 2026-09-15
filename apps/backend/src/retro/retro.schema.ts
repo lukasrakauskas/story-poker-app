@@ -23,6 +23,8 @@ export const retroCommandSchema: z.ZodType<RetroCommand> = z.discriminatedUnion(
     }),
     z.object({ type: z.literal('join'), name, code: id }),
     z.object({ type: z.literal('resume'), code: id, token: id }),
+    z.object({ type: z.literal('inspect'), code: id, token: id }),
+    z.object({ type: z.literal('forget'), code: id, token: id }),
     z.object({
       type: z.literal('add-note'),
       column: z.enum(['went-well', 'improve', 'ideas']),

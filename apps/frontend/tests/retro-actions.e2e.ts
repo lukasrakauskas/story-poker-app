@@ -111,6 +111,9 @@ test("edit, reassign, unassign and retain a removed action owner across reconnec
     .getByRole("button", { name: "Save action", exact: true })
     .click();
   await page.reload();
+  await page
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
   await expect(
     page.getByText("Owner: Bobby (no longer in room)", { exact: true })
   ).toBeVisible();

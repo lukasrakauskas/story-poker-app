@@ -74,6 +74,12 @@ export class ParticipantService {
     return true;
   }
 
+  /** Replace a bearer credential without changing the participant identity. */
+  rotateToken<T extends CollaborationParticipant>(participant: T): string {
+    participant.token = nanoid(32);
+    return participant.token;
+  }
+
   canClaimModerator<T extends CollaborationParticipant>(
     participants: T[],
     participant: T,

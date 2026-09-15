@@ -44,6 +44,54 @@ export class RetroApplicationService implements OnModuleDestroy {
     const expired = this.expireRooms();
     try {
       const current = this.sessions.get(connectionId);
+      if (command.type === 'inspect') {
+        const identity = this.retros.inspect(command.code, command.token);
+        return this.merge(
+          expired,
+          result(undefined, [
+            {
+              connectionId,
+              event: {
+                event: 'retro-identity',
+                data: { ...identity, ...(requestId ? { requestId } : {}) },
+              },
+            },
+          ]),
+        );
+      }
+      if (command.type === 'forget') {
+        const forgotten = this.retros.forget(command.code, command.token);
+        const previous = this.connections.revoke<string>(
+          RETRO_APPLICATION_NAMESPACE,
+          forgotten.code,
+          forgotten.id,
+        );
+        const revoked =
+          previous && previous !== connectionId
+            ? this.forgetConnection(previous)
+            : result();
+        if (previous) this.sessions.delete(previous);
+        const changed = forgotten.wasConnected
+          ? this.broadcast(forgotten.code)
+          : result();
+        return this.merge(
+          expired,
+          revoked,
+          result(undefined, [
+            {
+              connectionId,
+              event: {
+                event: 'retro-forgotten',
+                data: {
+                  code: forgotten.code,
+                  ...(requestId ? { requestId } : {}),
+                },
+              },
+            },
+          ]),
+          changed,
+        );
+      }
       let session: RetroSession;
       if (
         command.type === 'create' ||
@@ -168,6 +216,30 @@ export class RetroApplicationService implements OnModuleDestroy {
         },
       ],
       [{ connectionId, code: 4003, reason: 'Removed by moderator' }],
+    );
+  }
+
+  private forgetConnection(previousConnectionId: string): ApplicationResult {
+    return result(
+      undefined,
+      [
+        {
+          connectionId: previousConnectionId,
+          event: this.errorEvent(
+            new RetroError(
+              'invalid-session',
+              'This session was forgotten. Join as someone else to enter this room.',
+            ),
+          ),
+        },
+      ],
+      [
+        {
+          connectionId: previousConnectionId,
+          code: 4004,
+          reason: 'Session forgotten',
+        },
+      ],
     );
   }
 

@@ -41,6 +41,90 @@ function state(
 }
 
 describe('RetroApplicationService', () => {
+  it('inspects without replacing a live connection and explicitly forgets a credential', () => {
+    const created = state(
+      application.execute('owner', {
+        type: 'create',
+        name: 'Alice',
+        title: 'Retro',
+      }),
+      'owner',
+    );
+    const inspected = application.execute(
+      'visitor',
+      {
+        type: 'inspect',
+        code: created.room.code,
+        token: created.self.token,
+      },
+      'inspect-1',
+    );
+    expect(event(inspected, 'visitor')).toEqual({
+      event: 'retro-identity',
+      data: {
+        code: created.room.code,
+        name: 'Alice',
+        moderator: true,
+        requestId: 'inspect-1',
+      },
+    });
+    expect(inspected.messages).toHaveLength(1);
+    expect(
+      state(
+        application.execute('owner', {
+          type: 'add-note',
+          column: 'ideas',
+          text: 'Still owned by Alice',
+        }),
+        'owner',
+      ).room.notes,
+    ).toHaveLength(1);
+
+    const forgotten = application.execute(
+      'visitor',
+      {
+        type: 'forget',
+        code: created.room.code,
+        token: created.self.token,
+      },
+      'forget-1',
+    );
+    expect(event(forgotten, 'visitor')).toEqual({
+      event: 'retro-forgotten',
+      data: { code: created.room.code, requestId: 'forget-1' },
+    });
+    expect(event(forgotten, 'owner')).toMatchObject({
+      event: 'retro-error',
+      data: {
+        code: 'invalid-session',
+        message:
+          'This session was forgotten. Join as someone else to enter this room.',
+      },
+    });
+    expect(forgotten.closes).toContainEqual({
+      connectionId: 'owner',
+      code: 4004,
+      reason: 'Session forgotten',
+    });
+    expect(
+      event(
+        application.execute('replacement', {
+          type: 'resume',
+          code: created.room.code,
+          token: created.self.token,
+        }),
+        'replacement',
+      ),
+    ).toMatchObject({
+      event: 'retro-error',
+      data: {
+        code: 'invalid-session',
+        message:
+          'This saved session is no longer available. Join as someone else.',
+      },
+    });
+  });
+
   it('owns session routing, recipient privacy, and synchronized reveal', () => {
     const created = state(
       application.execute('owner-connection', {

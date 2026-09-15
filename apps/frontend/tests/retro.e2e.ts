@@ -252,6 +252,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
 
   await owner.reload();
   await expect(
+    owner.getByRole("button", { name: "Continue as Alice", exact: true })
+  ).toBeVisible();
+  await owner
+    .getByRole("button", { name: "Continue as Alice", exact: true })
+    .click();
+  await expect(
     owner.getByRole("complementary").getByText("Alice (you)", { exact: true })
   ).toBeVisible();
   await expect(noteActions).toBeVisible();
@@ -478,6 +484,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
 
   await guest.reload();
   await expect(
+    guest.getByRole("button", { name: "Continue as Bobby", exact: true })
+  ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Continue as Bobby", exact: true })
+    .click();
+  await expect(
     guest.getByRole("button", {
       name: "Remove vote from theme: Delivery flow",
       exact: true,
@@ -559,7 +571,9 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   await removedParticipant
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
-  await expect(owner.getByRole("paragraph").filter({ hasText: /^Charlie$/ })).toBeVisible();
+  await expect(
+    owner.getByRole("paragraph").filter({ hasText: /^Charlie$/ })
+  ).toBeVisible();
   await owner
     .getByRole("button", { name: "Remove participant Charlie", exact: true })
     .click();
@@ -668,6 +682,12 @@ test("collaborates, rejoins with cookies, and saves final retros with Markdown e
   expect(saved[0][1]).not.toContain("voterIds");
   expect(JSON.parse(saved[0][1]).room.phase).toBe("closed");
   await guest.reload();
+  await expect(
+    guest.getByRole("button", { name: "Continue as Bobby", exact: true })
+  ).toBeVisible();
+  await guest
+    .getByRole("button", { name: "Continue as Bobby", exact: true })
+    .click();
   await expect(
     guest.getByRole("complementary").getByText("Bobby (you)", { exact: true })
   ).toBeVisible();

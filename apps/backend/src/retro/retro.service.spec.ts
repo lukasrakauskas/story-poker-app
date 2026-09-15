@@ -99,6 +99,65 @@ describe('room lifecycle and privacy', () => {
       'no longer available',
     );
   });
+  it('inspects identity without reconnecting, and forgets only that room credential', () => {
+    const noteId = add('Owned before forgetting');
+    const originalToken = owner.token;
+    service.disconnect(owner);
+
+    expect(service.inspect(owner.code, originalToken)).toEqual({
+      code: owner.code,
+      name: 'Alice',
+      moderator: true,
+    });
+    expect(service.snapshot(guest).members[0]).toMatchObject({
+      id: owner.id,
+      connected: false,
+      moderator: true,
+    });
+
+    expect(service.forget(owner.code, originalToken)).toEqual({
+      code: owner.code,
+      id: owner.id,
+      wasConnected: false,
+    });
+    expect(() => service.inspect(owner.code, originalToken)).toThrow(
+      'Join as someone else',
+    );
+    expect(() => service.resume(owner.code, originalToken)).toThrow(
+      'Join as someone else',
+    );
+    service.mutate(guest, { type: 'claim-moderator' });
+    service.mutate(guest, { type: 'advance' });
+    const replacement = service.join(owner.code, 'Carol');
+    expect(replacement.id).not.toBe(owner.id);
+    expect(service.snapshot(replacement).members).toContainEqual(
+      expect.objectContaining({ id: owner.id, name: 'Alice' }),
+    );
+    expect(service.snapshot(replacement).notes).toContainEqual(
+      expect.objectContaining({
+        id: noteId,
+        authorId: owner.id,
+        authorName: 'Alice',
+      }),
+    );
+  });
+
+  it('does not leave a forgotten connected moderator online', () => {
+    const originalToken = owner.token;
+    expect(service.forget(owner.code, originalToken)).toEqual({
+      code: owner.code,
+      id: owner.id,
+      wasConnected: true,
+    });
+    expect(service.snapshot(guest).members[0]).toMatchObject({
+      id: owner.id,
+      connected: false,
+      moderator: true,
+    });
+    service.mutate(guest, { type: 'claim-moderator' });
+    expect(service.snapshot(guest).members[1].moderator).toBe(true);
+  });
+
   it('keeps rooms isolated, credentials private and snapshots detached', () => {
     add();
     const other = service.create('Carol', 'Other room');
@@ -792,6 +851,8 @@ it.each([
     owner: { kind: 'external', name: 'x'.repeat(61) },
   },
   { type: 'resume', code: 'room', token: '' },
+  { type: 'inspect', code: 'room', token: '' },
+  { type: 'forget', code: 'room', token: '' },
 ])('rejects malformed and oversized commands: %j', (command) => {
   expect(retroCommandSchema.safeParse(command).success).toBe(false);
 });
