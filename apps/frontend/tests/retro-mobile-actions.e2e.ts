@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { chooseRecoveryHistory } from "./retro-history-test-helpers";
 
 test("mobile discussion actions preserve context, scroll and focus beside a long priority list", async ({
   page,
@@ -14,6 +15,7 @@ test("mobile discussion actions preserve context, scroll and focus beside a long
   await expect(
     page.getByRole("heading", { name: "Long discussion", exact: true })
   ).toBeVisible();
+  await chooseRecoveryHistory(page);
   const guestContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
   });
@@ -23,6 +25,7 @@ test("mobile discussion actions preserve context, scroll and focus beside a long
   await guest
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
+  await chooseRecoveryHistory(guest);
   for (let i = 1; i <= 18; i++) {
     await page
       .getByLabel("Add a note", { exact: true })

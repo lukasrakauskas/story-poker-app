@@ -12,7 +12,18 @@ import {
   readRetroToken,
   saveRetroToken,
 } from "../lib/retro-session";
-import { saveRetroHistory } from "../lib/retro-history";
+import {
+  DEFAULT_RETRO_HISTORY_RETENTION,
+  isRetroHistoryPolicyKey,
+  isRetroHistorySuppressed,
+  readRetroHistoryPreference,
+  retroHistoryKey,
+  RETRO_HISTORY_POLICY_CHANGED,
+  saveRetroHistory,
+  saveRetroHistoryPreference,
+  type RetroHistoryPolicy,
+  type RetroHistoryPreference,
+} from "../lib/retro-history";
 
 type Connection = "connecting" | "connected" | "disconnected";
 type Failure = { code: string; message: string };
@@ -31,6 +42,10 @@ export function useRetroSocket() {
   const ready = useRef(false);
   const latestRoom = useRef<RetroRoom | null>(null);
   const terminal = useRef(false);
+  const historyRoomKey = useRef<string | null>(null);
+  const historyPolicy = useRef<RetroHistoryPreference | null>(null);
+  const historyChoice = useRef<RetroHistoryPreference | null>(null);
+  const historyPreferenceSavedRef = useRef<boolean | null>(null);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [room, setRoom] = useState<RetroRoom | null>(null);
   const [selfId, setSelfId] = useState<string | null>(null);
@@ -39,6 +54,81 @@ export function useRetroSocket() {
   const [attempt, setAttempt] = useState(0);
   const [cookieSaved, setCookieSaved] = useState<boolean | null>(null);
   const [historySaved, setHistorySaved] = useState<boolean | null>(null);
+  const [historyPreference, setHistoryPreference] =
+    useState<RetroHistoryPreference | null>(null);
+  const [historyPreferenceSaved, setHistoryPreferenceSaved] = useState<
+    boolean | null
+  >(null);
+  const [historyDisabled, setHistoryDisabled] = useState(false);
+
+  const syncHistoryState = useCallback((snapshot: RetroRoom | null) => {
+    if (!snapshot) return;
+    const key = retroHistoryKey(snapshot);
+    if (historyRoomKey.current !== key) {
+      historyRoomKey.current = key;
+      historyPolicy.current = null;
+      historyChoice.current = null;
+      historyPreferenceSavedRef.current = null;
+      setHistorySaved(null);
+      setHistoryPreferenceSaved(null);
+    }
+    const stored = readRetroHistoryPreference(snapshot);
+    const suppressed = isRetroHistorySuppressed(snapshot);
+    // If preference storage is unavailable, retain the explicit choice for this
+    // mounted session without ever pretending it was persisted for other tabs.
+    const memoryChoice =
+      historyPreferenceSavedRef.current === false && !suppressed
+        ? historyChoice.current
+        : null;
+    const displayed = memoryChoice ?? stored;
+    const effective =
+      suppressed || displayed?.mode === "none" ? null : displayed;
+    historyPolicy.current = effective;
+    setHistoryPreference(displayed);
+    setHistoryDisabled(suppressed || displayed?.mode === "none");
+    return effective;
+  }, []);
+
+  const persistHistorySnapshot = useCallback(
+    (
+      snapshot: RetroRoom,
+      viewerId: string,
+      policy: RetroHistoryPreference | null = historyPolicy.current
+    ) => {
+      if (
+        !policy ||
+        policy.mode === "none" ||
+        (policy.mode === "final-only" && snapshot.phase !== "closed")
+      )
+        return;
+      setHistorySaved(saveRetroHistory(snapshot, viewerId, policy));
+    },
+    []
+  );
+
+  const chooseHistoryPreference = useCallback(
+    (snapshotPolicy: RetroHistoryPolicy) => {
+      const snapshot = latestRoom.current;
+      if (!snapshot) return;
+      const choice: RetroHistoryPreference = {
+        mode: snapshotPolicy.mode,
+        retention: snapshotPolicy.retention ?? DEFAULT_RETRO_HISTORY_RETENTION,
+      };
+      const saved = saveRetroHistoryPreference(snapshot, choice);
+      historyChoice.current = choice;
+      historyPreferenceSavedRef.current = saved;
+      const suppressed = isRetroHistorySuppressed(snapshot);
+      const effective = suppressed || choice.mode === "none" ? null : choice;
+      historyPolicy.current = effective;
+      setHistoryPreference(choice);
+      setHistoryPreferenceSaved(saved);
+      setHistoryDisabled(suppressed || choice.mode === "none");
+      setHistorySaved(null);
+      if (effective && selfId)
+        persistHistorySnapshot(snapshot, selfId, effective);
+    },
+    [persistHistorySnapshot, selfId]
+  );
 
   const settle = useCallback((success: boolean) => {
     if (inFlight.current) {
@@ -48,6 +138,19 @@ export function useRetroSocket() {
     }
     setPending(false);
   }, []);
+
+  useEffect(() => {
+    const sync = () => syncHistoryState(latestRoom.current);
+    const onStorage = (event: StorageEvent) => {
+      if (isRetroHistoryPolicyKey(event.key)) sync();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(RETRO_HISTORY_POLICY_CHANGED, sync);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(RETRO_HISTORY_POLICY_CHANGED, sync);
+    };
+  }, [syncHistoryState]);
 
   useEffect(() => {
     let active = true;
@@ -143,8 +246,9 @@ export function useRetroSocket() {
           setCookieSaved(
             saveRetroToken(snapshot.code, self.token, snapshot.expiresAt)
           );
-          setHistorySaved(saveRetroHistory(snapshot, self.id));
           latestRoom.current = snapshot;
+          const policy = syncHistoryState(snapshot);
+          if (policy) persistHistorySnapshot(snapshot, self.id, policy);
           terminal.current = false;
           ready.current = true;
           setRoom(snapshot);
@@ -233,7 +337,7 @@ export function useRetroSocket() {
       ready.current = false;
       settle(false);
     };
-  }, [attempt, settle]);
+  }, [attempt, persistHistorySnapshot, settle, syncHistoryState]);
 
   const send = useCallback(
     (command: RetroCommand): Promise<boolean> => {
@@ -316,6 +420,10 @@ export function useRetroSocket() {
     retry,
     cookieSaved,
     historySaved,
+    historyPreference,
+    historyPreferenceSaved,
+    historyDisabled,
+    chooseHistoryPreference,
   };
 }
 

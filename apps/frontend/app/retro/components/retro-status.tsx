@@ -1,6 +1,7 @@
 "use client";
 
 import type { RetroPhase } from "shared/retrospective";
+import type { RetroHistoryPreference } from "../../../lib/retro-history";
 import { Button } from "ui/components/button";
 import {
   Card,
@@ -20,6 +21,9 @@ export function RetroStatus({
   retry,
   cookieSaved,
   historySaved,
+  historyPreference,
+  historyPreferenceSaved,
+  historyDisabled,
   expired,
   terminal,
   minutes,
@@ -33,6 +37,9 @@ export function RetroStatus({
   retry: () => void;
   cookieSaved: boolean | null;
   historySaved: boolean | null;
+  historyPreference: RetroHistoryPreference | null;
+  historyPreferenceSaved: boolean | null;
+  historyDisabled: boolean;
   expired: boolean;
   terminal: boolean;
   minutes: number | null;
@@ -112,7 +119,31 @@ export function RetroStatus({
             identity and moderator access.
           </p>
         )}
-        {historySaved === false && (
+        {historyPreferenceSaved === false && (
+          <p className="text-destructive">
+            Could not save this history preference. It applies only to this tab;
+            collaboration is not interrupted.
+          </p>
+        )}
+        {historyDisabled && historyPreference?.mode !== "none" && (
+          <p>
+            Browser history is disabled for this room after deletion. Live
+            updates will not recreate the saved entry.
+          </p>
+        )}
+        {historyPreference?.mode === "none" && (
+          <p>
+            Browser history is disabled for this room. Exported backups still
+            work.
+          </p>
+        )}
+        {historyPreference?.mode === "final-only" && phase !== "closed" && (
+          <p>
+            Only the completed takeaway will be saved; in-progress recovery
+            snapshots stay out of browser history.
+          </p>
+        )}
+        {historySaved === false && !historyDisabled && (
           <p className="text-destructive">
             Could not save this snapshot in browser history. Storage may be
             blocked or full.
@@ -133,10 +164,10 @@ export function RetroStatus({
           </summary>
           <p className="mt-2">
             No account is required. A room cookie restores your identity until
-            expiry. Notes, names, and actions are saved in this browser when
-            storage is available; they are not a backup or shared across
-            devices. Opening this room in another tab moves your live connection
-            there.
+            expiry. Notes, names, and actions are saved in this browser only
+            after you choose a history policy; they are not a backup or shared
+            across devices. Opening this room in another tab moves your live
+            connection there. Exported files are separate backups.
           </p>
         </details>
       </CardContent>

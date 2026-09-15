@@ -13,6 +13,7 @@ import { RoomDetails } from "./room-details";
 import { PhaseAdvanceDialog } from "./phase-advance-dialog";
 import { RetroExport } from "./retro-export";
 import { RetroStatus } from "./retro-status";
+import { RetroHistoryChoice } from "./retro-history-choice";
 
 const phases: {
   id: RetroPhase;
@@ -75,6 +76,10 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     send,
     cookieSaved,
     historySaved,
+    historyPreference,
+    historyPreferenceSaved,
+    historyDisabled,
+    chooseHistoryPreference,
   } = useRetro();
   const compactDiscussion = useCompactDiscussion();
   const [now, setNow] = useState<number | null>(null);
@@ -128,6 +133,10 @@ function Workspace({ initialCode }: { initialCode?: string }) {
       : null;
   const actionError =
     error && !supportingError && !invalid && !expired ? error : null;
+  const historyChoiceRequired =
+    !!room &&
+    (historyPreference === null ||
+      (historyDisabled && historyPreference.mode !== "none"));
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-5 px-4 py-6 sm:px-8">
@@ -287,6 +296,9 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               retry={retry}
               cookieSaved={cookieSaved}
               historySaved={historySaved}
+              historyPreference={historyPreference}
+              historyPreferenceSaved={historyPreferenceSaved}
+              historyDisabled={historyDisabled}
               expired={expired}
               terminal={expired || invalid}
               minutes={minutes}
@@ -294,6 +306,14 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               phase={room.phase}
             />
             <div className="order-2 min-w-0 space-y-6 xl:col-start-1 xl:row-span-2 xl:row-start-1">
+              {historyChoiceRequired && (
+                <RetroHistoryChoice
+                  key={`${room.code}:${room.expiresAt}:${historyPreference?.mode ?? "new"}`}
+                  previous={historyPreference}
+                  disabledAfterDelete={historyDisabled}
+                  onChoose={chooseHistoryPreference}
+                />
+              )}
               {room.phase === "discuss" && compactDiscussion && (
                 <MobileActions
                   room={room}

@@ -197,7 +197,8 @@ export function RetroLobby({ initialCode = "" }: { initialCode?: string }) {
       </Card>
       <p className="text-center text-sm text-muted-foreground">
         No account needed. Cookies let you rejoin until the room expires two
-        hours after creation. Previous retros and actions stay on this browser.
+        hours after creation. You choose whether this room’s history stays on
+        this browser before anything is saved.
       </p>
     </div>
   );

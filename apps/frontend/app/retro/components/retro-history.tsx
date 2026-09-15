@@ -15,10 +15,12 @@ import {
   AlertDialogTrigger,
 } from "ui/components/alert-dialog";
 import {
+  deleteAllRetroHistory,
   deleteRetroHistory,
   readRetroHistory,
   retroHistoryKey,
   RETRO_HISTORY_CHANGED,
+  RETRO_HISTORY_POLICY_CHANGED,
   type SavedRetro,
 } from "../../../lib/retro-history";
 import { RetroExport } from "./retro-export";
@@ -46,9 +48,11 @@ export function RetroHistory() {
     refresh();
     window.addEventListener("storage", refresh);
     window.addEventListener(RETRO_HISTORY_CHANGED, refresh);
+    window.addEventListener(RETRO_HISTORY_POLICY_CHANGED, refresh);
     return () => {
       window.removeEventListener("storage", refresh);
       window.removeEventListener(RETRO_HISTORY_CHANGED, refresh);
+      window.removeEventListener(RETRO_HISTORY_POLICY_CHANGED, refresh);
     };
   }, []);
 
@@ -63,17 +67,61 @@ export function RetroHistory() {
         </h1>
         <p className="text-sm text-muted-foreground">
           Saved on this browser without an account, including notes, names, and
-          action items. Clearing browser data removes this history; it does not
-          sync across devices. Download a copy for a lasting backup. Anyone
-          using this browser profile can see it.
+          action items. History is saved only after a participant chooses a
+          room-level preference; clearing browser data removes it and it does
+          not sync across devices. Anyone using this browser profile can see it.
         </p>
         <p className="text-sm text-muted-foreground">
-          Completed retros include the final actions received while connected. A
-          snapshot saved during writing contains only your private notes. Other
-          entries are the last snapshot this browser saw, not necessarily the
-          final outcome.
+          Completed retros contain the final actions received while connected.
+          Recovery entries are explicitly consented, may be incomplete, and
+          contain only the private writing visible to the browser that saved
+          them. An exported file is a separate backup; deleting local history
+          does not delete that file.
         </p>
       </header>
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4">
+        <div>
+          <h2 className="font-semibold">Manage browser history</h2>
+          <p className="text-sm text-muted-foreground">
+            Delete all saved retrospectives and pause future live saves in every
+            open tab until each room is explicitly chosen again.
+          </p>
+        </div>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" size="sm">
+              Delete all retrospective history
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Delete all retrospective history?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                This removes every saved retrospective from this browser and
+                stops open rooms from recreating entries. It does not delete the
+                live rooms or exported files and cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={(event) => {
+                  if (deleteAllRetroHistory()) return;
+                  event.preventDefault();
+                  setError(
+                    "Could not delete all retrospective history. Check browser storage permissions."
+                  );
+                }}
+              >
+                Delete all history
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </section>
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -83,8 +131,8 @@ export function RetroHistory() {
         <p>Loading saved retrospectives…</p>
       ) : !entries.length ? (
         <p className="rounded-lg border border-dashed p-6 text-muted-foreground">
-          No saved retrospectives yet. Join a room to save its snapshots
-          automatically.
+          No saved retrospectives yet. Join a room and choose a history
+          preference to save an outcome or consented recovery snapshots.
         </p>
       ) : (
         entries.map(({ room, savedAt, viewerId }) => (
@@ -120,7 +168,9 @@ export function RetroHistory() {
                     </AlertDialogTitle>
                     <AlertDialogDescription>
                       Delete “{room.title}” from this browser? This does not
-                      delete the live room and cannot be undone.
+                      delete the live room, but it also stops open tabs from
+                      recreating this entry until you choose again. It cannot be
+                      undone.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

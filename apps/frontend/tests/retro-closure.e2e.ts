@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { chooseFinalOnlyHistory } from "./retro-history-test-helpers";
 
 async function saved(page: Page) {
   return page.evaluate(
@@ -22,6 +23,7 @@ test("closure freezes snapshots and save times across presence, reopen and late 
   await expect(
     page.getByRole("heading", { name: "Final record", exact: true })
   ).toBeVisible();
+  await chooseFinalOnlyHistory(page);
   const url = page.url();
   const guestContext = await browser.newContext();
   const guest = await guestContext.newPage();
@@ -31,6 +33,7 @@ test("closure freezes snapshots and save times across presence, reopen and late 
     .getByRole("button", { name: "Join retrospective", exact: true })
     .click();
   await expect(page.getByText("Bobby", { exact: true })).toBeVisible();
+  await chooseFinalOnlyHistory(guest);
   for (const label of [
     "Reveal and group notes",
     "Start voting",
