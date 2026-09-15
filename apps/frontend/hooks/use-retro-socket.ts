@@ -100,7 +100,11 @@ export function useRetroSocket(initialCode?: string) {
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener(RETRO_HISTORY_POLICY_CHANGED, history.sync);
+    window.addEventListener("pagehide", history.flush);
+    window.addEventListener("beforeunload", history.flush);
     return () => {
+      window.removeEventListener("pagehide", history.flush);
+      window.removeEventListener("beforeunload", history.flush);
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(RETRO_HISTORY_POLICY_CHANGED, history.sync);
       history.dispose();

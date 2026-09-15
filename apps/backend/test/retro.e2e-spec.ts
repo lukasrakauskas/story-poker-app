@@ -1,3 +1,4 @@
+import { materializeRetroState } from 'shared/retrospective';
 import { Test } from '@nestjs/testing';
 import { type INestApplication } from '@nestjs/common';
 import { WsAdapter } from '@nestjs/platform-ws';
@@ -55,7 +56,7 @@ async function command(socket: WebSocket, data: RetroCommand | unknown) {
 
 function state(event: RetroServerEvent) {
   if (event.event !== 'retro-state') throw new Error(JSON.stringify(event));
-  return event.data;
+  return { ...event.data, room: materializeRetroState(event.data) };
 }
 
 function cookieFrom(response: { headers: Record<string, unknown> }): string {

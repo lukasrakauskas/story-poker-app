@@ -169,12 +169,22 @@ const identity: RetroRememberedIdentity = {
   moderator: true,
 };
 
-function stateEvent(snapshot: RetroRoom = room, requestId?: string) {
+function stateEvent(
+  snapshot: RetroRoom = room,
+  requestId?: string,
+  version = 1
+) {
   return JSON.stringify({
     event: "retro-state",
     data: {
       room: snapshot,
       self: { id: "alice" },
+      version,
+      recipient: {
+        notes: snapshot.phase === "write" ? snapshot.notes : [],
+        votedNoteIds: [],
+        votedGroupIds: [],
+      },
       ...(requestId === undefined ? {} : { requestId }),
     },
   });
@@ -508,6 +518,37 @@ test("ignores HTTP establishment completing after timeout or disposal", async ()
   assert.equal(context.client.getSnapshot().room, null);
   context.client.dispose();
   assert.equal(context.timers.timeoutCount, 0);
+});
+
+test("refreshes missed versions without replaying mutations or discarding matching ACKs", async () => {
+  const context = setup();
+  clients.push(context.client);
+  context.transport.openSocket();
+  context.transport.message(stateEvent());
+  context.transport.message(
+    stateEvent({ ...room, title: "Latest" }, undefined, 3)
+  );
+  assert.equal(context.transport.lastCommand().data.type, "refresh");
+  const refreshId = context.transport.lastCommand().data.requestId;
+  context.transport.message(
+    stateEvent({ ...room, title: "Latest" }, refreshId, 3)
+  );
+  assert.equal(context.client.getSnapshot().room?.title, "Latest");
+  const mutation = context.client.send({ type: "toggle-ready" });
+  const id = context.transport.lastCommand().data.requestId;
+  // A request-specific authoritative full snapshot can cross a gap safely.
+  context.transport.message(
+    stateEvent({ ...room, title: "Acknowledged" }, id, 5)
+  );
+  assert.equal(await mutation, true);
+  context.transport.message(stateEvent(room, undefined, 4));
+  assert.equal(context.client.getSnapshot().room?.title, "Acknowledged");
+  assert.equal(
+    context.transport.sent.filter(
+      (value) => JSON.parse(value).data.type === "toggle-ready"
+    ).length,
+    1
+  );
 });
 
 test("keeps route parsing independent from the transport", () => {

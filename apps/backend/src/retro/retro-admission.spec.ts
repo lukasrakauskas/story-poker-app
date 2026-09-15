@@ -129,7 +129,7 @@ describe('retrospective admission integration', () => {
     expect(event).toMatchObject({
       event: 'retro-state',
       data: {
-        room: {
+        recipient: {
           notes: [expect.objectContaining({ text: 'Accepted after backoff' })],
         },
       },

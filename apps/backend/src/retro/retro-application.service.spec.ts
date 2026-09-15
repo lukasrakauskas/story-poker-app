@@ -1,3 +1,4 @@
+import { materializeRetroState } from 'shared/retrospective';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { RetroServerEvent } from 'shared/retrospective';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
@@ -35,7 +36,7 @@ function state(
 ) {
   const message = event(applicationResult, connectionId);
   if (message.event !== 'retro-state') throw new Error(JSON.stringify(message));
-  return message.data;
+  return { ...message.data, room: materializeRetroState(message.data) };
 }
 
 async function establish(

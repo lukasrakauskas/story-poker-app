@@ -32,6 +32,22 @@ async function add(text = 'Great teamwork') {
 }
 
 describe('room lifecycle and privacy', () => {
+  it('reuses public projections per repository version with private recipient envelopes', async () => {
+    await add('Private feedback');
+    const first = await service.prepareBroadcast(owner.code);
+    const cached = await service.prepareBroadcast(owner.code);
+    expect(first.room).toBe(cached.room);
+    expect(first.room.notes).toEqual([]);
+    expect(first.recipient(owner).notes).toHaveLength(1);
+    expect(first.recipient(guest).notes).toEqual([]);
+    await service.mutate(owner, { type: 'advance' });
+    const revealed = await service.prepareBroadcast(owner.code);
+    expect(revealed.version).toBeGreaterThan(first.version);
+    expect(revealed.room.notes).toHaveLength(1);
+    expect(revealed.recipient(owner).notes).toEqual([]);
+    expect(JSON.stringify(revealed.room)).not.toContain(owner.token);
+    expect(JSON.stringify(revealed.room)).not.toContain('tokenHash');
+  });
   it('inspects unknown, malformed, full, closed and expired links without revealing content', async () => {
     const unavailable = (code: string) => ({
       code,

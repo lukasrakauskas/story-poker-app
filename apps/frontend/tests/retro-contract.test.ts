@@ -42,7 +42,12 @@ const room = {
 test("frontend validates complete nested server events with the shared schema", () => {
   const event = {
     event: "retro-state" as const,
-    data: { room, self: { id: "alice" } },
+    data: {
+      room,
+      self: { id: "alice" },
+      version: 1,
+      recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
+    },
   };
   assert.deepEqual(parseRetroServerEvent(event), event);
   assert.equal(

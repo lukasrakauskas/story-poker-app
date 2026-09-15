@@ -11,7 +11,7 @@ import { RetroSessionController } from './retro-session.controller.js';
 import { RetroSessionCookieService } from './retro-session-cookie.service.js';
 import { RETRO_LIFETIME_MS, RetroService } from './retro.service.js';
 
-type Headers = { cookie?: string; origin?: string | string[] };
+import type { Request, Response } from 'express';
 
 function response() {
   const values = new Map<string, string>();
@@ -20,21 +20,18 @@ function response() {
     setHeader(name: string, value: string) {
       values.set(name, value);
     },
-  };
+  } as unknown as Response & { values: Map<string, string> };
 }
 
 function cookiePair(value: string): string {
   return value.split(';', 1)[0];
 }
 
-function request(
-  cookie?: string,
-  origin?: string | string[],
-): { headers: Headers; socket: { remoteAddress?: string } } {
+function request(cookie?: string, origin?: string | string[]): Request {
   return {
     headers: { cookie, origin },
     socket: { remoteAddress: '127.0.0.1' },
-  };
+  } as unknown as Request;
 }
 
 let controller: RetroSessionController;

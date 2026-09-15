@@ -3,6 +3,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { nanoid } from 'nanoid';
 import {
   retroPublicRoomSchema,
+  retroRecipientEnvelopeSchema,
   type RetroCommand,
   type RetroActionAssignment,
   type RetroActionOwner,
@@ -97,6 +98,10 @@ export class RetroService {
     (code: string, id: string) => void
   >();
   private readonly unsubscribeMemberChanges: () => void;
+  private readonly projections = new Map<
+    string,
+    { version: number; expiresAt: number; room: RetroRoom }
+  >();
 
   constructor(
     private readonly participants: ParticipantService,
@@ -477,12 +482,71 @@ export class RetroService {
   ): Promise<RetroRoom> {
     const room = await this.room(session.code, context);
     const member = this.authorizeInRoom(room, session);
+    return this.projectRoom(room, member.id);
+  }
+
+  /** Read a committed room once; authorize each recipient against that same version. */
+  async prepareBroadcast(code: string, context?: RetroRepositoryContext) {
+    const stored = await this.room(code, context);
+    let cached = this.projections.get(code);
+    if (
+      !cached ||
+      cached.version !== stored.version ||
+      cached.expiresAt !== stored.expiresAt
+    ) {
+      cached = {
+        version: stored.version,
+        expiresAt: stored.expiresAt,
+        room: this.projectRoom(stored, ''),
+      };
+      // Bounded independently of room expiry, including code reuse.
+      if (this.projections.size >= MAX_ROOMS)
+        this.projections.delete(this.projections.keys().next().value!);
+      this.projections.set(code, cached);
+    }
+    return {
+      version: stored.version,
+      room: cached.room,
+      recipient: (session: RetroSession) => {
+        const member = this.authorizeInRoom(stored, session);
+        return retroRecipientEnvelopeSchema.parse({
+          notes:
+            stored.phase === 'write'
+              ? stored.notes
+                  .filter((note) => note.authorId === member.id)
+                  .map(({ voterIds: _votes, ...note }) => ({
+                    ...note,
+                    voteCount: null,
+                    votedBySelf: false,
+                  }))
+              : [],
+          votedNoteIds:
+            stored.phase === 'vote'
+              ? stored.notes
+                  .filter(
+                    (note) =>
+                      !note.groupId && note.voterIds.includes(member.id),
+                  )
+                  .map((note) => note.id)
+              : [],
+          votedGroupIds:
+            stored.phase === 'vote'
+              ? stored.groups
+                  .filter((group) => group.voterIds.includes(member.id))
+                  .map((group) => group.id)
+              : [],
+        });
+      },
+    };
+  }
+
+  private projectRoom(room: StoredRetroRoom, memberId: string): RetroRoom {
     const { readyMemberIds, groups } = room;
     // Writing is private even for moderators. Advancing to vote changes the
     // phase before one broadcast reveals the complete board to everyone.
     const notes =
       room.phase === 'write'
-        ? room.notes.filter((note) => note.authorId === member.id)
+        ? room.notes.filter((note) => note.authorId === memberId)
         : room.notes;
     // Keep the public shape explicit. Internal access verifiers, participant
     // token digests, connection ownership, readiness storage, and voter
@@ -513,7 +577,7 @@ export class RetroService {
           votedBySelf:
             !note.groupId &&
             room.phase === 'vote' &&
-            voterIds.includes(member.id),
+            voterIds.includes(memberId),
         })),
         groups: groups.map(({ voterIds, ...group }) => ({
           ...group,
@@ -521,7 +585,7 @@ export class RetroService {
             room.phase === 'discuss' || room.phase === 'closed'
               ? voterIds.length
               : null,
-          votedBySelf: room.phase === 'vote' && voterIds.includes(member.id),
+          votedBySelf: room.phase === 'vote' && voterIds.includes(memberId),
         })),
       }),
     );
@@ -531,7 +595,7 @@ export class RetroService {
     session: RetroSession,
     command: Exclude<
       RetroCommand,
-      { type: 'create' | 'join' | 'resume' | 'inspect' }
+      { type: 'create' | 'join' | 'resume' | 'inspect' | 'refresh' }
     >,
     context?: RetroRepositoryContext,
   ): Promise<RetroMutationResult | undefined> {

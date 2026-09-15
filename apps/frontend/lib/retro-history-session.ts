@@ -1,3 +1,4 @@
+import { createRetroHistoryWriter } from "./retro-history-writer";
 import type { RetroRoom } from "shared/retrospective";
 import {
   createRetroHistoryPersistence,
@@ -14,6 +15,9 @@ export class RetroHistorySession {
   private viewerId = "";
   private memoryChoice: RetroHistoryPreference | null = null;
   private listeners = new Set<() => void>();
+  private readonly writer = createRetroHistoryWriter({
+    save: (room, viewerId) => this.persist(room, viewerId ?? ""),
+  });
   private state: {
     preference: RetroHistoryPreference | null;
     preferenceSaved: boolean | null;
@@ -49,12 +53,16 @@ export class RetroHistorySession {
       preference,
       disabled: disabled || preference?.mode === "none",
     };
-    if (this.state.disabled) this.state.saved = null;
+    if (this.state.disabled) {
+      this.state.saved = null;
+      this.writer.reset();
+    }
     this.notify();
   };
 
   save = (room: RetroRoom, viewerId: string): boolean | null => {
     if (!this.room || retroHistoryKey(this.room) !== retroHistoryKey(room)) {
+      this.writer.reset();
       this.memoryChoice = null;
       this.state = {
         preference: null,
@@ -73,11 +81,27 @@ export class RetroHistorySession {
       (preference.mode === "final-only" && room.phase !== "closed")
     )
       return null;
+    this.writer.enqueue(room, viewerId);
+    return this.state.saved;
+  };
+
+  private persist(room: RetroRoom, viewerId: string): boolean {
+    // Re-read deletion and consent markers at flush time, not just enqueue.
+    this.sync();
+    const preference = this.state.preference;
+    if (
+      !preference ||
+      this.state.disabled ||
+      (preference.mode === "final-only" && room.phase !== "closed")
+    )
+      return false;
     const saved = this.persistence.saveRetroHistory(room, viewerId, preference);
     this.state = { ...this.state, saved };
     this.notify();
     return saved;
-  };
+  }
+
+  flush = () => this.writer.flush();
 
   choose = (policy: RetroHistoryPolicy) => {
     if (!this.room) return;
@@ -90,8 +114,14 @@ export class RetroHistorySession {
       this.memoryChoice
     );
     this.state = { ...this.state, preferenceSaved, saved: null };
+    this.writer.reset();
     this.save(this.room, this.viewerId);
+    this.flush();
   };
 
-  dispose = () => this.persistence.dispose();
+  dispose = () => {
+    this.flush();
+    this.writer.cancel();
+    this.persistence.dispose();
+  };
 }

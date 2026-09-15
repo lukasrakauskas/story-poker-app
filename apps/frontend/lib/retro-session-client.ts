@@ -1,3 +1,7 @@
+import {
+  materializeRetroState,
+  retroVersionStatus,
+} from "shared/retrospective";
 import type {
   RetroCommand,
   RetroRememberedIdentity,
@@ -82,7 +86,7 @@ export interface RetroSessionClientOptions {
   maxReconnectAttempts?: number;
 }
 
-type PendingKind = "resume" | "mutation" | "inspect";
+type PendingKind = "resume" | "mutation" | "inspect" | "refresh";
 type PendingRequest = {
   id: string;
   kind: PendingKind;
@@ -176,6 +180,7 @@ export class RetroSessionClient {
   private online = true;
   private visible = true;
   private uncertainty: RetroFailure | null = null;
+  private latestVersion: number | null = null;
   private readonly reconnectPolicy: RetroReconnectPolicy;
 
   constructor(private readonly options: RetroSessionClientOptions) {
@@ -421,11 +426,36 @@ export class RetroSessionClient {
       !pending ||
       event.data.requestId === pending.id ||
       (pending.kind === "resume" && event.data.requestId === undefined);
-    const { room, self } = event.data;
-    if (this.activeCode && room.code !== this.activeCode) {
+    const { self } = event.data;
+    if (this.activeCode && event.data.room.code !== this.activeCode) {
       this.failConnection(INVALID_RESPONSE_FAILURE);
       return;
     }
+    const versionStatus = retroVersionStatus(
+      this.latestVersion,
+      event.data.version,
+      !!pending && acknowledged
+    );
+    if (versionStatus === "stale") {
+      // A late request-specific ACK still settles its mutation, but must never
+      // roll the displayed board back to an older committed version.
+      if (pending && acknowledged) this.finishPending(true);
+      return;
+    }
+    if (versionStatus === "gap") {
+      if (pending?.kind === "refresh") return;
+      if (pending?.kind === "mutation")
+        this.uncertainty = {
+          code: "connection",
+          message:
+            "A room update was missed. Your last change is unconfirmed; verify the refreshed room before trying it again.",
+        };
+      this.finishPending(false);
+      void this.issue({ type: "refresh" }, "refresh");
+      return;
+    }
+    const room = materializeRetroState(event.data);
+    this.latestVersion = event.data.version;
     this.activeCode = room.code;
     this.resumeRequired = true;
     this.resumePrepared = true;

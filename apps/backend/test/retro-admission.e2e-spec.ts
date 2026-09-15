@@ -158,6 +158,8 @@ describe('retrospective admission controls', () => {
           members: expect.arrayContaining([
             expect.objectContaining({ name: 'Alice' }),
           ]),
+        },
+        recipient: {
           notes: [
             expect.objectContaining({ text: 'Existing room remains writable' }),
           ],

@@ -11,6 +11,7 @@ import {
 
 export const RETRO_HISTORY_PREFIX = `retro-history-v${RETRO_HISTORY_KEY_VERSION}:`;
 export const RETRO_HISTORY_CHANGED = "retro-history-changed";
+export { createRetroHistoryWriter } from "./retro-history-writer";
 export const RETRO_HISTORY_POLICY_CHANGED = "retro-history-policy-changed";
 export const RETRO_HISTORY_PREFERENCE_PREFIX = "retro-history-preference-v1:";
 export const RETRO_HISTORY_DISABLED_PREFIX = "retro-history-disabled-v1:";

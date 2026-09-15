@@ -281,6 +281,7 @@ export const retroCommandSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.literal("inspect"), code: retroCodeSchema }).strict(),
   z.object({ type: z.literal("resume"), code: retroCodeSchema }).strict(),
+  z.object({ type: z.literal("refresh") }).strict(),
   z
     .object({
       type: z.literal("add-note"),
@@ -351,10 +352,23 @@ export const retroCommandMessageSchema = retroCommandSchema.and(
 export const retroClientSelfSchema = z.object({ id: retroIdSchema }).strict();
 
 /** Routine state contains identity only; the HttpOnly cookie carries credentials. */
+export const retroRecipientEnvelopeSchema = z
+  .object({
+    notes: z.array(retroPublicNoteSchema).max(300),
+    votedNoteIds: z.array(retroIdSchema).max(3),
+    votedGroupIds: z.array(retroIdSchema).max(3),
+  })
+  .strict();
+export type RetroRecipientEnvelope = z.infer<
+  typeof retroRecipientEnvelopeSchema
+>;
+
 export const retroClientStateSchema = z
   .object({
     room: retroPublicRoomSchema,
     self: retroClientSelfSchema,
+    recipient: retroRecipientEnvelopeSchema,
+    version: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     requestId: retroRequestIdSchema.optional(),
   })
   .strict();
@@ -536,6 +550,39 @@ export type RetroCommand = z.infer<typeof retroCommandSchema>;
 export type RetroCommandMessage = z.infer<typeof retroCommandMessageSchema>;
 export type RetroClientSelf = z.infer<typeof retroClientSelfSchema>;
 export type RetroClientState = z.infer<typeof retroClientStateSchema>;
+export type RetroStateData = RetroClientState;
+
+export function materializeRetroState(data: RetroStateData): RetroRoom {
+  const noteVotes = new Set(data.recipient.votedNoteIds);
+  const groupVotes = new Set(data.recipient.votedGroupIds);
+  return {
+    ...data.room,
+    notes:
+      data.room.phase === "write"
+        ? data.recipient.notes.filter((note) => note.authorId === data.self.id)
+        : data.room.notes.map((note) => ({
+            ...note,
+            votedBySelf:
+              data.room.phase === "vote" &&
+              !note.groupId &&
+              noteVotes.has(note.id),
+          })),
+    groups: data.room.groups.map((group) => ({
+      ...group,
+      votedBySelf: data.room.phase === "vote" && groupVotes.has(group.id),
+    })),
+  };
+}
+
+export function retroVersionStatus(
+  last: number | null,
+  incoming: number,
+  authoritative = false
+): "next" | "stale" | "gap" {
+  if (last !== null && incoming < last) return "stale";
+  if (authoritative || last === null || incoming === last + 1) return "next";
+  return incoming <= last ? "stale" : "gap";
+}
 export type RetroRoomInfo = z.infer<typeof retroRoomInfoSchema>;
 export type RetroErrorData = z.infer<typeof retroErrorDataSchema>;
 export type RetroServerEvent = z.infer<typeof retroServerEventSchema>;

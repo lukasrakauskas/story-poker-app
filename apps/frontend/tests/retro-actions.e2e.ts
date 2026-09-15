@@ -2,7 +2,20 @@ import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { chooseRecoveryHistory } from "./retro-history-test-helpers";
 
-async function snapshot(page: Page) {
+async function snapshot(page: Page, actionText?: string) {
+  await expect
+    .poll(() =>
+      page.evaluate((text) => {
+        const value = Object.entries(localStorage).find(([key]) =>
+          key.startsWith("retro-history-v1:")
+        )?.[1];
+        const actions = value ? JSON.parse(value).room.actions : [];
+        return text
+          ? actions.some((action: { text: string }) => action.text === text)
+          : actions.length > 0;
+      }, actionText)
+    )
+    .toBe(true);
   return page.evaluate(
     () =>
       JSON.parse(
@@ -79,7 +92,7 @@ test("edit, reassign, unassign and retain a removed action owner across reconnec
     .getByRole("button", { name: "Save action", exact: true })
     .click();
   await expect(guest.getByText("Owner: Alice", { exact: true })).toBeVisible();
-  expect((await snapshot(page)).actions[0]).toMatchObject({
+  expect((await snapshot(page, "Corrected step")).actions[0]).toMatchObject({
     id: original.id,
     done: true,
     text: "Corrected step",
@@ -127,7 +140,7 @@ test("edit, reassign, unassign and retain a removed action owner across reconnec
   await expect(
     page.getByText("Owner: Bobby (no longer in room)", { exact: true })
   ).toBeVisible();
-  expect((await snapshot(page)).actions[0]).toEqual({
+  expect((await snapshot(page, "Final step")).actions[0]).toEqual({
     ...original,
     text: "Final step",
     done: true,

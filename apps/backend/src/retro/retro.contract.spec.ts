@@ -147,6 +147,8 @@ describe('shared retrospective contracts', () => {
       data: {
         room: publicRoom,
         self: { id: 'alice' },
+        version: 1,
+        recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
       },
     };
     expect(retroServerEventSchema.safeParse(event).success).toBe(true);

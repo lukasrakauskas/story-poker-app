@@ -154,6 +154,17 @@ export class RetroApplicationService implements OnModuleDestroy {
           'Join a room before making changes.',
         );
       session = current;
+      if (command.type === 'refresh')
+        return this.merge(
+          expired,
+          await this.broadcast(
+            session.code,
+            connectionId,
+            requestId,
+            false,
+            connectionId,
+          ),
+        );
       this.requireBroadcastCapacity(session.code);
       const mutation = await this.retros.mutate(session, command, context);
       const removed = mutation?.removedMemberId
@@ -643,12 +654,20 @@ export class RetroApplicationService implements OnModuleDestroy {
     requester?: string,
     requestId?: string,
     admissionReserved = false,
+    targetConnectionId?: string,
   ): Promise<ApplicationResult> {
     if (!admissionReserved && !this.reserveBroadcast(code)) return result();
     const messages: OutboundMessage[] = [];
     const closes: { connectionId: string; code: number; reason: string }[] = [];
     const roomSessions = [...this.sessions].filter(
-      ([, session]) => session.code === code,
+      ([connectionId, session]) =>
+        session.code === code &&
+        (!targetConnectionId || connectionId === targetConnectionId),
+    );
+    if (!roomSessions.length) return result();
+    const projectionPromise = this.retros.prepareBroadcast(
+      code,
+      this.context(),
     );
     const audience = new Set(
       this.connections.audience<string>(
@@ -660,26 +679,28 @@ export class RetroApplicationService implements OnModuleDestroy {
     for (const [connectionId, session] of roomSessions) {
       if (!audience.has(connectionId)) continue;
       try {
-        const event: RetroServerEvent = {
-          event: 'retro-state',
-          data: {
-            room: await this.retros.snapshot(session, this.context()),
-            self: { id: session.id },
-            ...(connectionId === requester && requestId ? { requestId } : {}),
-          },
+        const projection = await projectionPromise;
+        // Public schema validation/projection happens once per committed version;
+        // only the small private envelope is validated per authorized recipient.
+        const data = {
+          room: projection.room,
+          self: { id: session.id },
+          recipient: projection.recipient(session),
+          version: projection.version,
+          ...(connectionId === requester && requestId ? { requestId } : {}),
         };
-        const validated = retroServerEventSchema.safeParse(event);
+        const event: RetroServerEvent = { event: 'retro-state', data };
         messages.push({
           connectionId,
-          event: validated.success
-            ? validated.data
-            : this.errorEvent(
-                new RetroError(
-                  RETRO_PROTOCOL_ERROR_CODE,
-                  RETRO_PROTOCOL_ERROR_MESSAGE,
-                ),
-                connectionId === requester ? requestId : undefined,
-              ),
+          event,
+          serialization: {
+            type: 'retro-state',
+            publicRoom: data.room,
+            self: data.self,
+            recipient: data.recipient,
+            version: data.version,
+            ...(data.requestId ? { requestId: data.requestId } : {}),
+          },
         });
       } catch (error) {
         if (!(error instanceof RetroError)) {
