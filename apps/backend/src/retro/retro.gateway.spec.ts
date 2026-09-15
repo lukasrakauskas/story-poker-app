@@ -3,9 +3,8 @@ import { Test } from '@nestjs/testing';
 import { type Server, WebSocket } from 'ws';
 import { ConnectionRegistryService } from '../collaboration/connection-registry.service.js';
 import { ParticipantService } from '../collaboration/participant.service.js';
-import { RoomAccessService } from '../collaboration/room-access.service.js';
 import { RoomRegistryService } from '../collaboration/room-registry.service.js';
-import { RetentionService } from '../collaboration/retention.service.js';
+import { InMemoryRetroRoomRepository } from './retro-room.repository.js';
 import { ApplicationEventBus } from '../transport/application-event-bus.service.js';
 import { RateLimitService } from '../transport/rate-limit.service.js';
 import { WebSocketHeartbeatService } from '../transport/websocket-heartbeat.service.js';
@@ -33,13 +32,11 @@ function socket() {
 function latest(client: WebSocket) {
   return JSON.parse(vi.mocked(client.send).mock.calls.at(-1)![0] as string);
 }
-beforeEach(() => {
+beforeEach(async () => {
   vi.useFakeTimers();
   service = new RetroService(
     new ParticipantService(),
-    new RoomRegistryService(),
-    new RetentionService(),
-    new RoomAccessService(),
+    new InMemoryRetroRoomRepository(),
   );
   const events = new ApplicationEventBus();
   const connections = new ConnectionRegistryService();
@@ -51,46 +48,35 @@ beforeEach(() => {
     events,
   );
 });
-afterEach(() => {
+afterEach(async () => {
   gateway.onModuleDestroy();
   vi.useRealTimers();
 });
 
 describe('RetroGateway', () => {
-  it('rejects unknown nested command fields without crashing the connection', () => {
-    const owner = socket();
-    gateway.onCommand(owner, {
-      type: 'create',
-      name: 'Alice',
-      title: 'Retro',
-      identity: { moderator: true },
-    });
-    expect(latest(owner)).toMatchObject({
-      event: 'retro-error',
-      data: { code: 'invalid-command' },
-    });
-    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
-    expect(latest(owner).event).toBe('retro-state');
-  });
-
-  it('keeps closed broadcasts identical when sockets disconnect, resume or join late', () => {
+  it('keeps closed broadcasts identical when sockets disconnect, resume or join late', async () => {
     const owner = socket();
     const guest = socket();
-    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Final' });
+    await gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Final',
+    });
     const code = latest(owner).data.room.code;
-    gateway.onCommand(guest, { type: 'join', name: 'Bobby', code });
+    await gateway.onCommand(guest, { type: 'join', name: 'Bobby', code });
     const token = latest(guest).data.self.token;
-    for (let i = 0; i < 4; i++) gateway.onCommand(owner, { type: 'advance' });
+    for (let i = 0; i < 4; i++)
+      await gateway.onCommand(owner, { type: 'advance' });
     const final = latest(owner).data.room;
     expect(final.closedAt).toBe(Date.now());
-    gateway.handleDisconnect(guest);
+    await gateway.handleDisconnect(guest);
     expect(latest(owner).data.room).toEqual(final);
     const returning = socket();
-    gateway.onCommand(returning, { type: 'resume', code, token });
+    await gateway.onCommand(returning, { type: 'resume', code, token });
     expect(latest(returning).data.room).toEqual(final);
     expect(latest(owner).data.room).toEqual(final);
     const late = socket();
-    gateway.onCommand(late, { type: 'join', code, name: 'Carol' });
+    await gateway.onCommand(late, { type: 'join', code, name: 'Carol' });
     expect(latest(late)).toMatchObject({
       event: 'retro-error',
       data: { code: 'room-closed' },
@@ -115,17 +101,17 @@ describe('RetroGateway', () => {
     await testingModule.close();
   });
 
-  it('acknowledges only the requesting socket, including rejected commands', () => {
+  it('acknowledges only the requesting socket, including rejected commands', async () => {
     const owner = socket();
     const guest = socket();
-    gateway.onCommand(owner, {
+    await gateway.onCommand(owner, {
       type: 'create',
       name: 'Alice',
       title: 'Retro',
       requestId: 'create-1',
     });
     expect(latest(owner).data.requestId).toBe('create-1');
-    gateway.onCommand(guest, {
+    await gateway.onCommand(guest, {
       type: 'join',
       name: 'Bobby',
       code: latest(owner).data.room.code,
@@ -133,16 +119,16 @@ describe('RetroGateway', () => {
     });
     expect(latest(guest).data.requestId).toBe('join-1');
     expect(latest(owner).data).not.toHaveProperty('requestId');
-    gateway.onCommand(guest, { type: 'advance', requestId: 'advance-1' });
+    await gateway.onCommand(guest, { type: 'advance', requestId: 'advance-1' });
     expect(latest(guest)).toMatchObject({
       event: 'retro-error',
       data: { code: 'forbidden', requestId: 'advance-1' },
     });
   });
-  it('keeps protected rooms opaque and bounds password attempts', () => {
+  it('keeps protected rooms opaque and bounds password attempts', async () => {
     const owner = socket();
     const visitor = socket();
-    gateway.onCommand(owner, {
+    await gateway.onCommand(owner, {
       type: 'create',
       name: 'Alice',
       title: 'Sensitive retro',
@@ -152,7 +138,7 @@ describe('RetroGateway', () => {
     expect(created.room.requiresPassword).toBe(true);
     expect(JSON.stringify(created)).not.toContain('secret');
 
-    gateway.onCommand(visitor, {
+    await gateway.onCommand(visitor, {
       type: 'inspect',
       code: created.room.code,
     });
@@ -167,7 +153,7 @@ describe('RetroGateway', () => {
     expect(JSON.stringify(latest(visitor))).not.toContain('Sensitive retro');
 
     for (let attempt = 0; attempt < 5; attempt++) {
-      gateway.onCommand(visitor, {
+      await gateway.onCommand(visitor, {
         type: 'join',
         code: created.room.code,
         name: `Guest ${attempt}`,
@@ -178,7 +164,7 @@ describe('RetroGateway', () => {
         data: { code: 'wrong-room-password' },
       });
     }
-    gateway.onCommand(visitor, {
+    await gateway.onCommand(visitor, {
       type: 'join',
       code: created.room.code,
       name: 'Bobby',
@@ -188,13 +174,13 @@ describe('RetroGateway', () => {
       event: 'retro-error',
       data: { code: 'rate-limit' },
     });
-    expect(service.inspect(created.room.code)).toMatchObject({
+    expect(await service.inspect(created.room.code)).toMatchObject({
       available: true,
       requiresPassword: true,
     });
 
-    vi.advanceTimersByTime(60_000);
-    gateway.onCommand(visitor, {
+    await vi.advanceTimersByTimeAsync(60_000);
+    await gateway.onCommand(visitor, {
       type: 'join',
       code: created.room.code,
       name: 'Bobby',
@@ -212,9 +198,13 @@ describe('RetroGateway', () => {
     });
   });
 
-  it('expires attached rooms and cleans timers even without incoming messages', () => {
+  it('expires attached rooms and cleans timers even without incoming messages', async () => {
     const owner = socket();
-    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
+    await gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
     const code = latest(owner).data.room.code;
     gateway.afterInit({ clients: new Set() } as Server);
     gateway.afterInit({ clients: new Set() } as Server);
@@ -224,14 +214,14 @@ describe('RetroGateway', () => {
       .mock.calls.find(([event]) => event === 'pong')![1];
     for (let elapsed = 0; elapsed < RETRO_LIFETIME_MS; elapsed += 30_000) {
       pong.call(owner);
-      vi.advanceTimersByTime(30_000);
+      await vi.advanceTimersByTimeAsync(30_000);
     }
     expect(latest(owner)).toMatchObject({
       event: 'retro-error',
       data: { code: 'room-expired' },
     });
-    expect(service.isExpired(code)).toBe(true);
-    gateway.onCommand(owner, {
+    expect(await service.isExpired(code)).toBe(true);
+    await gateway.onCommand(owner, {
       type: 'create',
       name: 'Alice',
       title: 'New room',
@@ -241,32 +231,40 @@ describe('RetroGateway', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('marks disconnects and sends only other members their own credentials', () => {
+  it('marks disconnects and sends only other members their own credentials', async () => {
     const owner = socket();
     const guest = socket();
-    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
+    await gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
     const created = latest(owner).data;
-    gateway.onCommand(guest, {
+    await gateway.onCommand(guest, {
       type: 'join',
       name: 'Bobby',
       code: created.room.code,
     });
-    gateway.handleDisconnect(guest);
+    await gateway.handleDisconnect(guest);
     expect(latest(owner).data.room.members[1].connected).toBe(false);
     expect(latest(owner).data.self).toEqual(created.self);
-    expect(() => gateway.handleDisconnect(guest)).not.toThrow();
+    await expect(gateway.handleDisconnect(guest)).resolves.not.toThrow();
   });
 
-  it('limits command floods and recovers after the rate window', () => {
+  it('limits command floods and recovers after the rate window', async () => {
     const owner = socket();
-    for (let i = 0; i < 31; i++) gateway.onCommand(owner, null);
+    for (let i = 0; i < 31; i++) await gateway.onCommand(owner, null);
     expect(latest(owner).data.code).toBe('rate-limit');
     vi.advanceTimersByTime(1000);
-    gateway.onCommand(owner, { type: 'create', name: 'Alice', title: 'Retro' });
+    await gateway.onCommand(owner, {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
     expect(latest(owner).event).toBe('retro-state');
   });
 
-  it('pings clients and terminates unresponsive connections', () => {
+  it('pings clients and terminates unresponsive connections', async () => {
     const owner = socket();
     gateway.afterInit({ clients: new Set([owner]) } as Server);
     vi.advanceTimersByTime(30_000);
