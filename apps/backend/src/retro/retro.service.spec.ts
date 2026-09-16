@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ParticipantService } from '../collaboration/participant.service.js';
-import { InMemoryRetroRoomRepository } from './retro-room.repository.js';
+import {
+  InMemoryRetroRoomRepository,
+  type StoredRetroNote,
+} from './retro-room.repository.js';
 import {
   RETRO_LIFETIME_MS,
   RETRO_OFFLINE_RETENTION_MS,
@@ -511,7 +514,55 @@ describe('retrospective workflow', () => {
     ).rejects.toThrow('writing or voting');
   });
 
-  it('preserves server note creation order through grouping, deletion and resume', async () => {
+  it('migrates persisted themes into unnamed stacks and preserves their votes', async () => {
+    const repository = new InMemoryRetroRoomRepository();
+    const migratingService = new RetroService(
+      new ParticipantService(),
+      repository,
+    );
+    const session = await migratingService.create('Carol', 'Legacy room');
+    for (const text of ['First legacy note', 'Second legacy note'])
+      await migratingService.mutate(session, {
+        type: 'add-note',
+        column: 'ideas',
+        text,
+      });
+    await repository.update(session.code, (room) => {
+      const legacy = room as unknown as {
+        groups: { id: string; title: string; voterIds: string[] }[];
+        notes: (StoredRetroNote & { groupId: string | null })[];
+      };
+      legacy.groups = [
+        {
+          id: 'legacy-theme',
+          title: 'Retired theme',
+          voterIds: [session.id],
+        },
+      ];
+      legacy.notes = room.notes.map((note) => ({
+        ...note,
+        groupId: 'legacy-theme',
+      }));
+      room.phase = 'discuss';
+      return { result: undefined };
+    });
+
+    const migrated = await migratingService.snapshot(session);
+    expect('groups' in migrated).toBe(false);
+    expect(migrated.notes.map((note) => note.text)).toEqual([
+      'First legacy note',
+      'Second legacy note',
+    ]);
+    expect(migrated.notes.map((note) => note.voteCount)).toEqual([1, 0]);
+    expect(migrated.notes.map((note) => note.stackId)).toEqual([
+      'legacy-theme',
+      'legacy-theme',
+    ]);
+    migratingService.onModuleDestroy();
+    repository.onModuleDestroy();
+  });
+
+  it('preserves server lane order through deletion and resume', async () => {
     const ids = [
       await add('First'),
       await add('Second'),
@@ -520,13 +571,16 @@ describe('retrospective workflow', () => {
     ];
     await service.mutate(owner, { type: 'advance' });
     await service.mutate(owner, {
-      type: 'group-notes',
-      title: 'Theme',
-      noteIds: [ids[2], ids[0]],
+      type: 'move-note',
+      id: ids[2],
+      column: 'went-well',
+      beforeId: ids[0],
+      stackWithId: null,
+      moveStack: false,
     });
     expect(
       (await service.snapshot(guest)).notes.map((note) => note.id),
-    ).toEqual(ids);
+    ).toEqual([ids[2], ids[0], ids[1], ids[3]]);
     await service.mutate(owner, { type: 'delete-note', id: ids[1] });
     await service.mutate(owner, { type: 'advance' });
     await service.mutate(owner, { type: 'advance' });
@@ -534,136 +588,110 @@ describe('retrospective workflow', () => {
     await service.resume(guest.code, guest.token);
     expect(
       (await service.snapshot(guest)).notes.map((note) => note.id),
-    ).toEqual([ids[0], ids[2], ids[3]]);
+    ).toEqual([ids[2], ids[0], ids[3]]);
   });
 
-  it('groups revealed notes into stable theme voting targets', async () => {
+  it('creates unnamed stacks and lets participants drag messages in and out', async () => {
+    const ids = [await add('One'), await add('Two'), await add('Three')];
+    await service.mutate(owner, { type: 'advance' });
+    await service.mutate(guest, {
+      type: 'move-note',
+      id: ids[0],
+      column: 'went-well',
+      beforeId: null,
+      stackWithId: ids[1],
+      moveStack: false,
+    });
+    let arranged = await service.snapshot(owner);
+    const stackId = arranged.notes.find((note) => note.id === ids[0])?.stackId;
+    expect(stackId).toEqual(expect.any(String));
+    expect(arranged.notes.find((note) => note.id === ids[1])?.stackId).toBe(
+      stackId,
+    );
+
+    await service.mutate(owner, {
+      type: 'move-note',
+      id: ids[0],
+      column: 'ideas',
+      beforeId: null,
+      stackWithId: null,
+      moveStack: false,
+    });
+    arranged = await service.snapshot(guest);
+    expect(arranged.notes.find((note) => note.id === ids[0])).toMatchObject({
+      column: 'ideas',
+      stackId: null,
+    });
+    expect(
+      arranged.notes.find((note) => note.id === ids[1])?.stackId,
+    ).toBeNull();
+  });
+
+  it('keeps every arranged note as an individual voting target', async () => {
     const first = await add('Slow reviews');
     const second = await add('Long feedback loops');
-    await service.mutate(guest, {
-      type: 'add-note',
+    await service.mutate(owner, { type: 'advance' });
+    await service.mutate(owner, {
+      type: 'move-note',
+      id: second,
       column: 'ideas',
-      text: 'Pair earlier',
+      beforeId: null,
+      stackWithId: null,
+      moveStack: false,
     });
-    const ungrouped = (await service.snapshot(guest)).notes[0].id;
     await service.mutate(owner, { type: 'advance' });
-
-    await expect(
-      service.mutate(guest, {
-        type: 'group-notes',
-        title: 'Review flow',
-        noteIds: [first, second],
-      }),
-    ).rejects.toThrow('moderator');
-    await service.mutate(owner, {
-      type: 'group-notes',
-      title: 'Review flow',
-      noteIds: [first, second],
-    });
-    let grouped = await service.snapshot(owner);
-    expect(grouped.phase).toBe('group');
-    expect(grouped.groups).toEqual([
-      expect.objectContaining({
-        title: 'Review flow',
-        voteCount: null,
-        votedBySelf: false,
-      }),
-    ]);
+    await service.mutate(guest, { type: 'toggle-vote', id: first });
+    await service.mutate(guest, { type: 'toggle-vote', id: second });
     expect(
-      grouped.notes.filter((note) => note.groupId === grouped.groups[0].id),
+      (await service.snapshot(guest)).notes.filter((note) => note.votedBySelf),
     ).toHaveLength(2);
-
-    await service.mutate(owner, { type: 'ungroup-note', id: first });
-    expect((await service.snapshot(owner)).groups).toEqual([]);
-    expect(
-      (await service.snapshot(owner)).notes.every((note) => !note.groupId),
-    ).toBe(true);
-    await service.mutate(owner, {
-      type: 'group-notes',
-      title: 'Review flow',
-      noteIds: [first, second],
-    });
-    grouped = await service.snapshot(owner);
-    const groupId = grouped.groups[0].id;
-    await service.mutate(owner, { type: 'advance' });
-    await expect(
-      service.mutate(guest, { type: 'toggle-vote', id: first }),
-    ).rejects.toThrow('theme');
-    await service.mutate(guest, { type: 'toggle-vote', id: groupId });
-    await service.mutate(guest, { type: 'toggle-vote', id: ungrouped });
-    expect((await service.snapshot(owner)).groups[0]).toMatchObject({
-      voteCount: null,
-      votedBySelf: false,
-    });
-    expect((await service.snapshot(guest)).groups[0].votedBySelf).toBe(true);
-    expect(
-      (await service.snapshot(guest)).notes.find(
-        (note) => note.id === ungrouped,
-      )?.votedBySelf,
-    ).toBe(true);
-
     await service.disconnect(guest);
     await service.resume(guest.code, guest.token);
-    expect((await service.snapshot(guest)).groups[0].votedBySelf).toBe(true);
-    await service.mutate(owner, { type: 'advance' });
-    const discussed = await service.snapshot(owner);
-    expect(discussed.groups[0].voteCount).toBe(1);
     expect(
-      discussed.notes.find((note) => note.id === ungrouped)?.voteCount,
-    ).toBe(1);
-    await expect(
-      service.mutate(owner, {
-        type: 'group-notes',
-        title: 'Late',
-        noteIds: [first, second],
-      }),
-    ).rejects.toThrow('group phase');
+      (await service.snapshot(guest)).notes.filter((note) => note.votedBySelf),
+    ).toHaveLength(2);
+    await service.mutate(owner, { type: 'advance' });
+    expect(
+      (await service.snapshot(owner)).notes.map((note) => note.voteCount),
+    ).toEqual([1, 1]);
   });
 
-  it('moves notes between stacks without replacing the target theme or attribution', async () => {
-    const ids = [
-      await add('One'),
-      await add('Two'),
-      await add('Three'),
-      await add('Four'),
-    ];
+  it('serializes concurrent lane moves into one convergent room order', async () => {
+    const ids = [await add('One'), await add('Two'), await add('Three')];
     await service.mutate(owner, { type: 'advance' });
-    await service.mutate(owner, {
-      type: 'group-notes',
-      title: 'First',
-      noteIds: ids.slice(0, 2),
-    });
-    await service.mutate(owner, {
-      type: 'group-notes',
-      title: 'Second',
-      noteIds: ids.slice(2),
-    });
-    const before = await service.snapshot(owner);
-    const target = before.groups[1];
-    const command = {
+    const firstMove = {
       type: 'move-note' as const,
       id: ids[0],
-      groupId: target.id,
+      column: 'ideas' as const,
+      beforeId: null,
+      stackWithId: null,
+      moveStack: false,
     };
-    await expect(service.mutate(guest, command)).rejects.toThrow('moderator');
-    await expect(
-      service.mutate(owner, { ...command, groupId: 'missing' }),
-    ).rejects.toThrow('no longer exists');
-    expect(await service.snapshot(owner)).toEqual(before);
-    await service.mutate(owner, command);
-    const moved = await service.snapshot(guest);
-    expect(moved.groups).toEqual([target]);
-    expect(moved.notes.find((note) => note.id === ids[0])).toEqual({
-      ...before.notes[0],
-      groupId: target.id,
-    });
-    expect(moved.notes.find((note) => note.id === ids[1])?.groupId).toBeNull();
-    await service.mutate(owner, command); // Idempotent drop onto the same stack.
+    await Promise.all([
+      service.mutate(guest, firstMove),
+      service.mutate(owner, {
+        type: 'move-note',
+        id: ids[1],
+        column: 'ideas',
+        beforeId: ids[0],
+        stackWithId: null,
+        moveStack: false,
+      }),
+    ]);
+    const ownerRoom = await service.snapshot(owner);
     await service.disconnect(guest);
     await service.resume(guest.code, guest.token);
-    expect((await service.snapshot(guest)).groups).toEqual([target]);
+    const guestRoom = await service.snapshot(guest);
+    expect(guestRoom.notes).toEqual(ownerRoom.notes);
+    expect(
+      guestRoom.notes
+        .filter((note) => note.column === 'ideas')
+        .map((note) => note.id),
+    ).toEqual([ids[1], ids[0]]);
     await service.mutate(owner, { type: 'advance' });
-    await expect(service.mutate(owner, command)).rejects.toThrow('group phase');
+    await expect(service.mutate(owner, firstMove)).rejects.toThrow(
+      'group phase',
+    );
   });
 
   it('keeps open voting blind and anonymous while preserving own selections', async () => {
@@ -892,8 +920,15 @@ it.each([
   { type: 'add-note', column: 'wrong', text: 'Hello' },
   { type: 'add-note', column: 'ideas', text: ' ' },
   { type: 'edit-note', id: 'note', text: 'x'.repeat(1001) },
-  { type: 'group-notes', title: 'Theme', noteIds: ['only-one'] },
-  { type: 'group-notes', title: ' ', noteIds: ['one', 'two'] },
+  { type: 'move-note', id: 'note', column: 'ideas' },
+  {
+    type: 'move-note',
+    id: 'note',
+    column: 'wrong',
+    beforeId: null,
+    stackWithId: null,
+    moveStack: false,
+  },
   { type: 'add-action', text: 'Hello', owner: 'x'.repeat(61) },
   {
     type: 'edit-action',

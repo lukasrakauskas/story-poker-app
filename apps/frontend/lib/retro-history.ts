@@ -125,23 +125,18 @@ function projectPublicRoom(value: unknown): unknown {
             "authorName",
             "column",
             "text",
-            "groupId",
+            "stackId",
             "voteCount",
             "votedBySelf",
           ])
         )
       : source.notes,
-    groups: Array.isArray(source.groups)
-      ? source.groups.map((group) =>
-          pick(group, ["id", "title", "voteCount", "votedBySelf"])
-        )
-      : source.groups,
     actions: Array.isArray(source.actions)
       ? source.actions.map((action) => {
           const projected = record(action);
           if (!projected) return action;
           return {
-            ...(record(pick(projected, ["id", "text", "done"])) ?? {}),
+            ...record(pick(projected, ["id", "text", "done"])),
             owner: projectActionOwner(projected.owner),
           };
         })
@@ -184,14 +179,6 @@ export function publicRetro(
   const snapshot = sanitizePublicRetroRoom(room);
   return retroPublicRoomSchema.parse({
     ...snapshot,
-    groups: snapshot.groups.map((group) => ({
-      ...group,
-      voteCount:
-        snapshot.phase === "discuss" || snapshot.phase === "closed"
-          ? (group.voteCount ?? 0)
-          : null,
-      votedBySelf: snapshot.phase === "vote" && group.votedBySelf,
-    })),
     notes: snapshot.notes
       // Fail closed when sanitizing a write-phase snapshot without its audience.
       .filter(
@@ -207,8 +194,7 @@ export function publicRetro(
                 ?.name ?? note.authorName)
             : note.authorName,
         voteCount:
-          !note.groupId &&
-          (snapshot.phase === "discuss" || snapshot.phase === "closed")
+          snapshot.phase === "discuss" || snapshot.phase === "closed"
             ? (note.voteCount ?? 0)
             : null,
         votedBySelf: snapshot.phase === "vote" && note.votedBySelf,

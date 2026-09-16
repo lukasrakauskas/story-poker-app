@@ -55,7 +55,7 @@ describe('WebSocket transport adapters', () => {
         type: 'retro-state' as const,
         publicRoom,
         self: { id },
-        recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
+        recipient: { notes: [], votedNoteIds: [] },
         version: 4,
       },
     });

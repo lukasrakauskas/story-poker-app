@@ -20,7 +20,7 @@ const columnTitles: Record<RetroColumn, string> = {
 };
 
 const phaseLabels: Record<Exclude<RetroPhase, "write">, string> = {
-  group: "Reveal and group notes",
+  group: "Reveal and arrange notes",
   vote: "Start voting",
   discuss: "Start discussion",
   closed: "Close retrospective",
@@ -268,23 +268,6 @@ export async function seedRetroAction(
       .selectOption({ label: ownerName });
   await form.getByRole("button", { name: "Add action", exact: true }).click();
   await expect(page.getByText(text, { exact: true })).toBeVisible();
-}
-
-export async function createRetroTheme(
-  page: Page,
-  noteTexts: string[],
-  title: string
-) {
-  for (const text of noteTexts)
-    await page.getByLabel(text, { exact: true }).check();
-  await page.getByLabel("Theme name", { exact: true }).fill(title);
-  await page
-    .getByRole("button", {
-      name: `Create theme from ${noteTexts.length} notes`,
-      exact: true,
-    })
-    .click();
-  await expect(page.getByText(title, { exact: true }).first()).toBeVisible();
 }
 
 export async function holdNextRetroCommand(page: Page, commandType: string) {

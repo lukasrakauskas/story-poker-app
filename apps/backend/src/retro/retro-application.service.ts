@@ -8,6 +8,7 @@ import {
   RETRO_PROTOCOL_ERROR_MESSAGE,
   retroServerEventSchema,
   type RetroCommand,
+  type RetroPresenceUpdate,
   type RetroRememberedIdentity,
   type RetroServerEvent,
   type RetroSessionView,
@@ -208,6 +209,27 @@ export class RetroApplicationService implements OnModuleDestroy {
     }
   }
 
+  presence(
+    connectionId: string,
+    update: RetroPresenceUpdate,
+  ): ApplicationResult {
+    const session = this.sessions.get(connectionId);
+    if (!session) return result();
+    const event: RetroServerEvent = {
+      event: 'retro-presence',
+      data: { ...update, memberId: session.id },
+    };
+    return result(
+      undefined,
+      [...this.sessions.entries()]
+        .filter(
+          ([targetId, target]) =>
+            targetId !== connectionId && target.code === session.code,
+        )
+        .map(([targetId]) => ({ connectionId: targetId, event })),
+    );
+  }
+
   /**
    * Establishment is intentionally HTTP-only. It creates the member and
    * returns a secret-free view; the HTTP controller writes the bearer token to
@@ -361,9 +383,17 @@ export class RetroApplicationService implements OnModuleDestroy {
 
   async disconnect(connectionId: string): Promise<ApplicationResult> {
     const session = this.sessions.get(connectionId);
+    const departed = session
+      ? this.presence(connectionId, {
+          x: 0,
+          y: 0,
+          noteId: null,
+          active: false,
+        })
+      : result();
     this.sessions.delete(connectionId);
     this.admission?.release(connectionId);
-    if (!session) return result();
+    if (!session) return departed;
     this.connections.release(
       RETRO_APPLICATION_NAMESPACE,
       session.code,
@@ -378,7 +408,7 @@ export class RetroApplicationService implements OnModuleDestroy {
     );
     if (!broadcastAllowed) {
       this.refreshMetrics();
-      return result();
+      return departed;
     }
     const disconnected = await this.broadcast(
       session.code,
@@ -387,7 +417,7 @@ export class RetroApplicationService implements OnModuleDestroy {
       true,
     );
     this.refreshMetrics();
-    return disconnected;
+    return this.merge(departed, disconnected);
   }
 
   async expireRooms(): Promise<ApplicationResult> {

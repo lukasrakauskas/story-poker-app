@@ -56,7 +56,7 @@ test("recovers moderation and removes a stale participant through the live socke
     .click();
   await expect(
     guest.page.getByRole("button", {
-      name: "Reveal and group notes",
+      name: "Reveal and arrange notes",
       exact: true,
     })
   ).toBeEnabled();
@@ -70,7 +70,7 @@ test("recovers moderation and removes a stale participant through the live socke
   ).toBeVisible();
   await expect(
     owner.page.getByRole("button", {
-      name: "Reveal and group notes",
+      name: "Reveal and arrange notes",
       exact: true,
     })
   ).toHaveCount(0);
@@ -79,7 +79,7 @@ test("recovers moderation and removes a stale participant through the live socke
     .click();
   await expect(
     owner.page.getByRole("button", {
-      name: "Reveal and group notes",
+      name: "Reveal and arrange notes",
       exact: true,
     })
   ).toBeEnabled();

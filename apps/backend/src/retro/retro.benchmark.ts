@@ -23,7 +23,7 @@ function stats(values: number[]) {
 async function run(size: {
   members: number;
   notes: number;
-  groups: number;
+  votedNotes: number;
   actions: number;
 }) {
   const repository = new InMemoryRetroRoomRepository();
@@ -43,13 +43,8 @@ async function run(size: {
         authorName: 'Alice',
         column: 'ideas' as const,
         text: 'Useful retrospective feedback '.padEnd(1000, 'x'),
-        groupId: i < size.groups * 2 ? `group-${Math.floor(i / 2)}` : null,
-        voterIds: [],
-      }));
-      room.groups = Array.from({ length: size.groups }, (_, i) => ({
-        id: `group-${i}`,
-        title: 'Theme'.padEnd(100, 'x'),
-        voterIds: i < 3 ? sessions.map((s) => s.id) : [],
+        stackId: null,
+        voterIds: i < size.votedNotes ? sessions.map((s) => s.id) : [],
       }));
       room.actions = Array.from({ length: size.actions }, (_, i) => ({
         id: `action-${i}`,
@@ -157,13 +152,13 @@ console.log(
       representative: await run({
         members: 15,
         notes: 120,
-        groups: 20,
+        votedNotes: 3,
         actions: 30,
       }),
       nearLimit: await run({
         members: 30,
         notes: 300,
-        groups: 150,
+        votedNotes: 3,
         actions: 100,
       }),
     },

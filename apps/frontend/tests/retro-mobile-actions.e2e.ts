@@ -37,14 +37,16 @@ test("mobile discussion actions preserve context, scroll and focus beside a long
       .getByRole("button", { name: "Add to went well", exact: true })
       .click();
     await expect(
-      page.getByText(
-        `Discussion topic ${i}: keep enough context to discuss a concrete next step.`,
-        { exact: true }
-      )
+      page
+        .locator("article")
+        .getByText(
+          `Discussion topic ${i}: keep enough context to discuss a concrete next step.`,
+          { exact: true }
+        )
     ).toBeVisible();
   }
   for (const label of [
-    "Reveal and group notes",
+    "Reveal and arrange notes",
     "Start voting",
     "Start discussion",
   ]) {

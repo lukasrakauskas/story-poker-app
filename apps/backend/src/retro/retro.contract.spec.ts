@@ -30,12 +30,10 @@ const publicRoom = {
       authorName: 'Alice',
       column: 'ideas' as const,
       text: 'Keep pairing',
-      groupId: null,
       voteCount: null,
       votedBySelf: true,
     },
   ],
-  groups: [],
   actions: [],
 };
 
@@ -130,11 +128,9 @@ describe('shared retrospective contracts', () => {
           authorName: 'Alice',
           column: 'ideas' as const,
           text: 'Keep pairing',
-          groupId: null,
           voterIds: ['alice'],
         },
       ],
-      groups: [],
       readyMemberIds: [],
     };
     expect(retroInternalRoomSchema.parse(internal).members[0].tokenHash).toBe(
@@ -148,7 +144,7 @@ describe('shared retrospective contracts', () => {
         room: publicRoom,
         self: { id: 'alice' },
         version: 1,
-        recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
+        recipient: { notes: [], votedNoteIds: [] },
       },
     };
     expect(retroServerEventSchema.safeParse(event).success).toBe(true);

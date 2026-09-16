@@ -147,6 +147,8 @@ export function useRetroSocket(initialCode?: string) {
     pending: state.pendingRequestId !== null,
     error: state.error,
     send: client.send,
+    sendPresence: client.sendPresence,
+    presence: state.presence,
     retry: client.retry,
     cookieSaved: state.cookieSaved,
     historySaved: historyState.saved,

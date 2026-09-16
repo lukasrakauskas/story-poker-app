@@ -1,4 +1,5 @@
 import type {
+  RetroPresenceEvent,
   RetroRememberedIdentity,
   RetroRoom,
   RetroRoomInfo,
@@ -45,6 +46,7 @@ export interface RetroSessionState {
   historySaved: boolean | null;
   rememberedIdentity: RetroRememberedIdentity | null;
   rememberedStatus: RememberedIdentityStatus;
+  presence: Record<string, RetroPresenceEvent["data"]>;
 }
 
 export const initialRetroSessionState: RetroSessionState = {
@@ -61,6 +63,7 @@ export const initialRetroSessionState: RetroSessionState = {
   historySaved: null,
   rememberedIdentity: null,
   rememberedStatus: "idle",
+  presence: {},
 };
 
 type RetroSessionAction =
@@ -74,6 +77,7 @@ type RetroSessionAction =
       acknowledged: boolean;
     }
   | { type: "room-info"; info: RetroRoomInfo }
+  | { type: "presence"; data: RetroPresenceEvent["data"] }
   | {
       type: "remembered-identity";
       identity: RetroRememberedIdentity;
@@ -143,9 +147,16 @@ export function retroSessionReducer(
         roomInfo: null,
         selfId: action.selfId,
         error: action.acknowledged ? null : state.error,
+        presence: action.room.phase === "group" ? state.presence : {},
       };
     case "room-info":
       return { ...state, roomInfo: action.info, error: null };
+    case "presence": {
+      const presence = { ...state.presence };
+      if (action.data.active) presence[action.data.memberId] = action.data;
+      else delete presence[action.data.memberId];
+      return { ...state, presence };
+    }
     case "remembered-identity":
       return {
         ...state,
@@ -186,6 +197,7 @@ export function retroSessionReducer(
         pendingRequestId: null,
         selfId: action.clearSelf ? null : state.selfId,
         error: action.error,
+        presence: {},
       };
   }
 }

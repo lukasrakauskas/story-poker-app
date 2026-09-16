@@ -157,7 +157,6 @@ const room: RetroRoom = {
     },
   ],
   notes: [],
-  groups: [],
   actions: [],
   requiresPassword: false,
 };
@@ -183,7 +182,6 @@ function stateEvent(
       recipient: {
         notes: snapshot.phase === "write" ? snapshot.notes : [],
         votedNoteIds: [],
-        votedGroupIds: [],
       },
       ...(requestId === undefined ? {} : { requestId }),
     },
@@ -405,6 +403,56 @@ test("requires the matching request id before acknowledging a mutation", async (
     )
   );
   assert.equal(await mutation, true);
+});
+
+test("sends and receives ephemeral arrange presence without pending requests", () => {
+  const context = setup();
+  clients.push(context.client);
+  context.transport.openSocket();
+  const arranging = { ...room, phase: "group" as const };
+  context.transport.message(stateEvent(arranging));
+
+  assert.equal(
+    context.client.sendPresence({
+      x: 0.25,
+      y: 0.75,
+      noteId: "note",
+      active: true,
+    }),
+    true
+  );
+  assert.deepEqual(context.transport.lastCommand(), {
+    event: "retro-presence",
+    data: { x: 0.25, y: 0.75, noteId: "note", active: true },
+  });
+  assert.equal(context.client.getSnapshot().pendingRequestId, null);
+
+  context.transport.message(
+    JSON.stringify({
+      event: "retro-presence",
+      data: {
+        memberId: "bob",
+        x: 0.5,
+        y: 0.4,
+        noteId: "note",
+        active: true,
+      },
+    })
+  );
+  assert.equal(context.client.getSnapshot().presence.bob?.x, 0.5);
+  context.transport.message(
+    JSON.stringify({
+      event: "retro-presence",
+      data: {
+        memberId: "bob",
+        x: 0,
+        y: 0,
+        noteId: null,
+        active: false,
+      },
+    })
+  );
+  assert.deepEqual(context.client.getSnapshot().presence, {});
 });
 
 test("rejects malformed nested state and closes the transport", () => {
