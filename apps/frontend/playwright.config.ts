@@ -1,27 +1,37 @@
 import { defineConfig } from "@playwright/test";
 
+const backendPort = process.env.PLAYWRIGHT_BACKEND_PORT ?? "4000";
+const frontendPort = process.env.PLAYWRIGHT_FRONTEND_PORT ?? "3001";
+
 export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.e2e.ts",
   timeout: 60_000,
   use: {
-    baseURL: "http://localhost:3001",
+    baseURL: `http://localhost:${frontendPort}`,
     launchOptions: {
       executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
     },
   },
   webServer: [
     {
-      command:
-        "bun run --cwd ../backend build && PORT=4000 bun ../backend/dist/main.js",
-      url: "http://localhost:4000",
+      command: `bun run --cwd ../backend build && PORT=${backendPort} RETRO_ALLOWED_ORIGINS=http://localhost:${frontendPort} bun ../backend/dist/main.js`,
+      url: `http://localhost:${backendPort}`,
+      // Browser scenarios create independent rooms rapidly behind one loopback
+      // source. Default admission budgets are exercised by backend abuse tests.
+      env: {
+        WS_CREATE_ATTEMPTS_PER_SOURCE: "1000",
+        WS_JOIN_ATTEMPTS_PER_SOURCE: "1000",
+        WS_RESUME_ATTEMPTS_PER_SOURCE: "2000",
+        WS_GLOBAL_CREATE_LIMIT: "1000",
+      },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
     {
-      command: "bun run dev -- --port 3001",
-      url: "http://localhost:3001/retro",
-      env: { NEXT_PUBLIC_WS_URL: "ws://localhost:4000" },
+      command: `bun run dev -- --port ${frontendPort}`,
+      url: `http://localhost:${frontendPort}/retro`,
+      env: { NEXT_PUBLIC_WS_URL: `ws://localhost:${backendPort}` },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

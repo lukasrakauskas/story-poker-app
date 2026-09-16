@@ -1,16 +1,21 @@
 {
   "name": "shared",
   "version": "0.0.0",
+  "type": "module",
   "main": "./index.ts",
   "types": "./index.ts",
   "exports": {
     ".": "./index.ts",
+    "./participant": "./participant.ts",
     "./retrospective": "./retrospective.ts",
     "./retro-priorities": "./retro-priorities.ts"
   },
   "license": "MIT",
   "scripts": {
     "lint": "oxlint ."
+  },
+  "dependencies": {
+    "zod": "^4.6.1"
   },
   "devDependencies": {
     "tsconfig": "workspace:*",

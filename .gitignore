@@ -11,6 +11,7 @@ playwright-report/
 test-results/
 
 # next.js
+*.tsbuildinfo
 .next/
 out/
 build

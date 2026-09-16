@@ -13,6 +13,7 @@ import { RoomDetails } from "./room-details";
 import { PhaseAdvanceDialog } from "./phase-advance-dialog";
 import { RetroExport } from "./retro-export";
 import { RetroStatus } from "./retro-status";
+import { RetroHistoryChoice } from "./retro-history-choice";
 
 const phases: {
   id: RetroPhase;
@@ -58,7 +59,7 @@ const phases: {
 
 export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
   return (
-    <RetroProvider>
+    <RetroProvider initialCode={initialCode}>
       <Workspace initialCode={initialCode} />
     </RetroProvider>
   );
@@ -72,9 +73,16 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     pending,
     error,
     retry,
+    reconnectAttempt,
+    recovery,
+    terminal: sessionTerminal,
     send,
-    cookieSaved,
+    forgetRememberedSession,
     historySaved,
+    historyPreference,
+    historyPreferenceSaved,
+    historyDisabled,
+    chooseHistoryPreference,
   } = useRetro();
   const compactDiscussion = useCompactDiscussion();
   const [now, setNow] = useState<number | null>(null);
@@ -92,6 +100,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     !!(room && now !== null && now >= room.expiresAt);
   const removed = error?.code === "removed";
   const invalid = error?.code === "invalid-session" || removed;
+  const terminal =
+    sessionTerminal || expired || invalid || room?.phase === "closed";
   const disabled =
     connection !== "connected" ||
     pending ||
@@ -128,6 +138,10 @@ function Workspace({ initialCode }: { initialCode?: string }) {
       : null;
   const actionError =
     error && !supportingError && !invalid && !expired ? error : null;
+  const historyChoiceRequired =
+    !!room &&
+    (historyPreference === null ||
+      (historyDisabled && historyPreference.mode !== "none"));
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-5 px-4 py-6 sm:px-8">
@@ -285,15 +299,28 @@ function Workspace({ initialCode }: { initialCode?: string }) {
               pending={pending}
               error={supportingError}
               retry={retry}
-              cookieSaved={cookieSaved}
               historySaved={historySaved}
+              historyPreference={historyPreference}
+              historyPreferenceSaved={historyPreferenceSaved}
+              historyDisabled={historyDisabled}
+              forgetSession={() => forgetRememberedSession(room.code)}
               expired={expired}
-              terminal={expired || invalid}
+              reconnectAttempt={reconnectAttempt}
+              recovery={recovery}
+              terminal={terminal}
               minutes={minutes}
               expiresAt={room.expiresAt}
               phase={room.phase}
             />
             <div className="order-2 min-w-0 space-y-6 xl:col-start-1 xl:row-span-2 xl:row-start-1">
+              {historyChoiceRequired && (
+                <RetroHistoryChoice
+                  key={`${room.code}:${room.expiresAt}:${historyPreference?.mode ?? "new"}`}
+                  previous={historyPreference}
+                  disabledAfterDelete={historyDisabled}
+                  onChoose={chooseHistoryPreference}
+                />
+              )}
               {room.phase === "discuss" && compactDiscussion && (
                 <MobileActions
                   room={room}
