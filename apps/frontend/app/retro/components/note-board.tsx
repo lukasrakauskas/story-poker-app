@@ -178,7 +178,7 @@ export function NoteBoard({
           <div className="mb-4 space-y-1">
             <h2 id={`heading-${column.id}`} className="font-semibold">
               {column.title}{" "}
-              <Badge variant="secondary" className="ml-1 tabular-nums">
+              <Badge variant="secondary" size="count" className="ml-1">
                 {room.notes.filter((note) => note.column === column.id).length}
               </Badge>
             </h2>
