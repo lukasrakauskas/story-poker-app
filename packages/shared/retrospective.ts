@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { participantNameSchema } from "./participant";
+import { participantNameSchema } from "shared/participant";
 
 /**
  * The wire protocol deliberately stays at v1 while its schemas evolve behind

@@ -1,4 +1,4 @@
-import type { RetroGroup, RetroNote, RetroRoom } from "./retrospective";
+import type { RetroGroup, RetroNote, RetroRoom } from "./retrospective.js";
 
 type Target = { id: string; voteCount: number | null } & (
   | { group: RetroGroup }
