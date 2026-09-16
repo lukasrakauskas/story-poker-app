@@ -761,6 +761,7 @@ export class RetroSessionClient {
   }
 
   setEnvironment = (online: boolean, visible: boolean): void => {
+    const becameVisible = !this.visible && visible;
     this.online = online;
     this.visible = visible;
     if (!this.started || this.state.phase === "terminal") return;
@@ -771,6 +772,12 @@ export class RetroSessionClient {
         this.clearRecoveryTimers();
         this.scheduleRecovery();
       }
+    } else if (becameVisible && this.state.room) {
+      // A suspended mobile tab can retain an OPEN readyState for a socket the
+      // network has already discarded. Replace it on foreground and perform a
+      // cookie-rotating resume instead of waiting for a delayed close event.
+      this.failConnection(CONNECTION_FAILURE);
+      this.retry();
     }
   };
 

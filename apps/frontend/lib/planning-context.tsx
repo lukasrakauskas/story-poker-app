@@ -23,6 +23,8 @@ export type State =
   | "connected"
   | "joining"
   | "joined"
+  | "reconnecting"
+  | "offline"
   | "disconnected";
 export type RoomAvailability =
   | "idle"
@@ -105,6 +107,7 @@ export function PlanningProvider({
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined
   );
+  const reconnectAttempt = useRef(0);
   const currentUserId = useRef<string | undefined>(undefined);
   useEffect(() => {
     currentUserId.current = currentUser?.id;
@@ -145,6 +148,7 @@ export function PlanningProvider({
   };
 
   const updateVote = (newVote: string | null) => {
+    if (state !== "joined" || !app.isOpen()) return;
     setVote(newVote);
     setCurrentUser((user) =>
       user ? { ...user, vote: newVote, voted: newVote !== null } : user
@@ -158,25 +162,28 @@ export function PlanningProvider({
 
   const removeVote = () => updateVote(null);
 
+  const canMutate = state === "joined" && app.isOpen();
+
   const changePlanningState = () => {
+    if (!canMutate) return;
     if (planningState === "voting") app.send("reveal-results");
     if (planningState === "results") app.send("start-voting");
   };
 
   const claimModerator = () => {
-    app.send("claim-moderator");
+    if (canMutate) app.send("claim-moderator");
   };
 
   const promoteUser = (userId: string) => {
-    app.send("promote-user", { userId });
+    if (canMutate) app.send("promote-user", { userId });
   };
 
   const kickUser = (userId: string) => {
-    app.send("kick-user", { userId });
+    if (canMutate) app.send("kick-user", { userId });
   };
 
   const changeAvatar = (avatar: number) => {
-    app.send("change-avatar", { avatar });
+    if (canMutate) app.send("change-avatar", { avatar });
   };
 
   const broadcastMessage = (data: {
@@ -212,14 +219,38 @@ export function PlanningProvider({
       );
     };
 
+    const reconnect = (immediate = false) => {
+      clearTimeout(reconnectTimer.current);
+      if (!navigator.onLine) {
+        setState("offline");
+        return;
+      }
+      if (document.visibilityState === "hidden") {
+        setState("reconnecting");
+        return;
+      }
+
+      setState("reconnecting");
+      const attempt = reconnectAttempt.current++;
+      const delay = immediate ? 0 : Math.min(30_000, 1_000 * 2 ** attempt);
+      reconnectTimer.current = setTimeout(app.reconnect, delay);
+    };
+
     const handleConnected = () => {
       clearTimeout(reconnectTimer.current);
-      setState("connected");
+      reconnectAttempt.current = 0;
       const room = roomFromPath();
       if (room) {
         setRoomCode(room);
+        const token = readSession(room);
+        if (token && currentUserId.current) {
+          setState("joining");
+          app.send("reconnect", { token, room });
+          return;
+        }
         setRoomAvailability("checking");
       }
+      setState("connected");
     };
 
     const unsubIsAlive = app.on("is-alive", () => {
@@ -333,8 +364,7 @@ export function PlanningProvider({
       if (code === 4001) return;
 
       setState("disconnected");
-      clearTimeout(reconnectTimer.current);
-      reconnectTimer.current = setTimeout(app.reconnect, 1000);
+      reconnect();
     });
 
     const unsubNameTaken = app.on("name-taken", () => {
@@ -443,7 +473,24 @@ export function PlanningProvider({
 
     if (app.isOpen()) handleConnected();
 
+    const handleOffline = () => {
+      clearTimeout(reconnectTimer.current);
+      setState("offline");
+      // Detach immediately so a browser that keeps a stale OPEN readyState
+      // cannot accept commands while the network is unavailable.
+      app.close();
+    };
+    const handleOnline = () => reconnect(true);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") return;
+      // Mobile browsers can leave a suspended WebSocket looking OPEN. Replace
+      // it on foreground and resume the existing participant on the new socket.
+      if (currentUserId.current || !app.isOpen()) reconnect(true);
+    };
     const handleClose = () => app.close();
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("beforeunload", handleClose);
 
     return () => {
@@ -472,6 +519,9 @@ export function PlanningProvider({
       unsubUserNotMod();
       unsubModeratorOnline();
       unsubMessageBroadcasted();
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("beforeunload", handleClose);
     };
   }, [app, avatars, toast]);
