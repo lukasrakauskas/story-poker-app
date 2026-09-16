@@ -1,6 +1,5 @@
 import {
   advanceRetroPhase,
-  createRetroTheme,
   expect,
   seedRetroAction,
   seedRetroNotes,
@@ -27,23 +26,20 @@ test("completes a concise cross-phase retrospective with a live participant", as
     guest.page.getByText("Teamwork was excellent", { exact: true })
   ).toHaveCount(0);
 
-  await advanceRetroPhase(owner.page, "Reveal and group notes");
+  await advanceRetroPhase(owner.page, "Reveal and arrange notes");
   await expect(
     owner.page.getByText("Reduce flaky tests", { exact: true })
   ).toBeVisible();
-  await createRetroTheme(
-    owner.page,
-    ["Teamwork was excellent", "Reduce flaky tests"],
-    "Delivery flow"
-  );
-
   await advanceRetroPhase(owner.page, "Start voting");
   await guest.page
-    .getByRole("button", { name: "Vote for theme: Delivery flow", exact: true })
+    .getByRole("button", {
+      name: "Vote for note: Reduce flaky tests",
+      exact: true,
+    })
     .click();
   await expect(
     guest.page.getByRole("button", {
-      name: "Remove vote from theme: Delivery flow",
+      name: "Remove vote from note: Reduce flaky tests",
       exact: true,
     })
   ).toHaveText("Voted");

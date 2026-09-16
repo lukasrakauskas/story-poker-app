@@ -23,7 +23,6 @@ const room = {
     },
   ],
   notes: [],
-  groups: [],
   actions: [],
 };
 
@@ -31,7 +30,7 @@ function state(overrides: Partial<RetroStateData> = {}): RetroStateData {
   return {
     room,
     self: { id: "alice" },
-    recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
+    recipient: { notes: [], votedNoteIds: [] },
     version: 4,
     ...overrides,
   };
@@ -44,12 +43,12 @@ test("materializes private writing and own votes without putting them in public 
     authorName: "Alice",
     column: "ideas" as const,
     text: "Only Alice",
-    groupId: null,
+    stackId: null,
     voteCount: null,
     votedBySelf: false,
   };
   const writing = state({
-    recipient: { notes: [privateNote], votedNoteIds: [], votedGroupIds: [] },
+    recipient: { notes: [privateNote], votedNoteIds: [] },
   });
   assert.deepEqual(materializeRetroState(writing).notes, [privateNote]);
   assert.deepEqual(writing.room.notes, []);
@@ -61,19 +60,14 @@ test("materializes private writing and own votes without putting them in public 
       ...room,
       phase: "vote",
       notes: [privateNote],
-      groups: [
-        { id: "theme", title: "Theme", voteCount: null, votedBySelf: false },
-      ],
     },
     recipient: {
       notes: [],
       votedNoteIds: ["note"],
-      votedGroupIds: ["theme"],
     },
   });
   const materialized = materializeRetroState(voting);
   assert.equal(materialized.notes[0].votedBySelf, true);
-  assert.equal(materialized.groups[0].votedBySelf, true);
   assert.deepEqual(voting.recipient.votedNoteIds, ["note"]);
 });
 

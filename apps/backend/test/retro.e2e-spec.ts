@@ -19,7 +19,10 @@ let app: INestApplication;
 let url: string;
 let sockets: WebSocket[];
 
-function next(socket: WebSocket): Promise<RetroServerEvent> {
+function next(
+  socket: WebSocket,
+  eventName?: RetroServerEvent['event'],
+): Promise<RetroServerEvent> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       socket.off('message', onMessage);
@@ -27,7 +30,11 @@ function next(socket: WebSocket): Promise<RetroServerEvent> {
     }, 3000);
     function onMessage(data: Buffer) {
       const event = JSON.parse(data.toString());
-      if (event.event === 'is-alive') return;
+      if (
+        event.event === 'is-alive' ||
+        (eventName && event.event !== eventName)
+      )
+        return;
       clearTimeout(timer);
       socket.off('message', onMessage);
       resolve(event);
@@ -122,7 +129,7 @@ describe('retrospective HTTP session and WebSocket route', () => {
       text: 'Keep attribution',
     });
     await command(owner.socket, { type: 'advance' });
-    const offline = next(owner.socket);
+    const offline = next(owner.socket, 'retro-state');
     guest.socket.close();
     expect(
       state(await offline).room.members.find(
@@ -220,19 +227,21 @@ describe('retrospective HTTP session and WebSocket route', () => {
     ]);
     expect(state(await guestReveal).room.notes).toEqual(revealed.room.notes);
     expect(revealed.room.phase).toBe('group');
-    const guestGroupedUpdate = next(guest.socket);
-    const grouped = state(
+    const guestArrangedUpdate = next(guest.socket);
+    const arranged = state(
       await command(owner.socket, {
-        type: 'group-notes',
-        title: 'Team flow',
-        noteIds: revealed.room.notes.map((note) => note.id),
+        type: 'move-note',
+        id: revealed.room.notes[1].id,
+        column: 'ideas',
+        beforeId: null,
+        stackWithId: null,
+        moveStack: false,
       }),
     );
-    await guestGroupedUpdate;
-    const groupId = grouped.room.groups[0].id;
-    expect(grouped.room.notes.every((note) => note.groupId === groupId)).toBe(
-      true,
+    expect(state(await guestArrangedUpdate).room.notes).toEqual(
+      arranged.room.notes,
     );
+    expect(arranged.room.notes[1].column).toBe('ideas');
     const guestVotingUpdate = next(guest.socket);
     expect(
       state(await command(owner.socket, { type: 'advance' })).room.phase,
@@ -242,22 +251,22 @@ describe('retrospective HTTP session and WebSocket route', () => {
     const guestVote = state(
       await command(guest.socket, {
         type: 'toggle-vote',
-        id: groupId,
+        id: arranged.room.notes[0].id,
       }),
     );
     const ownerVote = state(await voteReceived);
-    expect(ownerVote.room.groups[0]).toMatchObject({
+    expect(ownerVote.room.notes[0]).toMatchObject({
       voteCount: null,
       votedBySelf: false,
     });
-    expect(guestVote.room.groups[0]).toMatchObject({
+    expect(guestVote.room.notes[0]).toMatchObject({
       voteCount: null,
       votedBySelf: true,
     });
     expect(JSON.stringify(ownerVote.room)).not.toContain('voterIds');
     expect(JSON.stringify(guestVote.room)).not.toContain('voterIds');
     const discussing = state(await command(owner.socket, { type: 'advance' }));
-    expect(discussing.room.groups[0]).toMatchObject({
+    expect(discussing.room.notes[0]).toMatchObject({
       voteCount: 1,
       votedBySelf: false,
     });

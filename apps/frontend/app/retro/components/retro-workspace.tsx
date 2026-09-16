@@ -27,20 +27,20 @@ const phases: {
     label: "Write",
     description:
       "Write independently. Only you can see your notes during this phase. Revealing the board shows every note to the team at the same time.",
-    next: "Reveal and group notes",
+    next: "Reveal and arrange notes",
   },
   {
     id: "group",
-    label: "Group",
+    label: "Arrange",
     description:
-      "Review the revealed board. The moderator can organize related notes into themes before voting begins.",
+      "Review the revealed board. Drag matching messages together into unnamed stacks or move them across lanes before voting begins.",
     next: "Start voting",
   },
   {
     id: "vote",
     label: "Vote",
     description:
-      "Choose your priorities. Three votes per person, one per theme or ungrouped note. Totals stay hidden until discussion; click a voted target again to remove your vote.",
+      "Choose your priorities. Three votes per person, one per note. Totals stay hidden until discussion; click a voted note again to remove your vote.",
     next: "Start discussion",
   },
   {
@@ -70,6 +70,8 @@ export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
     recovery,
     terminal: sessionTerminal,
     send,
+    sendPresence,
+    presence,
     forgetRememberedSession,
     historySaved,
     historyPreference,
@@ -114,12 +116,7 @@ export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
     .filter((member) => !member.ready)
     .map((member) => member.name);
   const remaining = room
-    ? Math.max(
-        0,
-        3 -
-          room.notes.filter((note) => note.votedBySelf).length -
-          room.groups.filter((group) => group.votedBySelf).length
-      )
+    ? Math.max(0, 3 - room.notes.filter((note) => note.votedBySelf).length)
     : 3;
   const minutes =
     room && now !== null
@@ -328,6 +325,8 @@ export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
                   moderator={moderator}
                   disabled={disabled}
                   send={send}
+                  sendPresence={sendPresence}
+                  presence={presence}
                 />
               ) : (
                 <NoteBoard

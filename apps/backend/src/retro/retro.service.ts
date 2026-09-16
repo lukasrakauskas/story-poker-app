@@ -26,7 +26,6 @@ import {
   type RetroRoomChange,
   type RetroRoomOperation,
   type RetroRoomRepository,
-  type StoredRetroGroup,
   type StoredRetroNote,
   type StoredRetroParticipant,
   type StoredRetroRoom,
@@ -92,6 +91,63 @@ function splitPasswordAndContext(
   return { password: passwordOrContext, context };
 }
 
+type LegacyStoredGroup = { id: string; voterIds: string[] };
+type LegacyStoredNote = Omit<StoredRetroNote, 'stackId'> & {
+  stackId?: string | null;
+  groupId?: string | null;
+};
+
+/** Migrate persisted theme rooms on read, keeping each old vote on one note. */
+function migrateLegacyGroups(room: StoredRetroRoom): void {
+  const legacy = room as StoredRetroRoom & {
+    groups?: LegacyStoredGroup[];
+    notes: LegacyStoredNote[];
+  };
+  const groups = new Map(
+    (legacy.groups ?? []).map((group) => [group.id, group]),
+  );
+  const legacyNotes = legacy.notes as LegacyStoredNote[];
+  if (!legacy.groups && !legacyNotes.some((note) => 'groupId' in note)) {
+    room.notes = legacyNotes.map((note) => ({
+      ...note,
+      stackId: note.stackId ?? null,
+    }));
+    return;
+  }
+
+  const emitted = new Set<string>();
+  const notes: StoredRetroNote[] = [];
+  const clean = (note: LegacyStoredNote): StoredRetroNote => {
+    const { groupId: _groupId, ...rest } = note;
+    return { ...rest, stackId: note.stackId ?? null };
+  };
+  for (const note of legacyNotes) {
+    if (!note.groupId || !groups.has(note.groupId)) {
+      notes.push(clean(note));
+      continue;
+    }
+    const groupId = note.groupId;
+    if (emitted.has(groupId)) continue;
+    emitted.add(groupId);
+    const grouped = legacyNotes.filter((item) => item.groupId === groupId);
+    grouped.forEach((item, index) => {
+      const migrated = clean(item);
+      migrated.stackId = groupId;
+      if (index === 0) {
+        migrated.voterIds = [
+          ...new Set([
+            ...migrated.voterIds,
+            ...(groups.get(groupId)?.voterIds ?? []),
+          ]),
+        ];
+      }
+      notes.push(migrated);
+    });
+  }
+  room.notes = notes;
+  delete legacy.groups;
+}
+
 @Injectable()
 export class RetroService {
   private readonly memberExpiredListeners = new Set<
@@ -147,7 +203,6 @@ export class RetroService {
         access: createStoredRoomAccess(resolved.password),
         members: [created.member],
         notes: [],
-        groups: [],
         actions: [],
         readyMemberIds: [],
       },
@@ -523,17 +578,8 @@ export class RetroService {
           votedNoteIds:
             stored.phase === 'vote'
               ? stored.notes
-                  .filter(
-                    (note) =>
-                      !note.groupId && note.voterIds.includes(member.id),
-                  )
+                  .filter((note) => note.voterIds.includes(member.id))
                   .map((note) => note.id)
-              : [],
-          votedGroupIds:
-            stored.phase === 'vote'
-              ? stored.groups
-                  .filter((group) => group.voterIds.includes(member.id))
-                  .map((group) => group.id)
               : [],
         });
       },
@@ -541,7 +587,7 @@ export class RetroService {
   }
 
   private projectRoom(room: StoredRetroRoom, memberId: string): RetroRoom {
-    const { readyMemberIds, groups } = room;
+    const { readyMemberIds } = room;
     // Writing is private even for moderators. Advancing to vote changes the
     // phase before one broadcast reveals the complete board to everyone.
     const notes =
@@ -569,18 +615,6 @@ export class RetroService {
         })),
         notes: notes.map(({ voterIds, ...note }) => ({
           ...note,
-          voteCount:
-            !note.groupId &&
-            (room.phase === 'discuss' || room.phase === 'closed')
-              ? voterIds.length
-              : null,
-          votedBySelf:
-            !note.groupId &&
-            room.phase === 'vote' &&
-            voterIds.includes(memberId),
-        })),
-        groups: groups.map(({ voterIds, ...group }) => ({
-          ...group,
           voteCount:
             room.phase === 'discuss' || room.phase === 'closed'
               ? voterIds.length
@@ -623,10 +657,8 @@ export class RetroService {
             room.readyMemberIds = room.readyMemberIds.filter(
               (id) => id !== removed.id,
             );
-            for (const target of [...room.notes, ...room.groups])
-              target.voterIds = target.voterIds.filter(
-                (id) => id !== removed.id,
-              );
+            for (const note of room.notes)
+              note.voterIds = note.voterIds.filter((id) => id !== removed.id);
             return {
               result: { removedMemberId: removed.id },
               change: { kind: 'member-removed' as const, memberId: removed.id },
@@ -705,7 +737,7 @@ export class RetroService {
               authorName: member.name,
               column: command.column,
               text: command.text,
-              groupId: null,
+              stackId: null,
               voterIds: [],
             });
             return { result: undefined };
@@ -743,66 +775,95 @@ export class RetroService {
             room.notes = room.notes.filter(
               (candidate) => candidate.id !== note.id,
             );
-            this.cleanupGroups(room);
-            return { result: undefined };
-          }
-          case 'group-notes': {
-            this.requireModerator(member);
-            this.requirePhase(room, 'group');
-            const noteIds = new Set(command.noteIds);
-            if (noteIds.size < 2)
-              throw new RetroError(
-                'invalid-command',
-                'Choose at least two different notes to create a theme.',
-              );
-            const notes = [...noteIds].map((id) => this.note(room, id));
-            for (const note of notes) note.groupId = null;
-            this.cleanupGroups(room);
-            const group: StoredRetroGroup = {
-              id: nanoid(),
-              title: command.title,
-              voterIds: [],
-            };
-            room.groups.push(group);
-            for (const note of notes) note.groupId = group.id;
+            this.cleanupStacks(room);
             return { result: undefined };
           }
           case 'move-note': {
-            this.requireModerator(member);
             this.requirePhase(room, 'group');
             const note = this.note(room, command.id);
-            const group = room.groups.find(
-              (item) => item.id === command.groupId,
+            const source =
+              command.moveStack && note.stackId
+                ? room.notes.filter(
+                    (candidate) => candidate.stackId === note.stackId,
+                  )
+                : [note];
+            const sourceIds = new Set(source.map((candidate) => candidate.id));
+            if (
+              (command.beforeId && sourceIds.has(command.beforeId)) ||
+              (command.stackWithId && sourceIds.has(command.stackWithId))
+            )
+              throw new RetroError(
+                'invalid-command',
+                'A stack cannot be dropped onto itself.',
+              );
+
+            const target = command.stackWithId
+              ? this.note(room, command.stackWithId)
+              : null;
+            const before = command.beforeId
+              ? this.note(room, command.beforeId)
+              : null;
+            if (target && target.column !== command.column)
+              throw new RetroError(
+                'invalid-command',
+                'The stack target is in a different lane.',
+              );
+            if (before && before.column !== command.column)
+              throw new RetroError(
+                'invalid-command',
+                'The destination note is in a different lane.',
+              );
+
+            let remaining = room.notes.filter(
+              (candidate) => !sourceIds.has(candidate.id),
             );
-            if (!group)
-              throw new RetroError('not-found', 'That theme no longer exists.');
-            note.groupId = group.id;
-            this.cleanupGroups(room);
-            return { result: undefined };
-          }
-          case 'ungroup-note': {
-            this.requireModerator(member);
-            this.requirePhase(room, 'group');
-            const note = this.note(room, command.id);
-            if (!note.groupId)
-              throw new RetroError('not-found', 'That note is not in a theme.');
-            note.groupId = null;
-            this.cleanupGroups(room);
+            for (const moved of source) moved.column = command.column;
+            if (target) {
+              const stackId = target.stackId ?? nanoid();
+              const targetStack = target.stackId
+                ? remaining.filter(
+                    (candidate) => candidate.stackId === target.stackId,
+                  )
+                : [target];
+              targetStack.forEach((candidate) => {
+                candidate.stackId = stackId;
+              });
+              source.forEach((candidate) => {
+                candidate.stackId = stackId;
+              });
+              const targetIds = new Set(
+                targetStack.map((candidate) => candidate.id),
+              );
+              const index = remaining.findIndex((candidate) =>
+                targetIds.has(candidate.id),
+              );
+              remaining = remaining.filter(
+                (candidate) => !targetIds.has(candidate.id),
+              );
+              remaining.splice(index, 0, ...targetStack, ...source);
+            } else {
+              if (!command.moveStack) note.stackId = null;
+              const index = before
+                ? remaining.findIndex((candidate) => candidate.id === before.id)
+                : remaining.length;
+              remaining.splice(index, 0, ...source);
+            }
+            room.notes = (['went-well', 'improve', 'ideas'] as const).flatMap(
+              (column) =>
+                remaining.filter((candidate) => candidate.column === column),
+            );
+            this.cleanupStacks(room);
             return { result: undefined };
           }
           case 'toggle-vote': {
             this.requirePhase(room, 'vote');
-            const target = this.voteTarget(room, command.id);
+            const target = this.note(room, command.id);
             if (target.voterIds.includes(member.id)) {
               target.voterIds = target.voterIds.filter(
                 (id) => id !== member.id,
               );
             } else {
-              const targets = [
-                ...room.notes.filter((note) => !note.groupId),
-                ...room.groups,
-              ];
-              const used = targets.filter((candidate) =>
+              const used = room.notes.filter((candidate) =>
                 candidate.voterIds.includes(member.id),
               ).length;
               if (used >= VOTES_PER_MEMBER)
@@ -907,6 +968,7 @@ export class RetroService {
         'This room expired or does not exist. Create a new retrospective.',
       );
     }
+    migrateLegacyGroups(room);
     return room;
   }
 
@@ -930,7 +992,14 @@ export class RetroService {
     context?: RetroRepositoryContext,
   ): Promise<T> {
     try {
-      return await this.repository.update(code, operation, context);
+      return await this.repository.update(
+        code,
+        (room) => {
+          migrateLegacyGroups(room);
+          return operation(room);
+        },
+        context,
+      );
     } catch (error) {
       if (error instanceof RetroRepositoryError)
         throw new RetroError(
@@ -1031,29 +1100,14 @@ export class RetroService {
       );
   }
 
-  private cleanupGroups(room: StoredRetroRoom) {
-    const retained = new Set<string>();
-    for (const group of room.groups) {
-      const notes = room.notes.filter((note) => note.groupId === group.id);
-      if (notes.length >= 2) retained.add(group.id);
-      else for (const note of notes) note.groupId = null;
-    }
-    room.groups = room.groups.filter((group) => retained.has(group.id));
-  }
-
-  private voteTarget(
-    room: StoredRetroRoom,
-    id: string,
-  ): StoredRetroNote | StoredRetroGroup {
-    const group = room.groups.find((candidate) => candidate.id === id);
-    if (group) return group;
-    const note = this.note(room, id);
-    if (note.groupId)
-      throw new RetroError(
-        'invalid-command',
-        'Vote for the note theme instead of an individual grouped note.',
-      );
-    return note;
+  private cleanupStacks(room: StoredRetroRoom) {
+    const counts = new Map<string, number>();
+    for (const note of room.notes)
+      if (note.stackId)
+        counts.set(note.stackId, (counts.get(note.stackId) ?? 0) + 1);
+    for (const note of room.notes)
+      if (note.stackId && (counts.get(note.stackId) ?? 0) < 2)
+        note.stackId = null;
   }
 
   private note(room: StoredRetroRoom, id: string) {

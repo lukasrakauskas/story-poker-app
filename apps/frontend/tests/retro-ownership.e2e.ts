@@ -41,7 +41,7 @@ test("keeps note editing private and gives deletion to the right owner", async (
     guest.page.getByText("Edited owner note", { exact: true })
   ).toHaveCount(0);
 
-  await advanceRetroPhase(owner.page, "Reveal and group notes");
+  await advanceRetroPhase(owner.page, "Reveal and arrange notes");
   await expect(
     owner.page.getByRole("button", {
       name: "Actions for note: Guest note",

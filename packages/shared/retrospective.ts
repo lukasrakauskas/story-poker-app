@@ -7,7 +7,7 @@ import { participantNameSchema } from "shared/participant";
  * protocol because local history has a different migration cadence.
  */
 export const RETRO_PROTOCOL_VERSION = 1 as const;
-export const RETRO_ARCHIVE_VERSION = 3 as const;
+export const RETRO_ARCHIVE_VERSION = 4 as const;
 export const RETRO_HISTORY_KEY_VERSION = 1 as const;
 
 export const RETRO_PROTOCOL_ERROR_CODE = "protocol-error" as const;
@@ -127,16 +127,7 @@ export const retroPublicNoteSchema = z
     authorName: participantNameSchema,
     column: retroColumnSchema,
     text: retroTextSchema,
-    groupId: retroIdSchema.nullable(),
-    voteCount: voteCountSchema,
-    votedBySelf: z.boolean(),
-  })
-  .strict();
-
-export const retroPublicGroupSchema = z
-  .object({
-    id: retroIdSchema,
-    title: retroTitleSchema,
+    stackId: retroIdSchema.nullable().default(null),
     voteCount: voteCountSchema,
     votedBySelf: z.boolean(),
   })
@@ -159,7 +150,6 @@ const publicRoomShape = {
   closedAt: retroTimestampSchema.nullable(),
   members: z.array(retroPublicMemberSchema).max(RETRO_MAX_MEMBERS),
   notes: z.array(retroPublicNoteSchema).max(RETRO_MAX_NOTES),
-  groups: z.array(retroPublicGroupSchema).max(RETRO_MAX_NOTES),
   actions: z.array(retroActionSchema).max(RETRO_MAX_ACTIONS),
   /** Only the minimum access metadata is public; no verifier is exposed. */
   requiresPassword: z.boolean().default(false),
@@ -200,15 +190,7 @@ export const retroInternalNoteSchema = z
     authorName: participantNameSchema,
     column: retroColumnSchema,
     text: retroTextSchema,
-    groupId: retroIdSchema.nullable(),
-    voterIds: voterIdsSchema,
-  })
-  .strict();
-
-export const retroInternalGroupSchema = z
-  .object({
-    id: retroIdSchema,
-    title: retroTitleSchema,
+    stackId: retroIdSchema.nullable().default(null),
     voterIds: voterIdsSchema,
   })
   .strict();
@@ -218,7 +200,6 @@ export const retroInternalRoomSchema = z
     ...publicRoomShape,
     members: z.array(retroInternalParticipantSchema).max(RETRO_MAX_MEMBERS),
     notes: z.array(retroInternalNoteSchema).max(RETRO_MAX_NOTES),
-    groups: z.array(retroInternalGroupSchema).max(RETRO_MAX_NOTES),
     readyMemberIds: z.array(retroIdSchema).max(RETRO_MAX_MEMBERS),
   })
   .strict();
@@ -248,18 +229,6 @@ export const retroRememberedIdentitySchema = z
     moderator: z.boolean(),
   })
   .strict();
-
-const uniqueNoteIdsSchema = z
-  .array(retroIdSchema)
-  .min(2)
-  .max(RETRO_MAX_NOTES)
-  .superRefine((ids, context) => {
-    if (new Set(ids).size !== ids.length)
-      context.addIssue({
-        code: "custom",
-        message: "Note IDs must be unique.",
-      });
-  });
 
 /** Strict v1 command contract. Request IDs live in the transport envelope. */
 export const retroCommandSchema = z.discriminatedUnion("type", [
@@ -299,17 +268,12 @@ export const retroCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("delete-note"), id: retroIdSchema }).strict(),
   z
     .object({
-      type: z.literal("group-notes"),
-      title: retroTitleSchema,
-      noteIds: uniqueNoteIdsSchema,
-    })
-    .strict(),
-  z.object({ type: z.literal("ungroup-note"), id: retroIdSchema }).strict(),
-  z
-    .object({
       type: z.literal("move-note"),
       id: retroIdSchema,
-      groupId: retroIdSchema,
+      column: retroColumnSchema,
+      beforeId: retroIdSchema.nullable(),
+      stackWithId: retroIdSchema.nullable(),
+      moveStack: z.boolean(),
     })
     .strict(),
   z
@@ -356,7 +320,6 @@ export const retroRecipientEnvelopeSchema = z
   .object({
     notes: z.array(retroPublicNoteSchema).max(300),
     votedNoteIds: z.array(retroIdSchema).max(3),
-    votedGroupIds: z.array(retroIdSchema).max(3),
   })
   .strict();
 export type RetroRecipientEnvelope = z.infer<
@@ -412,11 +375,30 @@ export const retroErrorEventSchema = z
   })
   .strict();
 
+export const retroPresenceUpdateSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    noteId: retroIdSchema.nullable(),
+    active: z.boolean(),
+  })
+  .strict();
+
+export const retroPresenceEventSchema = z
+  .object({
+    event: z.literal("retro-presence"),
+    data: retroPresenceUpdateSchema
+      .extend({ memberId: retroIdSchema })
+      .strict(),
+  })
+  .strict();
+
 /** Strict v1 union used at both the backend boundary and the browser boundary. */
 export const retroServerEventSchema = z.discriminatedUnion("event", [
   retroStateEventSchema,
   retroRoomInfoEventSchema,
   retroErrorEventSchema,
+  retroPresenceEventSchema,
 ]);
 export const retroEventSchema = retroServerEventSchema;
 
@@ -446,6 +428,15 @@ const legacyMemberSchema = z
   })
   .strict();
 
+const legacyPublicGroupSchema = z
+  .object({
+    id: retroIdSchema,
+    title: retroTitleSchema,
+    voteCount: voteCountSchema,
+    votedBySelf: z.boolean(),
+  })
+  .strict();
+
 const legacyRoomBaseShape = {
   code: retroCodeSchema,
   title: retroTitleSchema,
@@ -453,7 +444,7 @@ const legacyRoomBaseShape = {
   expiresAt: retroTimestampSchema,
   closedAt: retroTimestampSchema.nullable().default(null),
   members: z.array(legacyMemberSchema).max(RETRO_MAX_MEMBERS),
-  groups: z.array(retroPublicGroupSchema).max(RETRO_MAX_NOTES).default([]),
+  groups: z.array(legacyPublicGroupSchema).max(RETRO_MAX_NOTES).default([]),
   actions: z
     .array(
       z
@@ -477,7 +468,16 @@ const legacyNoteShape = {
   column: retroColumnSchema,
   text: retroTextSchema,
   groupId: retroIdSchema.nullable().default(null),
+  stackId: retroIdSchema.nullable().default(null),
 };
+
+const legacyPublicNoteSchema = z
+  .object({
+    ...legacyNoteShape,
+    voteCount: voteCountSchema,
+    votedBySelf: z.boolean(),
+  })
+  .strict();
 
 /** Existing `retro-history-v1` entries with private voter identity arrays. */
 export const retroArchiveV1Schema = z
@@ -507,7 +507,23 @@ export const retroArchiveV2Schema = z
     room: z
       .object({
         ...legacyRoomBaseShape,
-        notes: z.array(retroPublicNoteSchema).max(RETRO_MAX_NOTES),
+        notes: z.array(legacyPublicNoteSchema).max(RETRO_MAX_NOTES),
+      })
+      .strict(),
+  })
+  .strict();
+
+/** Version 3 may contain the retired theme/group representation. */
+const retroArchiveV3Schema = z
+  .object({
+    version: z.literal(3),
+    savedAt: retroTimestampSchema,
+    retentionUntil: retroTimestampSchema.nullable().optional(),
+    viewerId: retroIdSchema.optional(),
+    room: z
+      .object({
+        ...legacyRoomBaseShape,
+        notes: z.array(legacyPublicNoteSchema).max(RETRO_MAX_NOTES),
       })
       .strict(),
   })
@@ -528,7 +544,6 @@ export type RetroColumn = z.infer<typeof retroColumnSchema>;
 export type RetroPhase = z.infer<typeof retroPhaseSchema>;
 export type RetroMember = z.infer<typeof retroPublicMemberSchema>;
 export type RetroNote = z.infer<typeof retroPublicNoteSchema>;
-export type RetroGroup = z.infer<typeof retroPublicGroupSchema>;
 export type RetroActionOwner = z.infer<typeof retroActionOwnerSchema>;
 export type RetroActionAssignment = z.infer<typeof retroActionAssignmentSchema>;
 export type RetroAction = z.infer<typeof retroActionSchema>;
@@ -538,7 +553,6 @@ export type RetroInternalParticipant = z.infer<
   typeof retroInternalParticipantSchema
 >;
 export type RetroInternalNote = z.infer<typeof retroInternalNoteSchema>;
-export type RetroInternalGroup = z.infer<typeof retroInternalGroupSchema>;
 export type RetroInternalRoom = z.infer<typeof retroInternalRoomSchema>;
 export type RetroPrivateRoom = z.infer<typeof retroPrivateRoomSchema>;
 export type RetroSession = z.infer<typeof retroSessionSchema>;
@@ -554,7 +568,6 @@ export type RetroStateData = RetroClientState;
 
 export function materializeRetroState(data: RetroStateData): RetroRoom {
   const noteVotes = new Set(data.recipient.votedNoteIds);
-  const groupVotes = new Set(data.recipient.votedGroupIds);
   return {
     ...data.room,
     notes:
@@ -562,15 +575,8 @@ export function materializeRetroState(data: RetroStateData): RetroRoom {
         ? data.recipient.notes.filter((note) => note.authorId === data.self.id)
         : data.room.notes.map((note) => ({
             ...note,
-            votedBySelf:
-              data.room.phase === "vote" &&
-              !note.groupId &&
-              noteVotes.has(note.id),
+            votedBySelf: data.room.phase === "vote" && noteVotes.has(note.id),
           })),
-    groups: data.room.groups.map((group) => ({
-      ...group,
-      votedBySelf: data.room.phase === "vote" && groupVotes.has(group.id),
-    })),
   };
 }
 
@@ -586,6 +592,8 @@ export function retroVersionStatus(
 export type RetroRoomInfo = z.infer<typeof retroRoomInfoSchema>;
 export type RetroErrorData = z.infer<typeof retroErrorDataSchema>;
 export type RetroServerEvent = z.infer<typeof retroServerEventSchema>;
+export type RetroPresenceUpdate = z.infer<typeof retroPresenceUpdateSchema>;
+export type RetroPresenceEvent = z.infer<typeof retroPresenceEventSchema>;
 export type RetroArchive = z.infer<typeof retroArchiveSchema>;
 
 export function actionOwnerLabel(owner: RetroActionOwner): string {
@@ -598,6 +606,53 @@ export function actionOwnerLabel(owner: RetroActionOwner): string {
  * recipient-owned selection state for voting or anonymous aggregate counts
  * after discussion. Callers can then run the public-room sanitizer again.
  */
+type LegacyPublicRoom = z.infer<typeof retroArchiveV3Schema>["room"];
+
+/** Convert retired named themes into unnamed note stacks without losing votes. */
+function flattenLegacyGroups(room: LegacyPublicRoom): RetroRoom {
+  const groups = new Map(room.groups.map((group) => [group.id, group]));
+  const emitted = new Set<string>();
+  const notes: RetroNote[] = [];
+  const append = (note: LegacyPublicRoom["notes"][number]) => {
+    const group = note.groupId ? groups.get(note.groupId) : undefined;
+    notes.push({
+      id: note.id,
+      authorId: note.authorId,
+      authorName: note.authorName,
+      column: note.column,
+      text: note.text,
+      stackId: group ? note.groupId : note.stackId,
+      voteCount: group?.voteCount ?? note.voteCount,
+      votedBySelf: group?.votedBySelf ?? note.votedBySelf,
+    });
+  };
+  for (const note of room.notes) {
+    if (!note.groupId || !groups.has(note.groupId)) {
+      append(note);
+      continue;
+    }
+    if (emitted.has(note.groupId)) continue;
+    emitted.add(note.groupId);
+    const grouped = room.notes.filter((item) => item.groupId === note.groupId);
+    grouped.forEach((item, index) => {
+      if (index === 0) append(item);
+      else
+        notes.push({
+          id: item.id,
+          authorId: item.authorId,
+          authorName: item.authorName,
+          column: item.column,
+          text: item.text,
+          stackId: item.groupId,
+          voteCount: item.voteCount,
+          votedBySelf: item.votedBySelf,
+        });
+    });
+  }
+  const { groups: _groups, ...rest } = room;
+  return retroPublicRoomSchema.parse({ ...rest, notes });
+}
+
 export function migrateRetroArchive(value: unknown): {
   entry: RetroArchive;
   migrated: boolean;
@@ -605,37 +660,49 @@ export function migrateRetroArchive(value: unknown): {
   const current = retroArchiveSchema.safeParse(value);
   if (current.success) return { entry: current.data, migrated: false };
 
+  const versionThree = retroArchiveV3Schema.safeParse(value);
+  if (versionThree.success)
+    return {
+      entry: retroArchiveSchema.parse({
+        ...versionThree.data,
+        version: RETRO_ARCHIVE_VERSION,
+        room: flattenLegacyGroups(versionThree.data.room),
+      }),
+      migrated: true,
+    };
+
   const versionTwo = retroArchiveV2Schema.safeParse(value);
-  if (versionTwo.success) {
+  if (versionTwo.success)
     return {
       entry: retroArchiveSchema.parse({
         ...versionTwo.data,
         version: RETRO_ARCHIVE_VERSION,
+        room: flattenLegacyGroups(versionTwo.data.room),
       }),
       migrated: true,
     };
-  }
 
   const legacy = retroArchiveV1Schema.parse(value);
+  const publicLegacyRoom = {
+    ...legacy.room,
+    notes: legacy.room.notes.map(({ voterIds, ...note }) => ({
+      ...note,
+      voteCount:
+        legacy.room.phase === "discuss" || legacy.room.phase === "closed"
+          ? voterIds.length
+          : null,
+      votedBySelf:
+        legacy.room.phase === "vote" &&
+        !!legacy.viewerId &&
+        voterIds.includes(legacy.viewerId),
+    })),
+  };
   return {
     entry: retroArchiveSchema.parse({
       version: RETRO_ARCHIVE_VERSION,
       savedAt: legacy.savedAt,
       ...(legacy.viewerId ? { viewerId: legacy.viewerId } : {}),
-      room: {
-        ...legacy.room,
-        notes: legacy.room.notes.map(({ voterIds, ...note }) => ({
-          ...note,
-          voteCount:
-            legacy.room.phase === "discuss" || legacy.room.phase === "closed"
-              ? voterIds.length
-              : null,
-          votedBySelf:
-            legacy.room.phase === "vote" &&
-            !!legacy.viewerId &&
-            voterIds.includes(legacy.viewerId),
-        })),
-      },
+      room: flattenLegacyGroups(publicLegacyRoom),
     }),
     migrated: true,
   };

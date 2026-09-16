@@ -5,60 +5,60 @@
   "representative": {
     "members": 15,
     "notes": 120,
-    "groups": 20,
+    "votedNotes": 3,
     "actions": 30,
-    "materializedRoomBytes": 175283,
-    "publicRoomBytes": 175283,
-    "perRecipientWireBytes": 175436,
-    "totalWireBytes": 2631540,
+    "materializedRoomBytes": 171682,
+    "publicRoomBytes": 171682,
+    "perRecipientWireBytes": 171816,
+    "totalWireBytes": 2577240,
     "baseline": {
       "projection": {
-        "meanMs": 20.635,
-        "p95Ms": 31.311
+        "meanMs": 18.981,
+        "p95Ms": 24.186
       },
       "serialization": {
-        "meanMs": 1.221,
-        "p95Ms": 3.953
+        "meanMs": 1.362,
+        "p95Ms": 3.473
       }
     },
     "optimized": {
       "projection": {
-        "meanMs": 1.451,
-        "p95Ms": 1.685
+        "meanMs": 1.398,
+        "p95Ms": 1.918
       },
       "serialization": {
-        "meanMs": 0.824,
-        "p95Ms": 1.704
+        "meanMs": 0.748,
+        "p95Ms": 1.371
       }
     }
   },
   "nearLimit": {
     "members": 30,
     "notes": 300,
-    "groups": 150,
+    "votedNotes": 3,
     "actions": 100,
-    "materializedRoomBytes": 482488,
-    "publicRoomBytes": 482488,
-    "perRecipientWireBytes": 482641,
-    "totalWireBytes": 14479230,
+    "materializedRoomBytes": 455207,
+    "publicRoomBytes": 455207,
+    "perRecipientWireBytes": 455341,
+    "totalWireBytes": 13660230,
     "baseline": {
       "projection": {
-        "meanMs": 109.43,
-        "p95Ms": 113.039
+        "meanMs": 88.245,
+        "p95Ms": 93.866
       },
       "serialization": {
-        "meanMs": 7.246,
-        "p95Ms": 12.32
+        "meanMs": 7.259,
+        "p95Ms": 14.339
       }
     },
     "optimized": {
       "projection": {
-        "meanMs": 4.257,
-        "p95Ms": 7.04
+        "meanMs": 4.426,
+        "p95Ms": 6.928
       },
       "serialization": {
-        "meanMs": 5.239,
-        "p95Ms": 7.158
+        "meanMs": 4.427,
+        "p95Ms": 11.155
       }
     }
   }

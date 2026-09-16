@@ -4,6 +4,7 @@ import {
 } from "shared/retrospective";
 import type {
   RetroCommand,
+  RetroPresenceUpdate,
   RetroRememberedIdentity,
   RetroRoom,
   RetroServerEvent,
@@ -262,6 +263,21 @@ export class RetroSessionClient {
       this.failConnection(CONFIGURATION_FAILURE);
   };
 
+  sendPresence = (presence: RetroPresenceUpdate): boolean => {
+    if (
+      !this.started ||
+      !this.options.transport.isOpen() ||
+      this.state.connection !== "connected" ||
+      this.state.phase !== "active" ||
+      this.state.room?.phase !== "group"
+    )
+      return false;
+    return this.options.transport.send(
+      JSON.stringify({ event: "retro-presence", data: presence }),
+      { queue: false }
+    );
+  };
+
   send = (command: RetroCommand): Promise<boolean> => {
     const current = this.state;
     if (
@@ -383,6 +399,8 @@ export class RetroSessionClient {
     }
     if (parsed.event === "retro-state") this.handleState(parsed);
     else if (parsed.event === "retro-room-info") this.handleRoomInfo(parsed);
+    else if (parsed.event === "retro-presence")
+      this.transition({ type: "presence", data: parsed.data });
     else this.handleError(parsed);
   };
 

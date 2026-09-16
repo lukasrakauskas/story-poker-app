@@ -2,19 +2,13 @@
 
 import { useId, useState } from "react";
 import { retroPriorities, priorityLabel } from "shared/retro-priorities";
-import type {
-  RetroColumn,
-  RetroGroup,
-  RetroNote,
-  RetroRoom,
-} from "shared/retrospective";
+import type { RetroColumn, RetroNote, RetroRoom } from "shared/retrospective";
 import type { RetroSession } from "../../../hooks/use-retro-socket";
 import { Button } from "ui/components/button";
 import { Label } from "ui/components/label";
 import { Badge } from "ui/components/badge";
 import { Textarea } from "ui/components/textarea";
 import { ItemActions } from "./item-actions";
-import { NoteStack } from "./note-stack";
 
 export const columns: {
   id: RetroColumn;
@@ -42,6 +36,23 @@ export const columns: {
   },
 ];
 
+function votingTargets(notes: RetroNote[]): RetroNote[][] {
+  const seen = new Set<string>();
+  const targets: RetroNote[][] = [];
+  for (const note of notes) {
+    if (!note.stackId) {
+      targets.push([note]);
+      continue;
+    }
+    if (seen.has(note.stackId)) continue;
+    seen.add(note.stackId);
+    targets.push(
+      notes.filter((candidate) => candidate.stackId === note.stackId)
+    );
+  }
+  return targets;
+}
+
 type BoardProps = {
   room: RetroRoom;
   selfId: string | null;
@@ -58,47 +69,33 @@ export function NoteBoard({
   onDraftChange,
 }: BoardProps) {
   const rankedHeading = useId();
+  const targets = votingTargets(room.notes);
   const remaining = Math.max(
     0,
-    3 -
-      room.notes.filter((note) => note.votedBySelf).length -
-      room.groups.filter((group) => group.votedBySelf).length
+    3 - room.notes.filter((note) => note.votedBySelf).length
   );
-  const ungrouped = room.notes.filter((note) => !note.groupId);
   if (room.phase === "vote") {
     return (
       <section aria-labelledby="voting-targets" className="space-y-4">
         <div>
           <h2 id="voting-targets" className="text-xl font-semibold">
-            Vote on themes and notes
+            Vote on notes
           </h2>
           <p className="text-sm text-muted-foreground">
-            Each theme is one voting target. Ungrouped notes remain individual
-            choices.
+            Choose up to three original messages. Related messages remain
+            visibly grouped, and totals stay hidden until discussion.
           </p>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {room.groups.map((group) => (
-            <ThemeCard
-              key={group.id}
-              group={group}
+          {targets.map((notes) => (
+            <VotingTargetCard
+              key={notes[0]?.stackId ?? notes[0]?.id}
+              notes={notes}
               room={room}
               selfId={selfId}
               disabled={disabled}
               send={send}
               remaining={remaining}
-            />
-          ))}
-          {ungrouped.map((note) => (
-            <NoteCard
-              key={note.id}
-              note={note}
-              room={room}
-              selfId={selfId}
-              disabled={disabled}
-              send={send}
-              remaining={remaining}
-              showColumn
             />
           ))}
         </div>
@@ -114,9 +111,8 @@ export function NoteBoard({
             Discussion priorities
           </h2>
           <p className="text-sm text-muted-foreground">
-            Most-voted themes and notes first. Start at the top and capture your
-            next steps. Equal votes share a rank, with ties kept in note
-            creation order.
+            Most-voted notes first. Start at the top and capture your next
+            steps. Equal votes share a rank, with ties kept in lane order.
           </p>
         </div>
         {ranked.length ? (
@@ -131,26 +127,15 @@ export function NoteBoard({
                   {target.tied && <span className="block text-xs">Tied</span>}
                 </span>
                 <div className="min-w-0 flex-1">
-                  {"group" in target ? (
-                    <ThemeCard
-                      group={target.group}
-                      room={room}
-                      selfId={selfId}
-                      disabled={disabled}
-                      send={send}
-                      remaining={remaining}
-                    />
-                  ) : (
-                    <NoteCard
-                      note={target.note}
-                      room={room}
-                      selfId={selfId}
-                      disabled={disabled}
-                      send={send}
-                      remaining={remaining}
-                      showColumn
-                    />
-                  )}
+                  <DiscussionTargetCard
+                    notes={target.notes}
+                    totalVotes={target.voteCount ?? 0}
+                    room={room}
+                    selfId={selfId}
+                    disabled={disabled}
+                    send={send}
+                    remaining={remaining}
+                  />
                 </div>
               </li>
             ))}
@@ -220,62 +205,6 @@ export function NoteBoard({
   );
 }
 
-function ThemeCard({
-  group,
-  room,
-  selfId,
-  disabled,
-  send,
-  remaining,
-}: BoardProps & { group: RetroGroup; remaining: number }) {
-  const moderator = room.members.some(
-    (member) => member.id === selfId && member.moderator
-  );
-  const notes = room.notes.filter((note) => note.groupId === group.id);
-  return (
-    <NoteStack title={group.title} count={notes.length}>
-      <ul className="space-y-2">
-        {notes.map((note) => (
-          <li
-            key={note.id}
-            className="flex items-start justify-between gap-2 rounded-md border bg-muted/20 p-3 text-sm"
-          >
-            <div className="min-w-0">
-              <p className="whitespace-pre-wrap break-words">{note.text}</p>
-              <p className="text-xs text-muted-foreground">{note.authorName}</p>
-            </div>
-            {moderator &&
-              (room.phase === "vote" || room.phase === "discuss") && (
-                <ItemActions
-                  kind="note"
-                  text={note.text}
-                  disabled={disabled}
-                  onDelete={() => send({ type: "delete-note", id: note.id })}
-                />
-              )}
-          </li>
-        ))}
-      </ul>
-      {room.phase === "vote" ? (
-        <Button
-          size="sm"
-          variant={group.votedBySelf ? "default" : "outline"}
-          aria-pressed={group.votedBySelf}
-          aria-label={`${group.votedBySelf ? "Remove vote from" : "Vote for"} theme: ${group.title}`}
-          disabled={disabled || (!group.votedBySelf && remaining === 0)}
-          onClick={() => void send({ type: "toggle-vote", id: group.id })}
-        >
-          {group.votedBySelf ? "Voted" : "Vote"}
-        </Button>
-      ) : (
-        <p className="text-xs font-medium text-muted-foreground">
-          {group.voteCount ?? 0} {group.voteCount === 1 ? "vote" : "votes"}
-        </p>
-      )}
-    </NoteStack>
-  );
-}
-
 function AddNote({
   column,
   disabled,
@@ -331,6 +260,157 @@ function focusEditor(element: HTMLTextAreaElement | null) {
   element?.focus();
 }
 
+function VotingTargetCard({
+  notes,
+  room,
+  selfId,
+  disabled,
+  send,
+  remaining,
+}: BoardProps & { notes: RetroNote[]; remaining: number }) {
+  const representative = notes[0];
+  if (!representative) return null;
+  if (notes.length === 1)
+    return (
+      <NoteCard
+        note={representative}
+        room={room}
+        selfId={selfId}
+        disabled={disabled}
+        send={send}
+        remaining={remaining}
+        showColumn
+      />
+    );
+
+  const moderator = room.members.some(
+    (member) => member.id === selfId && member.moderator
+  );
+  const canDelete = moderator && room.phase === "vote";
+  return (
+    <article className="overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-3">
+        <Badge variant="secondary" size="count">
+          {notes.length} grouped messages
+        </Badge>
+        <Badge variant="outline">
+          {columns.find((column) => column.id === representative.column)?.title}
+        </Badge>
+      </div>
+      <div className="divide-y">
+        {notes.map((note) => (
+          <section key={note.id} className="space-y-2 px-4 py-3">
+            <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
+              <span className="min-w-0 break-words">
+                {note.authorName}
+                {note.authorId === selfId ? " (you)" : ""}
+              </span>
+              {canDelete && (
+                <ItemActions
+                  kind="note"
+                  text={note.text}
+                  disabled={disabled}
+                  onDelete={() => send({ type: "delete-note", id: note.id })}
+                />
+              )}
+            </div>
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+              {note.text}
+            </p>
+            <Button
+              size="sm"
+              variant={note.votedBySelf ? "default" : "outline"}
+              aria-pressed={note.votedBySelf}
+              aria-label={`${note.votedBySelf ? "Remove vote from" : "Vote for"} note: ${note.text}`}
+              disabled={disabled || (!note.votedBySelf && remaining === 0)}
+              onClick={() => void send({ type: "toggle-vote", id: note.id })}
+            >
+              {note.votedBySelf ? "Voted" : "Vote"}
+            </Button>
+          </section>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function DiscussionTargetCard({
+  notes,
+  totalVotes,
+  room,
+  selfId,
+  disabled,
+  send,
+  remaining,
+}: BoardProps & {
+  notes: RetroNote[];
+  totalVotes: number;
+  remaining: number;
+}) {
+  const representative = notes[0];
+  if (!representative) return null;
+  if (notes.length === 1)
+    return (
+      <NoteCard
+        note={representative}
+        room={room}
+        selfId={selfId}
+        disabled={disabled}
+        send={send}
+        remaining={remaining}
+        showColumn
+      />
+    );
+
+  const moderator = room.members.some(
+    (member) => member.id === selfId && member.moderator
+  );
+  return (
+    <article className="overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-3">
+        <Badge variant="secondary" size="count">
+          {notes.length} grouped messages
+        </Badge>
+        <Badge variant="outline">
+          {columns.find((column) => column.id === representative.column)?.title}
+        </Badge>
+      </div>
+      <div className="divide-y">
+        {notes.map((note) => (
+          <section key={note.id} className="space-y-2 px-4 py-3">
+            <div className="flex items-start justify-between gap-2 text-xs text-muted-foreground">
+              <span className="min-w-0 break-words">
+                {note.authorName}
+                {note.authorId === selfId ? " (you)" : ""}
+              </span>
+              <div className="flex items-center gap-2">
+                <span>
+                  {note.voteCount ?? 0}{" "}
+                  {note.voteCount === 1 ? "vote" : "votes"}
+                </span>
+                {moderator && room.phase === "discuss" && (
+                  <ItemActions
+                    kind="note"
+                    text={note.text}
+                    disabled={disabled}
+                    onDelete={() => send({ type: "delete-note", id: note.id })}
+                  />
+                )}
+              </div>
+            </div>
+            <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+              {note.text}
+            </p>
+          </section>
+        ))}
+      </div>
+      <p className="border-t px-4 py-3 text-xs font-medium text-muted-foreground">
+        {totalVotes} {totalVotes === 1 ? "vote" : "votes"} across group
+      </p>
+    </article>
+  );
+}
+
 function NoteCard({
   note,
   room,
@@ -365,11 +445,6 @@ function NoteCard({
         {showColumn && (
           <Badge variant="outline" className="shrink-0">
             {columns.find((column) => column.id === note.column)?.title}
-          </Badge>
-        )}
-        {room.phase === "group" && note.groupId && (
-          <Badge variant="secondary" className="shrink-0">
-            {room.groups.find((group) => group.id === note.groupId)?.title}
           </Badge>
         )}
         {(canEdit || canDelete) && (

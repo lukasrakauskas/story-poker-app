@@ -36,7 +36,7 @@ const modes: {
     value: "final-only",
     label: "Save completed takeaways only (recommended)",
     description:
-      "Nothing from writing, grouping, voting, or discussion is saved. The completed, read-only outcome is saved when the moderator closes the room.",
+      "Nothing from writing, arranging, voting, or discussion is saved. The completed, read-only outcome is saved when the moderator closes the room.",
   },
   {
     value: "recovery",

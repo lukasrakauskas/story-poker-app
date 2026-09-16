@@ -266,20 +266,10 @@ export function RetroHistory() {
                             <p className="whitespace-pre-wrap break-words">
                               {note.text}
                             </p>
-                            {note.groupId && (
-                              <p className="mt-1 text-muted-foreground">
-                                Theme:{" "}
-                                {room.groups.find(
-                                  (group) => group.id === note.groupId
-                                )?.title ?? "Former theme"}
-                              </p>
-                            )}
                             <p className="mt-1 text-muted-foreground">
-                              {note.groupId
-                                ? "Votes counted with theme"
-                                : note.voteCount === null
-                                  ? "Votes hidden"
-                                  : `${note.voteCount} votes`}{" "}
+                              {note.voteCount === null
+                                ? "Votes hidden"
+                                : `${note.voteCount} votes`}{" "}
                               {" · "}
                               {note.authorName}
                             </p>
