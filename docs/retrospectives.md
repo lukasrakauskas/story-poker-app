@@ -1,75 +1,75 @@
 # Short-lived retrospectives
 
-Visit `/retro` to create a room, or share `/retro/<code>` to invite participants. This is independent of the planning-poker routes and uses a separate WebSocket endpoint at `/retro` on the backend origin configured by `NEXT_PUBLIC_WS_URL`.
+Visit `/retro` to create a retrospective, `/retro/<code>` to join, or `/retro/history` to read browser-local history. Poker remains a separate domain and protocol. Both domains reuse participant validation, room-access primitives and transport infrastructure.
 
-## Flow
+## Participant flow
 
-1. **Write:** everyone adds notes under Went well, To improve, or Ideas. Each participant receives only their own notes during this phase, including after reconnecting; moderators do not see anyone else's writing. Only the author can edit/delete a note. Participants explicitly mark writing done when ready.
-2. **Group:** the moderator reveals the complete attributed board to everyone in one phase transition. The team reviews it while the moderator creates named themes from two or more related notes, moves notes between themes, or ungroups them. Grouping never changes note text or author attribution.
-3. **Vote:** themes are one voting target each, while ungrouped notes remain individual targets. Each person has three votes, at most one per target; clicking again removes a vote so it can be moved. Voting totals stay hidden and voter identities stay server-only until the moderator starts discussion. Participants explicitly mark voting done even when they intentionally use fewer than three votes.
-4. **Discuss:** the moderator advances again, revealing anonymous aggregate totals, reviews the ranked themes and notes, and creates action items with an owner. The moderator can mark actions done or delete them.
-5. **Closed:** the moderator closes the retrospective, recording a server `closedAt` timestamp and freezing the participant/presence record, notes, votes, and actions. New joins are rejected with a clear message; retained participants can resume read-only until room expiry without changing the final record. The invitation UI is replaced by the participant record at closure. Share Copy Markdown or Markdown, text, and JSON downloads with anyone else. Connected browsers save the completed snapshot, including final action owners and completion status.
-6. **Previous retrospectives:** open `/retro/history` to read saved notes, themes, participants, and action items without an account or a live room. Every saved entry keeps its export controls, including incomplete snapshots. Live-room export controls are deliberately hidden during writing, grouping, voting, and discussion so partial work is not presented as the outcome.
+1. Room links are syntax-checked before opening a socket. Anonymous inspection returns only availability and whether a password is required—not protected titles, members, notes, actions or phase. Missing, expired, full and closed rooms do not ask for a participant name.
+2. A saved identity is inspected without attaching/displacing a socket. Choose **Continue as [name]**, or confirm **Join as someone else / Forget this session**. Forget affects only that room; old content retains its original authorship. Names are normalized before the shared 3–30-character check. Entered names are never silently replaced by a resume command.
+3. **Write:** participants see only their own notes, including moderators. Readiness is advisory and phase-specific. Unsent drafts are warned about before reveal.
+4. **Group:** the moderator reveals notes and may group, move, ungroup or delete revealed notes. Grouping preserves text and attribution.
+5. **Vote:** each participant has three selections across ungrouped notes and themes. Only their own selections are visible until discussion; voter identities remain server-only.
+6. **Discuss:** anonymous totals and consistent tied rankings are revealed. The moderator records actions, assigns/reassigns participant or external owners, and marks completion. Removed owners retain their name snapshots. Mobile actions remain reachable.
+7. **Closed:** a server `closedAt` timestamp freezes the participant record, notes, votes and actions. Late joins are rejected; retained identities can resume the frozen outcome until expiry. Final Markdown/text/JSON exports are available. Browser history is saved only under the participant's explicit policy.
 
-## Room status and supporting information
+## Identity and reconnect
 
-- Readiness is scoped to the active write or vote phase and resets for everyone on every phase change. New participants start not ready. A disconnected participant is excluded from the moderator's `ready / active participants` count; reconnecting during the same phase restores their prior ready/not-ready choice and returns them to the active count.
-- The moderator's advance confirmation names every connected participant who is not ready, but readiness is advisory so offline participants cannot block progress. A moderator with an unsent local note draft also receives a destructive-impact warning, and participants cannot mark writing done until their local drafts are submitted or cleared.
-- In a live room, connection/retry, expiry, rejoin-cookie, and browser-history state share one compact status card. It sits in the right sidebar on desktop and immediately before the board on mobile, rather than stacking banners above the workflow.
-- The status card includes a concise privacy/browser-storage disclosure. Terminal expiry and invalid-session errors remain prominent above the room, while command errors stay next to the active workflow.
-- Before a room is entered, connection failures and Retry remain inside the lobby card next to the create/join form; room-only expiry and storage notices are not rendered above the lobby.
+The backend owns host-only, room-scoped `HttpOnly; Secure; SameSite=None; Path=/retro` cookies. No credential is readable by application JavaScript or sent in routine room events. Credentialed HTTP establishes, inspects, rotates and forgets identities; WebSocket attachment sends only the room code. See [the security threat model](retro-security.md) for origin configuration, replay, shared devices and separate-origin deployment.
 
-## Lifetime and limitations
+Already-active sessions recover automatically after transient failures: jittered exponential delays start near one second and cap at 30 seconds, with at most six attempts before manual Retry is required. Thirty seconds of stable connectivity resets backoff. Offline and hidden tabs pause recovery; online/visibility signals resume it. Initial room-link visits still require explicit Continue. Replaced, rejected, removed and expired identities are terminal. Unacknowledged mutations are never replayed, and their uncertainty message survives authoritative recovery.
 
-- Live collaboration still exists **only in backend process memory**. The domain-neutral collaboration registry is shared in code by Poker and Retro, but there is no server database or disk persistence. Each participating browser separately saves token-free snapshots in localStorage.
-- Rooms expire **two hours after creation**, even if active. Expired rooms reject commands immediately and are swept every 30 seconds. A server restart loses all rooms.
-- Reconnection credentials are stored in one host-only cookie per room (`retro-session-<code>`, `Path=/retro`, `SameSite=Lax`, `Secure` on HTTPS). Cookies expire with the room, not with the tab, and are never stored in localStorage. Reopening the room link restores the same identity, note ownership, votes, and moderator access while the live room exists and the identity remains within its offline retention window. Joining a remembered room by code also resumes that identity.
-- Cookies are JavaScript-readable, **not HttpOnly**: the existing WebSocket protocol explicitly sends the credential in a resume command rather than authenticating through HTTP cookies. This is not an XSS-hardening change. Invalid/expired credentials are cleared; rejected resumes do not silently create a new identity. Opening the same room in another tab moves the live connection to that tab without deleting its shared cookie.
-- Anyone with the invitation can join; this is not an authenticated or confidential workspace. Participant names are reserved while their membership is retained.
-- Disconnected participants are retained for **five minutes**, using the shared collaboration retention scheduler. Resuming before expiry cancels cleanup and retains identity, ownership, votes, readiness, and role. At expiry, the active membership and its vote selections are removed, its name/capacity are released, and its old token is rejected. Connected participants receive the updated snapshot immediately. Notes and structured action owners retain their original IDs and display-name snapshots; a new participant taking the same name does not own the old content. Cleanup does not change closed rooms.
-- A room has at most one moderator. The connected moderator can transfer the role to another connected participant, which immediately removes their own moderator controls. When no moderator is connected, any connected participant can claim the role; commands are serialized in the room service, so the first accepted claim wins and later claims are rejected. If an old moderator reconnects within retention after recovery, they return as a participant and cannot take the role back automatically. If that identity expires, connected participants can still claim the vacant role under the same recovery policy.
-- During private writing, only an author can delete their own note; moderators cannot inspect or target writing that was not sent to them. After reveal, the moderator can delete any note during grouping, voting, or discussion with a destructive confirmation. Removing a note removes all votes attached to that note and releases those vote selections.
-- A moderator can remove any other participant, including an offline participant, but cannot remove themselves. Removal immediately revokes resume access and closes an active socket. The removed participant's votes are discarded; retained notes keep a stable author-name snapshot, and structured action owners retain a display-name snapshot even after that participant leaves.
-- Writing is private by default: write-phase snapshots contain only the receiving participant's notes, with no moderator preview. Advancing to grouping reveals all notes and authors to every participant. During voting, each recipient receives only their own selections and no aggregate totals; discussion/closed snapshots, history, and exports contain anonymous aggregate counts rather than voter IDs. Action items are visible after their phase begins. Only each participant's own reconnect token is sent to their socket.
-- Limits: 100 rooms per process, 30 participants per room, 300 notes and 100 actions per room. Names: 3–30 characters; titles: 100; note/action text: 1,000; action owner: 60. Commands are limited to 30 per second per connection; WebSocket payloads to 16 KiB.
-- Run one backend instance, or use sticky routing to the same process for all members of a room. Replicas do not share room state. This is intentionally not a durable collaboration service.
+## Lifetime, storage and replicas
 
-## Implementation
+- Rooms expire two hours after creation, not after their last activity. Capacity is 100 rooms per repository namespace, 30 participants, 300 notes, 300 groups and 100 actions per room. Titles are bounded to 100 characters, note/action text to 1,000, external owners to 60.
+- Disconnected identities have a persisted five-minute retention deadline. Resume before expiry restores ownership, readiness and role. Cleanup releases names/capacity and removes vote selections without erasing note/action attribution. A connected participant can claim a vacant moderator role; atomic updates select one winner. Closure is immutable under subsequent presence cleanup.
+- `RetroRoomRepository` separates storage from domain logic. Default `RETRO_STORAGE=memory` is for local development/tests and loses rooms on restart. Configure `RETRO_STORAGE=redis` and `RETRO_REDIS_URL` for shared TTL state that survives application replacement. `RETRO_REDIS_PREFIX` can isolate deployments.
+- Redis `WATCH`/`MULTI` transactions atomically commit domain updates, password authorization, credential rotation/revocation, connection ownership and expiry. Pub/sub coordinates recipient updates and replacement across replicas. Private storage contains token hashes and salted password verifiers, never public credentials. All replicas must share the same repository prefix and origin policy. Sticky routing is unnecessary for Redis-backed retrospectives; Poker is still process-local.
+- Redis TTL removes room/tombstone keys; the heartbeat sweeps expiry indexes and membership deadlines every 30 seconds. Redis failure returns a storage error rather than silently falling back to divergent local state. Pub/sub is not a durable history queue: reconnect or a detected version gap requests authoritative state.
+- Start optional Redis locally with `docker compose --profile shared-storage up --build` and configure `RETRO_STORAGE=redis`, `RETRO_REDIS_URL=redis://redis:6379`. Do not commit credentials or `.env` files. Monitor Redis availability and back up/configure Redis durability according to deployment needs; application restart survival is not a promise of surviving Redis data loss.
 
-- `packages/shared/retrospective.ts`: client/server protocol types.
-- `apps/backend/src/collaboration`: domain-neutral participant identity, normalized-name validation, roles, presence, reconnect tokens, connection replacement/audience lookup, room registration, and configurable retention scheduling.
-- `apps/backend/src/retro/retro.service.ts`: retrospective notes/phases/actions and fixed two-hour expiry policy.
-- `apps/backend/src/retro/retro-application.service.ts`: transport-independent command dispatch, sessions, recipient-specific snapshots, replacement, and expiry orchestration. It returns explicit addressed events and close effects.
-- `apps/backend/src/retro/retro.gateway.ts`: the transport-only Nest controller for runtime DTO validation, rate-limit delegation, heartbeat registration, application delegation, and response dispatch.
-- `apps/backend/src/transport`: shared WebSocket serialization/connection adapters, configurable heartbeat handling, application event dispatch, and keyed throttling. `RetroModule` imports both this module and `CollaborationModule`.
-- `apps/frontend/app/retro`: retrospective routes and UI, including the responsive room status card.
-- `apps/frontend/hooks/use-retro-socket.ts`: isolated connection, cookie resume lifecycle, and snapshot persistence.
-- `apps/frontend/lib/retro-session.ts`: expiring cookie helpers.
-- `apps/frontend/lib/retro-history.ts`: versioned, validated, token-free localStorage snapshots.
-- `apps/frontend/lib/retro-export.ts`: Markdown and plain-text serialization.
+## Passwords, admission and operations
+
+Optional passwords use the shared Poker/Retro room-access capability. The link alone reveals no protected content. Correct verification is required before creating membership. Passwords never enter cookies, snapshots, history, logs or exports; authorized resume does not resend them.
+
+Production requires exact allowed browser origins via `RETRO_ALLOWED_ORIGINS` (or the shared `WS_ALLOWED_ORIGINS` policy). Use HTTPS/WSS and credentialed CORS; wildcard origins are rejected. Missing-Origin non-browser clients remain subject to admission and authentication.
+
+Admission controls bound active/unauthenticated sockets, expensive operations per source, room creation and audience-weighted broadcast pressure. HTTP establishment/resume/forget/inspection uses the same operation admission boundary, so fresh sockets cannot bypass it. Configure `WS_MAX_ACTIVE_SOCKETS`, `WS_MAX_ACTIVE_SOCKETS_PER_SOURCE`, `WS_MAX_UNAUTHENTICATED_SOCKETS`, `WS_MAX_UNAUTHENTICATED_PER_SOURCE`, `WS_ADMISSION_WINDOW_MS`, `WS_CREATE_ATTEMPTS_PER_SOURCE`, `WS_JOIN_ATTEMPTS_PER_SOURCE`, `WS_RESUME_ATTEMPTS_PER_SOURCE`, `WS_PASSWORD_ATTEMPTS_PER_SOURCE`, `WS_GLOBAL_CREATE_LIMIT`, `WS_GLOBAL_CREATE_WINDOW_MS`, `WS_CREATE_CIRCUIT_COOLDOWN_MS`, `WS_BROADCAST_BUDGET`, `WS_BROADCAST_WINDOW_MS`, and `WS_BROADCAST_CIRCUIT_COOLDOWN_MS`. Defaults allow shared-team NATs while password attempts have a stricter budget. Commands also have a 30/second socket budget and 16 KiB inbound payload limit.
+
+Forwarded IP headers are ignored by default. Enable `WS_TRUST_PROXY=true` only behind trusted proxies and set `WS_TRUSTED_PROXY_IPS`; proxies must overwrite rather than append untrusted client source headers. Source limits and pressure circuits are **per process**, not distributed Redis counters. Apply an edge/global admission policy across replicas if aggregate deployment limits are required. Metrics/logs report rejection, throttle, room/socket and capacity counts without room content or credentials.
 
 ## Browser history and privacy
 
-- Snapshots are updated on every received room state, including the closing broadcast. During writing, the server sends each browser only that participant's private notes, so in-progress history and exports cannot contain another participant's unrevealed writing. Write-phase archives record their audience so the frontend can filter defensively; older write-phase archives without that marker have their notes removed. History uses a separate `retro-history-v1:<code>:<expiresAt>` entry per room lifetime, so saving one room does not overwrite another. A completed snapshot cannot be replaced by any later snapshot, including another closed broadcast. Its original content and `savedAt` are preserved through reconnect, reload, and presence changes; `closedAt` records actual completion time independently of the browser save time.
-- **Completed** entries contain final actions received while connected. Other entries are explicitly labeled as the **last seen** phase and may be incomplete: a disconnected browser cannot receive subsequent changes or the closing broadcast. History is a read-only record, not a second editable or synchronized board.
-- History remains after cookie/room expiry or server restart, until deleted or browser storage is cleared/evicted. `/retro/history` does not connect to the retrospective server. The frontend must still be reachable to load the page; this is not a service-worker/offline-app implementation.
-- Notes, participant names, anonymous vote totals (after discussion starts), and action owners are stored in this browser profile and visible to anyone using it. There is no login, cross-device sync, or automatic server backup. Use **Delete saved retro** to remove a saved copy; this does not delete the live room. An open live tab receiving further updates can save it again.
-- Storage denial/quota failures show a warning without interrupting collaboration. Older entries are not evicted to make space. Corrupt or unsupported entries are skipped with a warning rather than crashing the history page.
-- Copy Markdown and `.md`, `.txt`, and `.json` downloads work from a closed live room or any saved history entry without the retro server. The final-step copy distinguishes the browser-local snapshot from a durable exported backup. Exports allowlist public fields and never include resume credentials. Markdown preserves action checkboxes, owners, votes, authors, and multiline text while escaping user Markdown/HTML. Clipboard denial reveals a selectable Markdown field for manual copy.
+No retrospective content is persisted before a history choice. The suggested choice is **final-only**, with **30-day retention**; optional recovery snapshots require explicit consent. Retention choices are 7, 30, 90 days or forever. Notes, names and action owners are accessible to anyone sharing the browser profile. Browser history is neither cross-device synchronization nor an exported backup.
 
-## Checks
+Per-entry deletion also disables future saves for that room lifetime. **Delete all retrospective history** confirms accessibly and writes a suppression marker before removing data, including for rooms still open in other tabs. Explicitly reselecting a room is required to enable it again. Preference/storage failures do not interrupt collaboration; an unpersisted choice applies only to that tab. Resume credentials are separate and never enter localStorage.
+
+Recovery writes coalesce for 250 ms and recheck consent/deletion markers at flush time. Final closed snapshots flush synchronously and remain immutable/idempotent. Navigation flushes pending consented work. Archives carry retention deadlines; reads and scheduled cleanup remove expired entries. Current shared archive schemas migrate older `retro-history-v1:` entries, strip legacy voter identities and protect private writing based on its recorded viewer. Corrupt entries are skipped with a warning.
+
+`/retro/history` has no live socket and works without the room server, but the frontend must remain reachable; there is no service-worker/offline guarantee. Markdown, text and JSON exports allowlist public fields, retain owner attribution, escape user formatting and provide clipboard fallback. Exports from live rooms are restricted to the final outcome; saved incomplete recovery entries are labeled as last-seen snapshots.
+
+## Broadcast performance and implementation
+
+Each broadcast reads one committed repository room and reuses one validated public projection per version. A small recipient envelope contains private writing/own-vote selections; transport serializes the shared object once. Full public bytes are still sent per socket: typed deltas are deferred to keep recovery authoritative and simple. Clients validate the entire shared runtime event, reject stale versions, refresh gaps and honor request-specific acknowledgements even when updates interleave. Benchmarks are in [retro-benchmark.json](retro-benchmark.json); run `bun run --cwd apps/backend benchmark`. Measurements use in-memory storage and exclude Redis network latency.
+
+- `packages/shared/retrospective.ts`: strict runtime contracts, inferred types, privacy projections, versions and archive migrations.
+- `apps/backend/src/retro`: repository, domain service, async application use cases, HTTP sessions and thin WebSocket gateway.
+- `apps/backend/src/transport`: serialization, admission, heartbeat, origin policy and sanitized metrics.
+- `apps/frontend/lib/websocket-transport.ts`: shared Poker/Retro transport lifecycle; protocols remain separate.
+- `apps/frontend/lib/retro-session-client.ts`: explicit session state, injected HTTP/history/clock/navigation adapters, acknowledgements, reconnect and gap recovery.
+- `apps/frontend/lib/retro-history-session.ts`, `retro-history-writer.ts`, `retro-history.ts`: consent, coalescing, retention and storage adapters.
+- `apps/frontend/tests/retro-fixtures.ts`: independent browser room/context/socket ownership. Focused scenarios cover collaboration, acknowledgements, privacy, ownership, responsive UI, identity/reconnect, actions, closure, history and exports.
+
+## Verification
 
 ```sh
-bun run --cwd apps/frontend test:unit
 bun run --cwd apps/backend test
 bun run --cwd apps/backend test:e2e
-bun run build
+# Real Redis tests use isolated random key prefixes, never FLUSHDB:
+RETRO_REDIS_URL=redis://localhost:6379 bun run --cwd apps/backend test
+bun run --cwd apps/frontend test:unit
+bunx turbo run build --force
 bun run lint
-
-# Browser regression (starts backend :4000 and frontend :3001)
-cd apps/frontend
-bunx playwright install chromium
-bun run test:e2e
+CI=1 bun run --cwd apps/frontend test:e2e -- --workers=1
 ```
 
-The WebSocket end-to-end tests exercise real clients, room broadcasts, private credentials, permissions, shared reconnect replacement, and coexistence with the original poker endpoint. Cross-domain contract tests prove that Poker and Retro receive the same normalized-name, unique-name, role, token, disconnect, and resume guarantees. Application-service tests cover session orchestration, recipient privacy, audience events, and replacement without constructing sockets. Small gateway/transport contract tests cover DTO validation, serialization, rate limiting, heartbeat cleanup, and protocol wiring; domain service tests cover phase transitions, voting budgets, resource limits, and domain-specific retention/expiry. Bun frontend unit tests cover history updates, separate room lifetimes, corruption/quota handling, credential exclusion, and Markdown output. Browser regression covers separate-profile collaboration, request-specific acknowledgements (unrelated broadcasts cannot clear a pending draft), refresh/reopen identity and moderator recovery, same-profile tab replacement, stale cookies, all phases, saved final history without a live server/token, deletion, Markdown clipboard/download/fallback, connected/disconnected/expiring/storage-failure status, responsive status placement, and dark mode.
+The browser suite uses separate mutable rooms and configurable test-only admission budgets for its single loopback source. Backend abuse tests exercise production policy defaults independently. See [stack verification](retro-stack-verification.md) for the completed PR order and executed checks.

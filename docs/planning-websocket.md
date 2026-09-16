@@ -38,9 +38,10 @@ services. The client can correct the payload and continue on the same connection
 | `broadcast-message` | `roomId`: 1–64 characters; `message`: 1–1000 non-whitespace characters; `password`: at most 256 characters                                     |
 
 Participant names receive additional domain validation after command validation:
-surrounding spaces are removed and the normalized name must contain 3–30
-characters. Name normalization, case-insensitive uniqueness, participant roles,
-presence, reconnect tokens, connection replacement, room-code registration, and
+the shared `packages/shared/participant.ts` contract removes surrounding spaces
+and requires 3–30 normalized characters. Name normalization,
+case-insensitive uniqueness, participant roles, presence, reconnect tokens,
+connection replacement, room-code registration, and
 retention scheduling come from the domain-neutral `CollaborationModule` also used
 by retrospectives. Poker supplies its own five-minute offline-participant and
 15-minute empty-room retention policies; votes, card sets, avatars, passwords,

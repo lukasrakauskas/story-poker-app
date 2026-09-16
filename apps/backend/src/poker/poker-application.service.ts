@@ -55,7 +55,7 @@ export class PokerApplicationService implements OnModuleDestroy {
       data: {
         code: command.room,
         available: room !== undefined,
-        requiresPassword: room ? room.password !== null : false,
+        requiresPassword: room?.access.requiresPassword ?? false,
       },
     });
   }

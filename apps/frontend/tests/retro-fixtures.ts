@@ -7,6 +7,7 @@ import {
   type Page,
   type TestInfo,
 } from "@playwright/test";
+import { chooseRecoveryHistory } from "./retro-history-test-helpers";
 import type { RetroColumn, RetroPhase, RetroRoom } from "shared/retrospective";
 
 // Keep room setup and identity-sensitive browser plumbing here. Each guest gets
@@ -140,6 +141,7 @@ export class RetroRoomFixture {
     await expect(
       page.getByRole("heading", { name: this.roomTitle, exact: true })
     ).toBeVisible();
+    await chooseRecoveryHistory(page);
     this.roomUrl = page.url();
     return this.roomUrl;
   }
@@ -172,6 +174,7 @@ export class RetroRoomFixture {
     await expect(
       page.getByRole("heading", { name: this.title, exact: true })
     ).toBeVisible();
+    await chooseRecoveryHistory(page);
     return participant;
   }
 
@@ -246,7 +249,9 @@ export async function seedRetroNotes(page: Page, notes: NoteSeed[]) {
         exact: true,
       })
       .click();
-    await expect(page.getByText(text, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("article").getByText(text, { exact: true })
+    ).toBeVisible();
   }
 }
 
@@ -318,6 +323,9 @@ export async function releaseHeldRetroCommand(page: Page) {
 export async function readRetroHistorySnapshot(
   page: Page
 ): Promise<RetroHistorySnapshot> {
+  // Recovery persistence coalesces bursts for 250 ms. Wait for that boundary
+  // before inspecting the last-seen archive, rather than assuming sync writes.
+  await page.waitForTimeout(300);
   return page.evaluate(() => {
     const value = Object.entries(localStorage).find(([key]) =>
       key.startsWith("retro-history-v1:")

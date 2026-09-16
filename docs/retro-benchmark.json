@@ -1,0 +1,65 @@
+{
+  "storage": "in-memory (Redis network latency excluded)",
+  "iterations": 20,
+  "warmup": 5,
+  "representative": {
+    "members": 15,
+    "notes": 120,
+    "groups": 20,
+    "actions": 30,
+    "materializedRoomBytes": 175283,
+    "publicRoomBytes": 175283,
+    "perRecipientWireBytes": 175436,
+    "totalWireBytes": 2631540,
+    "baseline": {
+      "projection": {
+        "meanMs": 20.635,
+        "p95Ms": 31.311
+      },
+      "serialization": {
+        "meanMs": 1.221,
+        "p95Ms": 3.953
+      }
+    },
+    "optimized": {
+      "projection": {
+        "meanMs": 1.451,
+        "p95Ms": 1.685
+      },
+      "serialization": {
+        "meanMs": 0.824,
+        "p95Ms": 1.704
+      }
+    }
+  },
+  "nearLimit": {
+    "members": 30,
+    "notes": 300,
+    "groups": 150,
+    "actions": 100,
+    "materializedRoomBytes": 482488,
+    "publicRoomBytes": 482488,
+    "perRecipientWireBytes": 482641,
+    "totalWireBytes": 14479230,
+    "baseline": {
+      "projection": {
+        "meanMs": 109.43,
+        "p95Ms": 113.039
+      },
+      "serialization": {
+        "meanMs": 7.246,
+        "p95Ms": 12.32
+      }
+    },
+    "optimized": {
+      "projection": {
+        "meanMs": 4.257,
+        "p95Ms": 7.04
+      },
+      "serialization": {
+        "meanMs": 5.239,
+        "p95Ms": 7.158
+      }
+    }
+  }
+}

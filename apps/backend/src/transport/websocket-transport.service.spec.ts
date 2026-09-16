@@ -40,6 +40,50 @@ describe('WebSocket transport adapters', () => {
     expect(transport.unregister(client)).toBe('connection');
   });
 
+  it('serializes a shared retrospective projection once with private envelopes per recipient', () => {
+    const transport = new WebSocketTransportService();
+    const first = socket();
+    const second = socket();
+    transport.register(first, 'first');
+    transport.register(second, 'second');
+    const toJSON = vi.fn(() => ({ code: 'retro', title: 'Cached' }));
+    const publicRoom = { toJSON };
+    const message = (connectionId: string, id: string) => ({
+      connectionId,
+      event: { event: 'retro-state' },
+      serialization: {
+        type: 'retro-state' as const,
+        publicRoom,
+        self: { id },
+        recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
+        version: 4,
+      },
+    });
+    transport.dispatch(
+      result(undefined, [
+        message('first', 'alice'),
+        message('second', 'bobby'),
+      ]),
+    );
+    expect(toJSON).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse(vi.mocked(first.send).mock.calls[0][0] as string),
+    ).toMatchObject({
+      data: {
+        room: { code: 'retro', title: 'Cached' },
+        self: { id: 'alice' },
+      },
+    });
+    expect(
+      JSON.parse(vi.mocked(second.send).mock.calls[0][0] as string).data,
+    ).toMatchObject({
+      room: { code: 'retro', title: 'Cached' },
+      self: { id: 'bobby' },
+    });
+    transport.dispatch(result(undefined, [message('first', 'alice-again')]));
+    expect(toJSON).toHaveBeenCalledOnce();
+  });
+
   it('isolates heartbeat policy from gateways', () => {
     vi.useFakeTimers();
     const heartbeat = new WebSocketHeartbeatService();

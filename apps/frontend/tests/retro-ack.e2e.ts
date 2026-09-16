@@ -37,7 +37,9 @@ test("does not treat a peer broadcast as acknowledgement of a pending note", asy
 
   await releaseHeldRetroCommand(owner.page);
   await expect(
-    owner.page.getByText("Unsent owner note", { exact: true })
+    owner.page
+      .getByRole("article")
+      .getByText("Unsent owner note", { exact: true })
   ).toBeVisible();
   await expect(
     owner.page.getByLabel("Add a note", { exact: true }).first()

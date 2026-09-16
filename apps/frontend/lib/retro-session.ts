@@ -1,44 +1,187 @@
-const PREFIX = "retro-session-";
+import {
+  retroSessionViewSchema,
+  retroRememberedIdentitySchema,
+} from "shared/retrospective";
+import type {
+  RetroCommand,
+  RetroRememberedIdentity,
+  RetroSessionView,
+} from "shared/retrospective";
+
 const validCode = (code: string) => /^[a-zA-Z0-9_-]{1,64}$/.test(code);
 
-/** Cookies are JS-readable because the WebSocket protocol explicitly sends the token.
- * Host-only, SameSite=Lax, Secure on HTTPS, and never outlive the live room. */
-export function readRetroToken(code: string): string | null {
-  if (typeof document === "undefined" || !validCode(code)) return null;
+type EstablishCommand = Extract<RetroCommand, { type: "create" | "join" }>;
+
+type ErrorBody = { code?: unknown; message?: unknown };
+
+export class RetroSessionError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly status: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * The backend origin owns the room-scoped HttpOnly cookie. These helpers never
+ * read document.cookie and never expose Set-Cookie to application JavaScript.
+ */
+export function retroApiOrigin(): string {
+  const configured =
+    process.env.NEXT_PUBLIC_RETRO_API_URL ?? process.env.NEXT_PUBLIC_WS_URL;
+  const base =
+    configured ||
+    (typeof window !== "undefined"
+      ? window.location.origin
+      : "http://localhost:4000");
+  const url = new URL(base);
+  if (url.protocol === "ws:") url.protocol = "http:";
+  if (url.protocol === "wss:") url.protocol = "https:";
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    throw new RetroSessionError(
+      "configuration",
+      0,
+      "The retrospective API URL has an invalid protocol."
+    );
+  return url.origin;
+}
+
+function sessionPath(code: string, suffix = ""): string {
+  if (!validCode(code))
+    throw new RetroSessionError(
+      "invalid-command",
+      400,
+      "Invalid retrospective room code."
+    );
+  return `/retro/session/${encodeURIComponent(code)}${suffix}`;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isSessionView(value: unknown): value is RetroSessionView {
+  return retroSessionViewSchema.safeParse(value).success;
+}
+
+async function parseBody(response: Response): Promise<unknown> {
   try {
-    const value = document.cookie
-      .split("; ")
-      .find((cookie) => cookie.startsWith(`${PREFIX}${code}=`));
-    if (!value) return null;
-    const token = decodeURIComponent(value.slice(value.indexOf("=") + 1));
-    if (/^[a-zA-Z0-9_-]{1,64}$/.test(token)) return token;
-    clearRetroToken(code);
-    return null;
+    return await response.json();
   } catch {
-    clearRetroToken(code);
     return null;
   }
 }
 
-export function saveRetroToken(
+async function request<T>(
+  path: string,
+  init: RequestInit,
+  validate: (value: unknown) => value is T
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${retroApiOrigin()}${path}`, {
+      ...init,
+      credentials: "include",
+      cache: "no-store",
+    });
+  } catch {
+    throw new RetroSessionError(
+      "connection",
+      0,
+      "Unable to reach the retrospective server. Retry when your connection is available."
+    );
+  }
+  const body = await parseBody(response);
+  if (!response.ok) {
+    const error = isObject(body) ? (body as ErrorBody) : {};
+    throw new RetroSessionError(
+      typeof error.code === "string" ? error.code : "connection",
+      response.status,
+      typeof error.message === "string"
+        ? error.message
+        : "The retrospective session request was rejected."
+    );
+  }
+  if (!validate(body))
+    throw new RetroSessionError(
+      "connection",
+      response.status,
+      "The retrospective server returned an invalid session response."
+    );
+  return body;
+}
+
+// Keep successful Set-Cookie responses ordered across same-origin tabs. Server
+// rotation remains atomic; the lock prevents a delayed successful forget/join
+// response from overwriting a newer cookie in the shared browser cookie jar.
+const sessionRequests = new Map<string, Promise<unknown>>();
+function serializeSession<T>(
   code: string,
-  token: string,
-  expiresAt: number
-): boolean {
-  if (typeof document === "undefined" || !validCode(code)) return false;
-  try {
-    document.cookie = `${PREFIX}${code}=${encodeURIComponent(token)}; Path=/retro; Expires=${new Date(expiresAt).toUTCString()}; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
-    return readRetroToken(code) === token;
-  } catch {
-    return false;
-  }
+  operation: () => Promise<T>
+): Promise<T> {
+  const key = `retro-session:${retroApiOrigin()}:${code}`;
+  if (typeof navigator !== "undefined" && navigator.locks)
+    return navigator.locks.request(key, operation);
+  const result = (sessionRequests.get(key) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(operation);
+  sessionRequests.set(key, result);
+  void result
+    .finally(() => {
+      if (sessionRequests.get(key) === result) sessionRequests.delete(key);
+    })
+    .catch(() => undefined);
+  return result;
 }
 
-export function clearRetroToken(code: string) {
-  if (typeof document === "undefined" || !validCode(code)) return;
-  try {
-    document.cookie = `${PREFIX}${code}=; Path=/retro; Max-Age=0; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
-  } catch {
-    // A blocked cookie store must not break the live room.
-  }
+export function establishRetroSession(
+  command: EstablishCommand
+): Promise<RetroSessionView> {
+  return serializeSession(
+    command.type === "join" ? command.code : "create",
+    () =>
+      request(
+        "/retro/session",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(command),
+        },
+        isSessionView
+      )
+  );
+}
+
+export function resumeRetroSession(code: string): Promise<RetroSessionView> {
+  return serializeSession(code, () =>
+    request(sessionPath(code, "/resume"), { method: "POST" }, isSessionView)
+  );
+}
+
+function isRememberedIdentity(
+  value: unknown
+): value is RetroRememberedIdentity {
+  return retroRememberedIdentitySchema.safeParse(value).success;
+}
+
+export function inspectRetroSession(
+  code: string
+): Promise<RetroRememberedIdentity> {
+  return request(sessionPath(code), { method: "GET" }, isRememberedIdentity);
+}
+
+export async function forgetRetroSession(code: string): Promise<boolean> {
+  const response = await serializeSession(code, () =>
+    request(
+      sessionPath(code),
+      { method: "DELETE" },
+      (value: unknown): value is { forgotten: true } =>
+        isObject(value) &&
+        value.forgotten === true &&
+        Object.keys(value).length === 1
+    )
+  );
+  return response.forgotten;
 }
