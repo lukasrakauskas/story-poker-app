@@ -464,6 +464,32 @@ test("forget uses the HTTP identity endpoint and clears only remembered state", 
   );
 });
 
+test("replaces a possibly stale socket when a room returns to the foreground", async () => {
+  const context = setup();
+  clients.push(context.client);
+  context.transport.openSocket();
+  context.transport.message(stateEvent());
+
+  context.client.setEnvironment(true, false);
+  assert.equal(context.client.getSnapshot().connection, "connected");
+  context.client.setEnvironment(true, true);
+  assert.equal(context.client.getSnapshot().phase, "resuming");
+  assert.equal(context.transport.isOpen(), false);
+  assert.equal(context.transport.closeCalls, 1);
+
+  await flush();
+  assert.equal(
+    context.sessions.calls.filter((call) => call.operation === "resume").length,
+    1
+  );
+  context.transport.openSocket();
+  const resume = context.transport.lastCommand();
+  assert.equal(resume.data.type, "resume");
+  context.transport.message(stateEvent(room, resume.data.requestId));
+  assert.equal(context.client.getSnapshot().connection, "connected");
+  assert.equal(context.client.getSnapshot().selfId, "alice");
+});
+
 test("bounds automatic recovery and leaves manual retry available", async () => {
   const context = setup();
   clients.push(context.client);

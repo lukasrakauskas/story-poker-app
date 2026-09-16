@@ -14,7 +14,7 @@ type SocketListener<K extends WebSocketTransportEvent> = (
 /** Planning Poker's protocol adapter over the shared WebSocket transport. */
 export function useWebsocket(url: string) {
   const transport = useMemo(
-    () => new WebSocketTransport({ url, queueWhileConnecting: true }),
+    () => new WebSocketTransport({ url, queueWhileConnecting: false }),
     [url]
   );
 
@@ -56,7 +56,9 @@ export function useWebsocket(url: string) {
 
   const send = useCallback(
     (data: string) => {
-      transport.send(data, { queue: true });
+      // Planning commands are never replayed after an interrupted connection.
+      // The room snapshot received by `reconnect` is authoritative.
+      transport.send(data, { queue: false });
     },
     [transport]
   );
