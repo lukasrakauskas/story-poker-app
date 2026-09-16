@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { RetroColumn, RetroPhase } from "shared/retrospective";
 import { Button } from "ui/components/button";
-import { RetroProvider, useRetro } from "./retro-provider";
+import { useRetro } from "./retro-provider";
 import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
 import { NoteGrouping } from "./note-grouping";
@@ -58,14 +59,6 @@ const phases: {
 ];
 
 export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
-  return (
-    <RetroProvider initialCode={initialCode}>
-      <Workspace initialCode={initialCode} />
-    </RetroProvider>
-  );
-}
-
-function Workspace({ initialCode }: { initialCode?: string }) {
   const {
     room,
     selfId,
@@ -149,12 +142,12 @@ function Workspace({ initialCode }: { initialCode?: string }) {
         className="flex flex-wrap gap-4 text-sm"
         aria-label="Retrospective navigation"
       >
-        <a className="underline underline-offset-4" href="/retro">
+        <Link className="underline underline-offset-4" href="/retro">
           Start or join a room
-        </a>
-        <a className="underline underline-offset-4" href="/retro/history">
+        </Link>
+        <Link className="underline underline-offset-4" href="/retro/history">
           Previous retrospectives
-        </a>
+        </Link>
       </nav>
       {room && (invalid || expired) && (
         <div

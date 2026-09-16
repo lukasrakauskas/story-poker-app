@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { actionOwnerLabel } from "shared/retrospective";
 import { Button } from "ui/components/button";
@@ -58,9 +59,9 @@ export function RetroHistory() {
 
   return (
     <main className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-8">
-      <a href="/retro" className="text-sm underline underline-offset-4">
+      <Link href="/retro" className="text-sm underline underline-offset-4">
         Start or join a retrospective
-      </a>
+      </Link>
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">
           Previous retrospectives
@@ -192,12 +193,12 @@ export function RetroHistory() {
               </AlertDialog>
             </div>
             {room.expiresAt > now && (
-              <a
+              <Link
                 className="inline-block text-sm underline underline-offset-4"
                 href={`/retro/${encodeURIComponent(room.code)}`}
               >
                 Return to room
-              </a>
+              </Link>
             )}
             <section
               aria-label={`Action items for ${room.title}`}
