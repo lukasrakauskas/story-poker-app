@@ -20,14 +20,14 @@ const confirmationCopy: Record<
   { title: string; description: string }
 > = {
   write: {
-    title: "Reveal notes for grouping?",
+    title: "Reveal notes for arranging?",
     description:
       "Notes will be locked and revealed to everyone. The team cannot return to private writing.",
   },
   group: {
     title: "Start voting?",
     description:
-      "Themes will be locked for everyone. The team cannot return to grouping.",
+      "Stacks and lanes will be locked for everyone. The team cannot return to arranging.",
   },
   vote: {
     title: "Start discussion?",

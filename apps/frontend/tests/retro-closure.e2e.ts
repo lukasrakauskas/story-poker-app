@@ -35,7 +35,7 @@ test("closure freezes snapshots and save times across presence, reopen and late 
   await expect(page.getByText("Bobby", { exact: true })).toBeVisible();
   await chooseFinalOnlyHistory(guest);
   for (const label of [
-    "Reveal and group notes",
+    "Reveal and arrange notes",
     "Start voting",
     "Start discussion",
     "Close retrospective",
@@ -97,6 +97,7 @@ test("closure freezes snapshots and save times across presence, reopen and late 
   await page
     .getByRole("link", { name: "Previous retrospectives", exact: true })
     .click();
+  await expect(page).toHaveURL(/\/retro\/history$/);
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "Final record", exact: true })

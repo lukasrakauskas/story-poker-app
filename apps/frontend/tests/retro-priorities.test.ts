@@ -1,100 +1,100 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { retroPriorities, priorityLabel } from "shared/retro-priorities";
-import type { RetroRoom, RetroNote } from "shared/retrospective";
+import { retroPriorities } from "shared/retro-priorities";
+import type { RetroNote, RetroRoom } from "shared/retrospective";
 import { roomAsMarkdown, roomAsText } from "../lib/retro-export";
-import { publicRetro } from "../lib/retro-history";
 
 function note(
   id: string,
   voteCount: number,
-  groupId: string | null = null
+  stackId: string | null = null
 ): RetroNote {
   return {
     id,
-    voteCount,
-    groupId,
-    text: `Note ${id}`,
-    authorId: "author",
+    authorId: "alice",
     authorName: "Alice",
     column: "ideas",
+    text: id,
+    stackId,
+    voteCount,
     votedBySelf: false,
   };
 }
+
 const room: RetroRoom = {
-  code: "room",
-  title: "Ties",
+  code: "retro",
+  title: "Priorities",
   phase: "closed",
-  closedAt: 500,
+  expiresAt: 1_800_000_000_000,
+  closedAt: 1_700_000_000_000,
   requiresPassword: false,
-  expiresAt: 1000,
-  members: [],
-  actions: [],
+  members: [
+    {
+      id: "alice",
+      name: "Alice",
+      moderator: true,
+      connected: false,
+      ready: false,
+    },
+  ],
   notes: [
     note("z-first", 2),
-    note("m-second", 0, "theme"),
+    note("m-second", 1),
     note("a-third", 2),
     note("b-fourth", 0),
-    note("c-fifth", 0, "theme"),
-    note("d-sixth", 0),
   ],
-  groups: [
-    { id: "theme", title: "Theme second", voteCount: 2, votedBySelf: false },
-  ],
+  actions: [],
 };
 
-test("ties share competition ranks and server note order, not random IDs", () => {
-  const priorities = retroPriorities(room);
+test("ties share competition ranks and preserve server lane order", () => {
   assert.deepEqual(
-    priorities.map(({ id, rank, tied }) => ({ id, rank, tied })),
+    retroPriorities(room).map(({ id, rank, tied }) => ({ id, rank, tied })),
     [
       { id: "z-first", rank: 1, tied: true },
-      { id: "theme", rank: 1, tied: true },
       { id: "a-third", rank: 1, tied: true },
-      { id: "b-fourth", rank: 4, tied: true },
-      { id: "d-sixth", rank: 4, tied: true },
+      { id: "m-second", rank: 3, tied: false },
+      { id: "b-fourth", rank: 4, tied: false },
     ]
-  );
-  assert.equal(priorityLabel(priorities[1]), "Rank 1 (tied)");
-  assert.deepEqual(
-    retroPriorities(publicRetro(JSON.parse(JSON.stringify(room)))),
-    priorities
   );
 });
 
-test("all-zero, unique, empty and deleted-note priorities remain deterministic", () => {
-  assert.deepEqual(retroPriorities({ notes: [], groups: [] }), []);
+test("empty and reordered note priorities remain deterministic", () => {
+  assert.deepEqual(retroPriorities({ notes: [] }), []);
+  const reordered = { ...room, notes: [room.notes[2], room.notes[0]] };
   assert.deepEqual(
-    retroPriorities({ notes: [note("z", 0), note("a", 0)], groups: [] }).map(
-      ({ rank, tied }) => [rank, tied]
-    ),
-    [
-      [1, true],
-      [1, true],
-    ]
+    retroPriorities(reordered).map((target) => target.id),
+    ["a-third", "z-first"]
   );
-  assert.deepEqual(
-    retroPriorities({ notes: [note("z", 1), note("a", 2)], groups: [] }).map(
-      ({ id, rank, tied }) => [id, rank, tied]
-    ),
-    [
-      ["a", 1, false],
-      ["z", 2, false],
-    ]
-  );
-  const deleted = {
+});
+
+test("discussion keeps stacks together and ranks their aggregate votes", () => {
+  const stacked = {
     ...room,
-    notes: room.notes.filter((note) => note.id !== "z-first"),
+    notes: [
+      note("first", 2, "stack"),
+      note("second", 1, "stack"),
+      note("solo", 2),
+    ],
   };
-  assert.equal(retroPriorities(deleted)[0].id, "theme");
+  const priorities = retroPriorities(stacked);
+  assert.equal(priorities.length, 2);
+  assert.equal(priorities[0].voteCount, 3);
+  assert.deepEqual(
+    priorities[0].notes.map((item) => item.id),
+    ["first", "second"]
+  );
+  for (const output of [roomAsMarkdown(stacked), roomAsText(stacked)]) {
+    assert.match(output, /3 votes · 2 grouped messages/);
+    assert.match(output, /first/);
+    assert.match(output, /second/);
+  }
 });
 
-test("Markdown and text use the same ranks and interleaved theme/note order", () => {
+test("Markdown and text use the same individual-note ranks", () => {
   for (const output of [roomAsMarkdown(room), roomAsText(room)]) {
-    assert.equal(output.match(/Rank 1 \(tied\)/g)?.length, 3);
-    assert.equal(output.match(/Rank 4 \(tied\)/g)?.length, 2);
-    assert.ok(output.indexOf("Note z") < output.indexOf("Theme second"));
-    assert.ok(output.indexOf("Theme second") < output.indexOf("Note a"));
-    assert.ok(output.indexOf("Note a") < output.indexOf("Note b"));
+    assert.equal(output.match(/Rank 1 \(tied\)/g)?.length, 2);
+    assert.match(output, /z\\?-first/);
+    assert.match(output, /a\\?-third/);
+    assert.doesNotMatch(output, /Theme/);
   }
 });

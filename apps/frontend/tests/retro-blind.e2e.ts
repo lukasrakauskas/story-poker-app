@@ -1,6 +1,5 @@
 import {
   advanceRetroPhase,
-  createRetroTheme,
   expect,
   readRetroHistorySnapshot,
   seedRetroNotes,
@@ -26,16 +25,11 @@ test("keeps writing and voting blind until discussion starts", async ({
     guest.page.getByText("Private owner note", { exact: true })
   ).toHaveCount(0);
 
-  await advanceRetroPhase(owner.page, "Reveal and group notes");
-  await createRetroTheme(
-    owner.page,
-    ["Private owner note", "Private guest note"],
-    "One delivery theme"
-  );
+  await advanceRetroPhase(owner.page, "Reveal and arrange notes");
   await advanceRetroPhase(owner.page, "Start voting");
   await guest.page
     .getByRole("button", {
-      name: "Vote for theme: One delivery theme",
+      name: "Vote for note: Private owner note",
       exact: true,
     })
     .click();
@@ -43,22 +37,18 @@ test("keeps writing and voting blind until discussion starts", async ({
   await expect(owner.page.getByText("1 vote", { exact: true })).toHaveCount(0);
   await expect(
     guest.page.getByRole("button", {
-      name: "Remove vote from theme: One delivery theme",
+      name: "Remove vote from note: Private owner note",
       exact: true,
     })
   ).toHaveText("Voted");
   const ownerSnapshot = await readRetroHistorySnapshot(owner.page);
   const guestSnapshot = await readRetroHistorySnapshot(guest.page);
-  expect(ownerSnapshot.room.groups[0]).toMatchObject({
-    title: "One delivery theme",
-    voteCount: null,
-    votedBySelf: false,
-  });
-  expect(guestSnapshot.room.groups[0]).toMatchObject({
-    title: "One delivery theme",
-    voteCount: null,
-    votedBySelf: true,
-  });
+  expect(
+    ownerSnapshot.room.notes.find((note) => note.text === "Private owner note")
+  ).toMatchObject({ voteCount: null, votedBySelf: false });
+  expect(
+    guestSnapshot.room.notes.find((note) => note.text === "Private owner note")
+  ).toMatchObject({ voteCount: null, votedBySelf: true });
   expect(JSON.stringify(ownerSnapshot)).not.toContain("voterIds");
   expect(JSON.stringify(guestSnapshot)).not.toContain("voterIds");
 

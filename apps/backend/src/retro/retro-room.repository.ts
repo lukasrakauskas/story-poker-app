@@ -34,13 +34,7 @@ export interface StoredRetroNote {
   authorName: string;
   column: RetroColumn;
   text: string;
-  groupId: string | null;
-  voterIds: string[];
-}
-
-export interface StoredRetroGroup {
-  id: string;
-  title: string;
+  stackId: string | null;
   voterIds: string[];
 }
 
@@ -54,7 +48,6 @@ export interface StoredRetroRoom {
   access: StoredRoomAccess;
   members: StoredRetroParticipant[];
   notes: StoredRetroNote[];
-  groups: StoredRetroGroup[];
   actions: RetroAction[];
   readyMemberIds: string[];
   /** Monotonically increasing optimistic-concurrency version. */
@@ -160,8 +153,8 @@ function removeMembers(room: StoredRetroRoom, memberIds: string[]) {
   const removed = new Set(memberIds);
   room.members = room.members.filter((member) => !removed.has(member.id));
   room.readyMemberIds = room.readyMemberIds.filter((id) => !removed.has(id));
-  for (const target of [...room.notes, ...room.groups])
-    target.voterIds = target.voterIds.filter((id) => !removed.has(id));
+  for (const note of room.notes)
+    note.voterIds = note.voterIds.filter((id) => !removed.has(id));
 }
 
 function changeFor(

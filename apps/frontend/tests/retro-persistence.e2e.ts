@@ -68,7 +68,7 @@ test("reopens the same identity across tabs and keeps separate cookies and histo
     .click();
   await expect(
     reopened.getByRole("button", {
-      name: "Reveal and group notes",
+      name: "Reveal and arrange notes",
       exact: true,
     })
   ).toBeEnabled();
@@ -194,7 +194,7 @@ test("rejects stale credentials without clearing them, then allows joining again
   await expect(page.getByText("Bobby (you)", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("button", {
-      name: "Reveal and group notes",
+      name: "Reveal and arrange notes",
       exact: true,
     })
   ).toHaveCount(0);
@@ -320,7 +320,7 @@ test("requires a choice before storing and saves only the final snapshot in fina
   ).toBe(0);
 
   for (const label of [
-    "Reveal and group notes",
+    "Reveal and arrange notes",
     "Start voting",
     "Start discussion",
     "Close retrospective",

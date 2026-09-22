@@ -28,7 +28,7 @@ test("tied ranks keep creation order through reconnect, history and exports", as
       .click();
     await expect(page.getByText(text, { exact: true })).toBeVisible();
   }
-  for (const label of ["Reveal and group notes", "Start voting"]) {
+  for (const label of ["Reveal and arrange notes", "Start voting"]) {
     await page.getByRole("button", { name: label, exact: true }).click();
     await page
       .getByRole("button", {

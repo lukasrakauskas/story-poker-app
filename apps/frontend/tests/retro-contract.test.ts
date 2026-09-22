@@ -30,12 +30,11 @@ const room = {
       authorName: "Alice",
       column: "ideas" as const,
       text: "Keep pairing",
-      groupId: null,
+      stackId: null,
       voteCount: 1,
       votedBySelf: false,
     },
   ],
-  groups: [],
   actions: [],
 };
 
@@ -46,7 +45,7 @@ test("frontend validates complete nested server events with the shared schema", 
       room,
       self: { id: "alice" },
       version: 1,
-      recipient: { notes: [], votedNoteIds: [], votedGroupIds: [] },
+      recipient: { notes: [], votedNoteIds: [] },
     },
   };
   assert.deepEqual(parseRetroServerEvent(event), event);
@@ -120,14 +119,14 @@ test("migrates retro-history-v1 voter identities into recipient-safe fields", ()
     },
   });
   assert.equal(migrated.migrated, true);
-  assert.equal(migrated.entry.version, 3);
+  assert.equal(migrated.entry.version, 4);
   assert.deepEqual(migrated.entry.room.notes[0], {
     id: "note",
     authorId: "alice",
     authorName: "Former member",
     column: "ideas",
     text: "Keep pairing",
-    groupId: null,
+    stackId: null,
     voteCount: null,
     votedBySelf: true,
   });

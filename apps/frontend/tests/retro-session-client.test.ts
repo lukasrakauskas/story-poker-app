@@ -157,7 +157,6 @@ const room: RetroRoom = {
     },
   ],
   notes: [],
-  groups: [],
   actions: [],
   requiresPassword: false,
 };
@@ -183,7 +182,6 @@ function stateEvent(
       recipient: {
         notes: snapshot.phase === "write" ? snapshot.notes : [],
         votedNoteIds: [],
-        votedGroupIds: [],
       },
       ...(requestId === undefined ? {} : { requestId }),
     },
@@ -407,6 +405,56 @@ test("requires the matching request id before acknowledging a mutation", async (
   assert.equal(await mutation, true);
 });
 
+test("sends and receives ephemeral arrange presence without pending requests", () => {
+  const context = setup();
+  clients.push(context.client);
+  context.transport.openSocket();
+  const arranging = { ...room, phase: "group" as const };
+  context.transport.message(stateEvent(arranging));
+
+  assert.equal(
+    context.client.sendPresence({
+      x: 0.25,
+      y: 0.75,
+      noteId: "note",
+      active: true,
+    }),
+    true
+  );
+  assert.deepEqual(context.transport.lastCommand(), {
+    event: "retro-presence",
+    data: { x: 0.25, y: 0.75, noteId: "note", active: true },
+  });
+  assert.equal(context.client.getSnapshot().pendingRequestId, null);
+
+  context.transport.message(
+    JSON.stringify({
+      event: "retro-presence",
+      data: {
+        memberId: "bob",
+        x: 0.5,
+        y: 0.4,
+        noteId: "note",
+        active: true,
+      },
+    })
+  );
+  assert.equal(context.client.getSnapshot().presence.bob?.x, 0.5);
+  context.transport.message(
+    JSON.stringify({
+      event: "retro-presence",
+      data: {
+        memberId: "bob",
+        x: 0,
+        y: 0,
+        noteId: null,
+        active: false,
+      },
+    })
+  );
+  assert.deepEqual(context.client.getSnapshot().presence, {});
+});
+
 test("rejects malformed nested state and closes the transport", () => {
   const context = setup();
   clients.push(context.client);
@@ -462,6 +510,32 @@ test("forget uses the HTTP identity endpoint and clears only remembered state", 
       .map((call) => call.code),
     ["retro-room"]
   );
+});
+
+test("replaces a possibly stale socket when a room returns to the foreground", async () => {
+  const context = setup();
+  clients.push(context.client);
+  context.transport.openSocket();
+  context.transport.message(stateEvent());
+
+  context.client.setEnvironment(true, false);
+  assert.equal(context.client.getSnapshot().connection, "connected");
+  context.client.setEnvironment(true, true);
+  assert.equal(context.client.getSnapshot().phase, "resuming");
+  assert.equal(context.transport.isOpen(), false);
+  assert.equal(context.transport.closeCalls, 1);
+
+  await flush();
+  assert.equal(
+    context.sessions.calls.filter((call) => call.operation === "resume").length,
+    1
+  );
+  context.transport.openSocket();
+  const resume = context.transport.lastCommand();
+  assert.equal(resume.data.type, "resume");
+  context.transport.message(stateEvent(room, resume.data.requestId));
+  assert.equal(context.client.getSnapshot().connection, "connected");
+  assert.equal(context.client.getSnapshot().selfId, "alice");
 });
 
 test("bounds automatic recovery and leaves manual retry available", async () => {

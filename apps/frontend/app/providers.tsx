@@ -4,6 +4,7 @@ import { ThemeProvider } from "next-themes";
 import { usePathname } from "next/navigation";
 import { Toaster } from "ui/components/toaster";
 import { PlanningProvider } from "../lib/planning-context";
+import { RetroProvider } from "./retro/components/retro-provider";
 
 export default function Providers({
   children,
@@ -18,7 +19,7 @@ export default function Providers({
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       {isRetro ? (
-        children
+        <RetroProvider>{children}</RetroProvider>
       ) : (
         <PlanningProvider avatars={avatars}>{children}</PlanningProvider>
       )}

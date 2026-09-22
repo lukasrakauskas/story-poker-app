@@ -87,7 +87,7 @@ export function RoomDetails({
           <CardDescription>
             {room.phase === "closed"
               ? "This retrospective no longer accepts new participants. Returning participants can reopen it until expiry; share an export with anyone else. Presence below is recorded at closure, not live."
-              : "Anyone with the link can join. Notes stay visible only to their author while the team writes, then everyone sees the complete, attributed board when grouping starts."}
+              : "Anyone with the link can join. Notes stay visible only to their author while the team writes, then everyone sees the complete, attributed board when arranging starts."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

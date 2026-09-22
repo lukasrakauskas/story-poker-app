@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { RetroColumn, RetroPhase } from "shared/retrospective";
 import { Button } from "ui/components/button";
-import { RetroProvider, useRetro } from "./retro-provider";
+import { useRetro } from "./retro-provider";
 import { RetroLobby } from "./retro-lobby";
 import { NoteBoard } from "./note-board";
 import { NoteGrouping } from "./note-grouping";
@@ -26,20 +27,20 @@ const phases: {
     label: "Write",
     description:
       "Write independently. Only you can see your notes during this phase. Revealing the board shows every note to the team at the same time.",
-    next: "Reveal and group notes",
+    next: "Reveal and arrange notes",
   },
   {
     id: "group",
-    label: "Group",
+    label: "Arrange",
     description:
-      "Review the revealed board. The moderator can organize related notes into themes before voting begins.",
+      "Review the revealed board. Drag matching messages together into unnamed stacks or move them across lanes before voting begins.",
     next: "Start voting",
   },
   {
     id: "vote",
     label: "Vote",
     description:
-      "Choose your priorities. Three votes per person, one per theme or ungrouped note. Totals stay hidden until discussion; click a voted target again to remove your vote.",
+      "Choose your priorities. Three votes per person, one per note. Totals stay hidden until discussion; click a voted note again to remove your vote.",
     next: "Start discussion",
   },
   {
@@ -58,14 +59,6 @@ const phases: {
 ];
 
 export function RetroWorkspace({ initialCode }: { initialCode?: string }) {
-  return (
-    <RetroProvider initialCode={initialCode}>
-      <Workspace initialCode={initialCode} />
-    </RetroProvider>
-  );
-}
-
-function Workspace({ initialCode }: { initialCode?: string }) {
   const {
     room,
     selfId,
@@ -77,6 +70,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     recovery,
     terminal: sessionTerminal,
     send,
+    sendPresence,
+    presence,
     forgetRememberedSession,
     historySaved,
     historyPreference,
@@ -121,12 +116,7 @@ function Workspace({ initialCode }: { initialCode?: string }) {
     .filter((member) => !member.ready)
     .map((member) => member.name);
   const remaining = room
-    ? Math.max(
-        0,
-        3 -
-          room.notes.filter((note) => note.votedBySelf).length -
-          room.groups.filter((group) => group.votedBySelf).length
-      )
+    ? Math.max(0, 3 - room.notes.filter((note) => note.votedBySelf).length)
     : 3;
   const minutes =
     room && now !== null
@@ -149,12 +139,12 @@ function Workspace({ initialCode }: { initialCode?: string }) {
         className="flex flex-wrap gap-4 text-sm"
         aria-label="Retrospective navigation"
       >
-        <a className="underline underline-offset-4" href="/retro">
+        <Link className="underline underline-offset-4" href="/retro">
           Start or join a room
-        </a>
-        <a className="underline underline-offset-4" href="/retro/history">
+        </Link>
+        <Link className="underline underline-offset-4" href="/retro/history">
           Previous retrospectives
-        </a>
+        </Link>
       </nav>
       {room && (invalid || expired) && (
         <div
@@ -335,6 +325,8 @@ function Workspace({ initialCode }: { initialCode?: string }) {
                   moderator={moderator}
                   disabled={disabled}
                   send={send}
+                  sendPresence={sendPresence}
+                  presence={presence}
                 />
               ) : (
                 <NoteBoard

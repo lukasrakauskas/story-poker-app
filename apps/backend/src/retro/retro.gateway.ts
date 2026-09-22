@@ -28,6 +28,7 @@ import {
   RetroApplicationService,
 } from './retro-application.service.js';
 import { retroCommandMessageSchema } from './retro.schema.js';
+import { retroPresenceUpdateSchema } from 'shared/retrospective';
 import { RetroError } from './retro.service.js';
 import { RetroSessionCookieService } from './retro-session-cookie.service.js';
 
@@ -121,6 +122,31 @@ export class RetroGateway
     }
     this.transport.unregister(socket);
     this.cookieHeaders.delete(socket);
+  }
+
+  @SubscribeMessage('retro-presence')
+  onPresence(
+    @ConnectedSocket() socket: WebSocket,
+    @MessageBody() data: unknown,
+  ) {
+    const connectionId = this.ensureConnection(socket);
+    if (!connectionId) return;
+    const presence = retroPresenceUpdateSchema.safeParse(data);
+    if (!presence.success) return;
+    // Never drop the terminal event behind a burst of pointer updates: peers
+    // must be able to remove a stale cursor and card outline immediately.
+    if (
+      presence.data.active &&
+      !this.rateLimits.consume(
+        RETRO_APPLICATION_NAMESPACE,
+        `${connectionId}:presence`,
+        { limit: 40, windowMs: 1000 },
+      )
+    )
+      return;
+    return this.transport.dispatch(
+      this.application.presence(connectionId, presence.data),
+    );
   }
 
   @SubscribeMessage('retro-command')

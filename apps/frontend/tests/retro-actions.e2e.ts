@@ -58,7 +58,7 @@ test("edit, reassign, unassign and retain a removed action owner across reconnec
   await expect(page.getByText("Bobby", { exact: true })).toBeVisible();
   await chooseRecoveryHistory(guest);
   for (const label of [
-    "Reveal and group notes",
+    "Reveal and arrange notes",
     "Start voting",
     "Start discussion",
   ]) {

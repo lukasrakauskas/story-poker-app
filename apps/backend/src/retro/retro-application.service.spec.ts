@@ -311,6 +311,48 @@ describe('RetroApplicationService', () => {
     });
   });
 
+  it('broadcasts ephemeral drag presence only to room peers', async () => {
+    const created = await establish('owner', {
+      type: 'create',
+      name: 'Alice',
+      title: 'Retro',
+    });
+    const joined = await establish('guest', {
+      type: 'join',
+      name: 'Bobby',
+      code: created.state.room.code,
+    });
+    const presence = application.presence('guest', {
+      x: 0.25,
+      y: 0.75,
+      noteId: 'note',
+      active: true,
+    });
+    expect(presence.messages).toEqual([
+      {
+        connectionId: 'owner',
+        event: {
+          event: 'retro-presence',
+          data: {
+            memberId: joined.state.self.id,
+            x: 0.25,
+            y: 0.75,
+            noteId: 'note',
+            active: true,
+          },
+        },
+      },
+    ]);
+    expect(
+      application.presence('anonymous', {
+        x: 0,
+        y: 0,
+        noteId: null,
+        active: false,
+      }).messages,
+    ).toEqual([]);
+  });
+
   it('broadcasts disconnect presence without transport dependencies', async () => {
     const created = await establish('owner', {
       type: 'create',
@@ -323,9 +365,16 @@ describe('RetroApplicationService', () => {
       code: created.state.room.code,
     });
     const disconnected = await application.disconnect('guest');
-    expect(disconnected.messages).toHaveLength(1);
-    expect(disconnected.messages[0].connectionId).toBe('owner');
-    expect(disconnected.messages[0].event).toMatchObject({
+    expect(disconnected.messages).toHaveLength(2);
+    expect(disconnected.messages[0]).toMatchObject({
+      connectionId: 'owner',
+      event: {
+        event: 'retro-presence',
+        data: { memberId: expect.any(String), active: false },
+      },
+    });
+    expect(disconnected.messages[1].connectionId).toBe('owner');
+    expect(disconnected.messages[1].event).toMatchObject({
       event: 'retro-state',
       data: {
         room: {

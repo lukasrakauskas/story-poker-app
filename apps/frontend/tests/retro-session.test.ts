@@ -22,7 +22,6 @@ const view: RetroSessionView = {
     closedAt: null,
     members: [],
     notes: [],
-    groups: [],
     actions: [],
     requiresPassword: false,
   },

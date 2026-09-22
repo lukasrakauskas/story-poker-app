@@ -97,12 +97,11 @@ const room: RetroRoom = {
       authorName: "Alice",
       text: "Good teamwork",
       column: "went-well",
-      groupId: null,
+      stackId: null,
       voteCount: 1,
       votedBySelf: false,
     },
   ],
-  groups: [],
   actions: [
     {
       id: "action",
@@ -299,7 +298,7 @@ test("write-phase history and exports retain only the current participant's note
         authorName: "Bob",
         text: "Guest private thought",
         column: "ideas",
-        groupId: null,
+        stackId: null,
         voteCount: null,
         votedBySelf: false,
       },
@@ -339,7 +338,7 @@ test("write-phase history and exports retain only the current participant's note
   const migrated = storage.getItem(retroHistoryKey(writing))!;
   assert.ok(!migrated.includes("Guest private thought"));
   assert.ok(!migrated.includes("voterIds"));
-  assert.equal(JSON.parse(migrated).version, 3);
+  assert.equal(JSON.parse(migrated).version, 4);
 });
 
 test("migrates free-text owners without guessing identities and exports removed assignments", () => {
@@ -358,12 +357,12 @@ test("migrates free-text owners without guessing identities and exports removed 
     })
   );
   const migrated = readRetroHistory().entries[0];
-  assert.equal(migrated.version, 3);
+  assert.equal(migrated.version, 4);
   assert.deepEqual(
     migrated.room.actions.map((action) => action.owner),
     [{ kind: "external", name: "Alice" }, { kind: "unassigned" }]
   );
-  assert.equal(JSON.parse(storage.getItem(retroHistoryKey(room))!).version, 3);
+  assert.equal(JSON.parse(storage.getItem(retroHistoryKey(room))!).version, 4);
   const removed = { ...room, members: [] };
   assert.equal(saveRetroHistory(removed), true);
   const saved = readRetroHistory().entries[0].room;
@@ -394,27 +393,33 @@ test("completed history keeps its first content and saved time across repeated c
   assert.match(roomAsText(closed), /Completed: 1970-01-01T00:00:00.500Z/);
 });
 
-test("preserves grouped themes in history and exports", () => {
-  const grouped: RetroRoom = {
-    ...room,
-    groups: [
-      {
-        id: "theme",
-        title: "Delivery flow",
-        voteCount: 2,
-        votedBySelf: false,
+test("migrates version 3 themes into unnamed stacks without losing votes", () => {
+  storage.setItem(
+    retroHistoryKey(room),
+    JSON.stringify({
+      version: 3,
+      savedAt: 1,
+      room: {
+        ...room,
+        groups: [
+          {
+            id: "theme",
+            title: "Delivery flow",
+            voteCount: 2,
+            votedBySelf: false,
+          },
+        ],
+        notes: [{ ...room.notes[0], groupId: "theme", voteCount: null }],
       },
-    ],
-    notes: [{ ...room.notes[0], groupId: "theme", voteCount: null }],
-  };
-  assert.equal(saveRetroHistory(grouped), true);
-  assert.equal(
-    readRetroHistory().entries[0].room.groups[0].title,
-    "Delivery flow"
+    })
   );
-  const markdown = roomAsMarkdown(grouped);
-  assert.match(markdown, /### Delivery flow · 2 votes/);
-  assert.match(markdown, /Good teamwork — Alice/);
+  const migrated = readRetroHistory().entries[0];
+  assert.equal(migrated.version, 4);
+  assert.equal("groups" in migrated.room, false);
+  assert.equal(migrated.room.notes[0].voteCount, 2);
+  assert.equal(migrated.room.notes[0].stackId, "theme");
+  assert.match(roomAsMarkdown(migrated.room), /Good teamwork — Alice/);
+  assert.doesNotMatch(roomAsMarkdown(migrated.room), /Delivery flow/);
 });
 
 test("retains note author snapshots after a participant is removed", () => {
@@ -460,7 +465,7 @@ test("migrates legacy voter identities to private selections or aggregate counts
     })
   );
   let migrated = readRetroHistory().entries[0];
-  assert.equal(migrated.version, 3);
+  assert.equal(migrated.version, 4);
   assert.equal(migrated.room.notes[0].voteCount, null);
   assert.equal(migrated.room.notes[0].votedBySelf, true);
   assert.equal(migrated.room.notes[0].authorName, "Alice");
